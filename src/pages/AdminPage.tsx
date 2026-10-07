@@ -43,7 +43,9 @@ import {
   Star,
   BookOpen,
   Image as ImageIcon,
-  Play
+  Play,
+  CreditCard,
+  Receipt
 } from 'lucide-react';
 import { Article, Video, Framework, Course, Resource, Lead, Booking, ContactMessage, NewsletterSubscriber, AvailabilityRules, LeadStatus, LeadSource, BookingStatus } from '../types';
 import { ArticleEditorModal } from '../components/ArticleEditorModal';
@@ -126,6 +128,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
     updateAvailabilityRules,
     updateSettings,
     refreshDashboardData,
+    adminPayments,
+    isAdminPaymentsLoading,
+    adminPaymentsError,
+    fetchAdminPayments,
     notify
   } = useApp();
 
@@ -140,10 +146,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
 
   // Tabs
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'bookings' | 'leads' | 'messages' | 'subscribers' | 'pricing' | 'availability' | 'settings' | 'articles' | 'videos' | 'frameworks' | 'courses' | 'resources'
+    'overview' | 'payments' | 'bookings' | 'leads' | 'messages' | 'subscribers' | 'pricing' | 'availability' | 'settings' | 'articles' | 'videos' | 'frameworks' | 'courses' | 'resources'
   >(() => {
     try {
-      const validTabs = ['overview', 'bookings', 'leads', 'messages', 'subscribers', 'pricing', 'availability', 'settings', 'articles', 'videos', 'frameworks', 'courses', 'resources'];
+      const validTabs = ['overview', 'payments', 'bookings', 'leads', 'messages', 'subscribers', 'pricing', 'availability', 'settings', 'articles', 'videos', 'frameworks', 'courses', 'resources'];
       const params = new URLSearchParams(window.location.search);
       const urlTab = params.get('tab');
       if (urlTab && validTabs.includes(urlTab)) {
@@ -196,6 +202,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
       refreshFrameworks();
     }
   }, [activeTab, isAdminAuthenticated, refreshFrameworks]);
+
+  // Sync payments ledger when navigating to Payments tab
+  useEffect(() => {
+    if (activeTab === 'payments' && isAdminAuthenticated) {
+      fetchAdminPayments();
+    }
+  }, [activeTab, isAdminAuthenticated, fetchAdminPayments]);
+
+  // Payment Ledger Filter & Search State
+  const [paymentSearch, setPaymentSearch] = useState('');
+  const [paymentTypeFilter, setPaymentTypeFilter] = useState<'all' | 'course' | 'consultation'>('all');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState<'all' | string>('all');
 
   // Bookings Filter & Search State
   const [bookingSearch, setBookingSearch] = useState('');
@@ -854,6 +872,22 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
     );
   });
 
+  // Filtered Payments Ledger
+  const filteredPayments = adminPayments.filter(p => {
+    const q = (paymentSearch || '').toLowerCase().trim();
+    const matchesSearch =
+      q === '' ||
+      (p.itemTitle || '').toLowerCase().includes(q) ||
+      (p.razorpayOrderId || '').toLowerCase().includes(q) ||
+      (p.razorpayPaymentId || '').toLowerCase().includes(q) ||
+      (p.id || '').toLowerCase().includes(q) ||
+      (p.userId || '').toLowerCase().includes(q);
+
+    const matchesType = paymentTypeFilter === 'all' || p.itemType === paymentTypeFilter;
+    const matchesStatus = paymentStatusFilter === 'all' || p.status === paymentStatusFilter;
+    return matchesSearch && matchesType && matchesStatus;
+  });
+
   // Session verification loading state
   if (isAuthLoading) {
     return (
@@ -1077,6 +1111,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none border-b border-slate-800">
         {[
           { id: 'overview', label: 'Overview', icon: TrendingUp },
+          { id: 'payments', label: `Purchase History (${adminPayments.length})`, icon: CreditCard },
           { id: 'bookings', label: `Consultations (${bookings.length})`, icon: Calendar },
           { id: 'leads', label: `Leads & CRM (${leads.length})`, icon: Users },
           { id: 'messages', label: `Inquiries (${contactMessages.length})`, icon: MessageSquare },
@@ -1230,6 +1265,209 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB: PAYMENTS & PURCHASE HISTORY (CRM) */}
+      {/* ========================================================================= */}
+      {activeTab === 'payments' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-[#FF6B00]" />
+                <h2 className="text-xl font-display font-bold text-white">Purchase History & Payment Ledger</h2>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Authoritative transaction ledger populated from <span className="font-mono text-slate-300">public.payments</span> across courses and consultations.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => fetchAdminPayments()}
+                disabled={isAdminPaymentsLoading}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isAdminPaymentsLoading ? 'animate-spin text-[#FF6B00]' : ''}`} />
+                <span>Refresh Ledger</span>
+              </button>
+              <span className="text-xs text-slate-400 font-mono">
+                {filteredPayments.length} of {adminPayments.length} records
+              </span>
+            </div>
+          </div>
+
+          {/* Metrics summary cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {(() => {
+              const totalRevenue = adminPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+              const courseRevenue = adminPayments
+                .filter((p) => p.itemType === 'course')
+                .reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+              const consultationRevenue = adminPayments
+                .filter((p) => p.itemType === 'consultation')
+                .reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+              return (
+                <>
+                  <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+                    <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Captured Volume</div>
+                    <div className="text-2xl font-mono font-bold text-[#FF6B00]">₹{totalRevenue.toLocaleString('en-IN')}</div>
+                    <div className="text-[11px] text-slate-500 font-interface">{adminPayments.length} verified transactions</div>
+                  </div>
+                  <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+                    <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <GraduationCap className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Course Purchases</span>
+                    </div>
+                    <div className="text-2xl font-mono font-bold text-white">₹{courseRevenue.toLocaleString('en-IN')}</div>
+                    <div className="text-[11px] text-slate-500 font-interface">
+                      {adminPayments.filter((p) => p.itemType === 'course').length} enrollments
+                    </div>
+                  </div>
+                  <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+                    <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Consultation Purchases</span>
+                    </div>
+                    <div className="text-2xl font-mono font-bold text-white">₹{consultationRevenue.toLocaleString('en-IN')}</div>
+                    <div className="text-[11px] text-slate-500 font-interface">
+                      {adminPayments.filter((p) => p.itemType === 'consultation').length} advisory sessions
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+
+          {/* Filter Bar */}
+          <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row gap-4 items-center justify-between">
+            <div className="relative w-full sm:w-80">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search by title, Razorpay ID, order ID..."
+                value={paymentSearch}
+                onChange={(e) => setPaymentSearch(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-[#FF6B00]"
+              />
+            </div>
+
+            {/* Type Filter Buttons */}
+            <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto">
+              <span className="text-xs text-slate-400 font-medium whitespace-nowrap">Category:</span>
+              {[
+                { id: 'all', label: `All (${adminPayments.length})` },
+                { id: 'course', label: `Courses (${adminPayments.filter((p) => p.itemType === 'course').length})` },
+                { id: 'consultation', label: `Consultations (${adminPayments.filter((p) => p.itemType === 'consultation').length})` }
+              ].map((filterTab) => (
+                <button
+                  key={filterTab.id}
+                  type="button"
+                  onClick={() => setPaymentTypeFilter(filterTab.id as any)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap cursor-pointer ${
+                    paymentTypeFilter === filterTab.id
+                      ? 'bg-[#FF6B00] text-white shadow-sm'
+                      : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  {filterTab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Payments Table */}
+          {isAdminPaymentsLoading && adminPayments.length === 0 ? (
+            <div className="p-16 rounded-3xl bg-slate-900 border border-slate-800 flex flex-col items-center justify-center space-y-3">
+              <Loader2 className="w-8 h-8 text-[#FF6B00] animate-spin" />
+              <p className="text-sm text-slate-400">Loading purchase history from database...</p>
+            </div>
+          ) : filteredPayments.length === 0 ? (
+            <div className="p-16 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-3">
+              <Receipt className="w-10 h-10 text-slate-600 mx-auto" />
+              <h3 className="text-base font-display font-bold text-white">No Payment Records Found</h3>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                {paymentSearch || paymentTypeFilter !== 'all'
+                  ? 'No transaction records match the current filters. Try resetting the search or filter.'
+                  : 'Verified transactions from Razorpay checkout will automatically populate in this ledger.'}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[11px]">
+                    <th className="py-3.5 px-4 font-semibold">Date & Time</th>
+                    <th className="py-3.5 px-4 font-semibold">Type</th>
+                    <th className="py-3.5 px-4 font-semibold">Item / Service Title</th>
+                    <th className="py-3.5 px-4 font-semibold">Amount</th>
+                    <th className="py-3.5 px-4 font-semibold">Razorpay Payment ID</th>
+                    <th className="py-3.5 px-4 font-semibold">Razorpay Order ID</th>
+                    <th className="py-3.5 px-4 font-semibold">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 text-slate-300">
+                  {filteredPayments.map((p) => {
+                    const isConsultation = p.itemType === 'consultation';
+                    const formattedDate = p.createdAt
+                      ? new Date(p.createdAt).toLocaleDateString('en-IN', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })
+                      : '—';
+
+                    return (
+                      <tr key={p.id} className="hover:bg-slate-800/50 transition-colors">
+                        <td className="py-3.5 px-4 whitespace-nowrap text-slate-400 font-mono text-[11px]">
+                          {formattedDate}
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          {isConsultation ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[10px] font-bold uppercase tracking-wider">
+                              <Calendar className="w-3 h-3" />
+                              <span>Consultation</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/30 text-[10px] font-bold uppercase tracking-wider">
+                              <GraduationCap className="w-3 h-3" />
+                              <span>Course</span>
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 font-semibold text-white max-w-xs truncate" title={p.itemTitle}>
+                          {p.itemTitle}
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap font-mono font-bold text-[#FF6B00]">
+                          ₹{Number(p.amount).toLocaleString('en-IN')} {p.currency}
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap font-mono text-slate-300 text-[11px]">
+                          {p.razorpayPaymentId || '—'}
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap font-mono text-slate-400 text-[11px]">
+                          {p.razorpayOrderId || '—'}
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium capitalize ${
+                            p.status === 'captured' || p.status === 'paid'
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                          }`}>
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>{p.status}</span>
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 

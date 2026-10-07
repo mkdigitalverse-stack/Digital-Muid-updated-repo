@@ -285,6 +285,12 @@ interface AppContextType {
   paymentsError: string | null;
   fetchStudentPayments: (overrideUserId?: string) => Promise<PaymentRecord[]>;
 
+  // Admin / CRM Payment Ledger
+  adminPayments: PaymentRecord[];
+  isAdminPaymentsLoading: boolean;
+  adminPaymentsError: string | null;
+  fetchAdminPayments: () => Promise<PaymentRecord[]>;
+
 
   // Global search & UI
   isSearchOpen: boolean;
@@ -802,6 +808,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return [];
     } finally {
       setIsPaymentsLoading(false);
+    }
+  }, []);
+
+  const [adminPayments, setAdminPayments] = useState<PaymentRecord[]>([]);
+  const [isAdminPaymentsLoading, setIsAdminPaymentsLoading] = useState<boolean>(false);
+  const [adminPaymentsError, setAdminPaymentsError] = useState<string | null>(null);
+
+  const fetchAdminPayments = useCallback(async (): Promise<PaymentRecord[]> => {
+    setIsAdminPaymentsLoading(true);
+    setAdminPaymentsError(null);
+    try {
+      const res = await paymentService.fetchAllPaymentsForAdmin();
+      if (res.error && (!res.data || res.data.length === 0)) {
+        setAdminPaymentsError(typeof res.error === 'string' ? res.error : res.error?.message || 'Error loading payment ledger');
+      }
+      setAdminPayments(res.data || []);
+      return res.data || [];
+    } catch (err: any) {
+      console.error('[AppContext] Error fetching admin payments:', err);
+      setAdminPaymentsError(err?.message || 'Error loading payment ledger');
+      return [];
+    } finally {
+      setIsAdminPaymentsLoading(false);
     }
   }, []);
 
@@ -1747,12 +1776,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const gstAmount = Number((baseAmount * gstRate).toFixed(2));
     const totalAmount = Number((baseAmount + gstAmount).toFixed(2));
 
+    const hasVerifiedPayment = Boolean(bookingData.paymentId && !bookingData.paymentId.startsWith('pay_rzp_mock_'));
+    if (!hasVerifiedPayment) {
+      console.warn('[Security Notice] createBooking rejected unverified paid confirmation attempt.');
+      return {
+        success: false,
+        error: 'Paid consultations require completed Razorpay payment and cryptographic server verification.'
+      };
+    }
+
     const bookingId = generateUUID();
     const bookingCode = `DM-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const randomMeetHash = Math.random().toString(36).substring(2, 6) + '-' + Math.random().toString(36).substring(2, 6) + '-' + Math.random().toString(36).substring(2, 6);
     const meetUrl = `https://meet.google.com/${randomMeetHash}`;
-    const paymentId = bookingData.paymentId || `pay_rzp_${Math.random().toString(36).substring(2, 11)}`;
-    const razorpayOrderId = `order_${Math.random().toString(36).substring(2, 10)}`;
+    const paymentId = bookingData.paymentId!;
+    const razorpayOrderId = '';
 
     const newBooking: Booking = {
       id: bookingId,
@@ -3583,6 +3621,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isPaymentsLoading,
         paymentsError,
         fetchStudentPayments,
+        adminPayments,
+        isAdminPaymentsLoading,
+        adminPaymentsError,
+        fetchAdminPayments,
         courseProgressMap,
         isProgressLoading,
         fetchCourseProgress,

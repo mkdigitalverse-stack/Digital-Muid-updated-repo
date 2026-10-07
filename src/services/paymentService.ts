@@ -68,10 +68,48 @@ export const paymentService = {
   },
 
   /**
-   * Requests server-side order creation for an authenticated student.
-   * Transmits ONLY courseId and student's Supabase JWT.
-   * Does NOT alter UI or initiate checkout flow (Phase 2K-B).
+   * Fetches all payments across the platform for authenticated CRM/Admin users.
+   * Calls secure server API /api/payments/admin/all-payments with fallback to Supabase query.
    */
+  async fetchAllPaymentsForAdmin(): Promise<{ data: PaymentRecord[]; error: any }> {
+    try {
+      if (isSupabaseConfigured()) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          try {
+            const res = await fetch('/api/payments/admin/all-payments', {
+              headers: {
+                Authorization: `Bearer ${session.access_token}`
+              }
+            });
+            if (res.ok) {
+              const json = await res.json();
+              if (json.success && Array.isArray(json.payments)) {
+                return { data: json.payments.map(mapDbRowToPaymentRecord), error: null };
+              }
+            }
+          } catch (apiErr) {
+            console.warn('[PaymentService] Server admin payments endpoint notice:', apiErr);
+          }
+        }
+
+        // Direct fallback query under admin RLS
+        const { data, error } = await supabase
+          .from('payments')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (!error && data) {
+          return { data: data.map(mapDbRowToPaymentRecord), error: null };
+        }
+      }
+
+      return { data: [], error: null };
+    } catch (err: any) {
+      console.error('[PaymentService] Error fetching all payments for admin:', err);
+      return { data: [], error: err };
+    }
+  },
   async createCourseOrder(courseId: string): Promise<CreateCourseOrderResult> {
     try {
       if (!isSupabaseConfigured()) {

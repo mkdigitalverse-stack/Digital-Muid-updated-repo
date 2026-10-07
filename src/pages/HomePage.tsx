@@ -1275,7 +1275,7 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate, onOpenResourceModa
           {/* Pricing breakdown pill */}
           <div className="inline-flex items-center gap-3 px-5 py-2.5 rounded-xl bg-slate-950/80 border border-slate-700 text-sm">
             <span className="text-slate-400">Fixed Rate:</span>
-            <span className="font-mono font-bold text-white">₹{consultationProduct.basePrice} + 18% GST</span>
+            <span className="font-mono font-bold text-white">₹{consultationProduct.basePrice} + {(consultationProduct.gstRate * 100).toFixed(0)}% GST</span>
             <span className="text-slate-500">|</span>
             <span className="text-[#FF6B00] font-bold font-mono">Total ₹{totalCalculated}</span>
             <span className="text-xs text-slate-400">({consultationProduct.durationMinutes} mins on Google Meet)</span>

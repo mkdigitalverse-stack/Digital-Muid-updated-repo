@@ -100,11 +100,40 @@ export const consultationProductService = {
   async updateConsultationProduct(
     product: ConsultationProduct
   ): Promise<{ data: ConsultationProduct | null; error: any }> {
-    if (!isSupabaseConfigured()) {
-      return { data: null, error: new Error('Supabase is not configured') };
-    }
-
     try {
+      // 1. If user is authenticated admin, call privileged server endpoint first
+      if (isSupabaseConfigured()) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          try {
+            const res = await fetch('/api/payments/admin/update-consultation-pricing', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${session.access_token}`
+              },
+              body: JSON.stringify({
+                basePrice: product.basePrice,
+                gstRate: product.gstRate,
+                durationMinutes: product.durationMinutes
+              })
+            });
+            if (res.ok) {
+              const resData = await res.json();
+              if (resData.success && resData.product) {
+                return { data: mapDbRowToConsultationProduct(resData.product), error: null };
+              }
+            }
+          } catch (apiErr) {
+            console.warn('[consultationProductService] Server endpoint notice, falling back to direct:', apiErr);
+          }
+        }
+      }
+
+      if (!isSupabaseConfigured()) {
+        return { data: product, error: null };
+      }
+
       const targetId =
         product.id && product.id.length === 36
           ? product.id
@@ -115,7 +144,7 @@ export const consultationProductService = {
         id: targetId
       };
 
-      // 1. Directly UPDATE existing canonical consultation product row
+      // 2. Direct UPDATE attempt
       const { data: updateData, error: updateError } = await supabase
         .from('consultation_products')
         .update(payload)
@@ -127,7 +156,7 @@ export const consultationProductService = {
         return { data: mapDbRowToConsultationProduct(updateData), error: null };
       }
 
-      // 2. If row was not present, fallback to idempotent upsert
+      // 3. Fallback to upsert
       const { data: upsertData, error: upsertError } = await supabase
         .from('consultation_products')
         .upsert(payload, { onConflict: 'id' })

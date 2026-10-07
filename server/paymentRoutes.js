@@ -8,6 +8,8 @@ import {
 import {
   verifySupabaseToken,
   getSupabaseDbClient,
+  getSupabaseServerClient,
+  checkIsAdmin,
   isValidUUID
 } from "./supabaseServer.js";
 import { handleRazorpayWebhook } from "./paymentWebhook.js";
@@ -622,6 +624,113 @@ router.post("/verify-consultation-payment", async (req, res) => {
       verified: false,
       error: "An unexpected error occurred during consultation payment verification."
     });
+  }
+});
+
+/**
+ * GET /api/payments/admin/all-payments
+ *
+ * Retrieves the complete payment ledger from public.payments for authenticated administrators.
+ * Protected: requires valid JWT belonging to an authorized admin account.
+ */
+router.get("/admin/all-payments", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ success: false, error: "Authentication required." });
+    }
+
+    const { user, error: authError } = await verifySupabaseToken(authHeader);
+    if (authError || !user) {
+      return res.status(401).json({ success: false, error: "Invalid or expired administrator session." });
+    }
+
+    if (!checkIsAdmin(user)) {
+      return res.status(403).json({ success: false, error: "Access denied. Administrator privileges required." });
+    }
+
+    const supabaseServer = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    if (!supabaseServer) {
+      return res.status(503).json({ success: false, error: "Database service unavailable." });
+    }
+
+    const { data, error } = await supabaseServer
+      .from("payments")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("[Admin Payments] Error querying payments table:", error);
+      return res.status(500).json({ success: false, error: "Failed to retrieve payment records." });
+    }
+
+    return res.json({ success: true, payments: data || [] });
+  } catch (err) {
+    console.error("[Admin Payments] Unexpected error:", err);
+    return res.status(500).json({ success: false, error: "Internal server error fetching payment ledger." });
+  }
+});
+
+/**
+ * POST /api/payments/admin/update-consultation-pricing
+ *
+ * Authoritatively updates consultation product pricing and GST in public.consultation_products.
+ * Protected: requires valid JWT belonging to an authorized admin account.
+ */
+router.post("/admin/update-consultation-pricing", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ success: false, error: "Authentication required." });
+    }
+
+    const { user, error: authError } = await verifySupabaseToken(authHeader);
+    if (authError || !user) {
+      return res.status(401).json({ success: false, error: "Invalid or expired administrator session." });
+    }
+
+    if (!checkIsAdmin(user)) {
+      return res.status(403).json({ success: false, error: "Access denied. Administrator privileges required." });
+    }
+
+    const { basePrice, gstRate, durationMinutes } = req.body || {};
+    const parsedBase = Number(basePrice);
+    const parsedGst = Number(gstRate);
+    const parsedDuration = Number(durationMinutes);
+
+    if (isNaN(parsedBase) || parsedBase < 0 || isNaN(parsedGst) || parsedGst < 0) {
+      return res.status(400).json({ success: false, error: "Valid basePrice and gstRate are required." });
+    }
+
+    const supabaseServer = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    if (!supabaseServer) {
+      return res.status(503).json({ success: false, error: "Database service unavailable." });
+    }
+
+    const targetId = "31bbb9bf-ce10-4da4-a517-dfc673f9b875";
+    const updatePayload = {
+      base_price: parsedBase,
+      gst_rate: parsedGst,
+      duration_minutes: !isNaN(parsedDuration) && parsedDuration > 0 ? parsedDuration : 30,
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabaseServer
+      .from("consultation_products")
+      .update(updatePayload)
+      .eq("id", targetId)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.error("[Admin Consultation Pricing] Update error:", error);
+      return res.status(500).json({ success: false, error: "Failed to update consultation product." });
+    }
+
+    return res.json({ success: true, product: data });
+  } catch (err) {
+    console.error("[Admin Consultation Pricing] Unexpected error:", err);
+    return res.status(500).json({ success: false, error: "Internal server error updating consultation product." });
   }
 });
 

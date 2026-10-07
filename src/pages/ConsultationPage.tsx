@@ -19,8 +19,13 @@ import {
   ChevronDown,
   ChevronUp,
   Send,
-  MessageSquare
+  MessageSquare,
+  CreditCard,
+  Loader2
 } from 'lucide-react';
+import { paymentService } from '../services/paymentService';
+import { loadRazorpayCheckoutScript, getClientRazorpayKeyId } from '../lib/razorpay';
+import { Booking, RazorpayCheckoutSuccessResponse } from '../types';
 
 interface ConsultationPageProps {
   navigate: (path: string) => void;
@@ -33,11 +38,13 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
 }) => {
   const {
     consultationProduct,
-    createBooking,
     bookings,
     availabilityRules,
     getAvailableSlotsForDate,
     refreshAvailabilityRules,
+    currentUser,
+    refreshStudentBookings,
+    fetchStudentPayments,
     notify
   } = useApp();
 
@@ -140,9 +147,15 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const [primaryChallenge, setPrimaryChallenge] = useState('');
   const [desiredOutcome, setDesiredOutcome] = useState('');
 
-  // Submission State
+  // Submission & Checkout State
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [checkoutStatus, setCheckoutStatus] = useState<
+    'idle' | 'creating_order' | 'opening_checkout' | 'verifying_signature' | 'fulfilled' | 'failed'
+  >('idle');
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
+  const [confirmedPaymentId, setConfirmedPaymentId] = useState<string | null>(null);
   const [expandedFaq, setExpandedFaq] = useState<number | null>(0);
 
   // Ensure selectedTime remains valid when date or slots change
@@ -156,16 +169,17 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
     }
   }, [availableSlots, selectedTime]);
 
-  // Standardized Consultation Pricing (Base: ₹499 + 18% GST: ₹89.82 => Total: ₹589)
+  // Dynamic Consultation Pricing read strictly from consultationProduct (single source of truth)
   const basePrice = consultationProduct?.basePrice || 499;
   const gstRate = consultationProduct?.gstRate || 0.18;
   const gstAmount = Number((basePrice * gstRate).toFixed(2));
-  const totalAmount = Math.round(basePrice + gstAmount); // ₹589
+  const totalAmount = Math.round(basePrice + gstAmount);
 
   const handleIntakeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
 
+    // 1. Validate consultation intake fields
     if (!customerName.trim() || !customerEmail.trim() || !businessName.trim() || !primaryChallenge.trim()) {
       notify('Please fill in all required fields (Name, Email, Business Name, and Primary Challenge).', 'error');
       return;
@@ -177,30 +191,150 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
     }
 
     setIsSubmitting(true);
+    setCheckoutStatus('creating_order');
+    setCheckoutError(null);
+
+    const bookingBrief = {
+      customerName: customerName.trim(),
+      customerEmail: customerEmail.trim(),
+      customerPhone: customerPhone.trim(),
+      businessName: businessName.trim(),
+      primaryChallenge: primaryChallenge.trim(),
+      desiredOutcome: desiredOutcome.trim(),
+      website: website.trim(),
+      date: selectedDate,
+      time: selectedTime
+    };
+
     try {
-      const bookingResult = await createBooking({
-        customerName: customerName.trim(),
-        customerEmail: customerEmail.trim(),
-        customerPhone: customerPhone.trim(),
-        businessName: businessName.trim(),
-        primaryChallenge: primaryChallenge.trim(),
-        desiredOutcome: desiredOutcome.trim(),
-        website: website.trim(),
-        date: selectedDate,
-        time: selectedTime
+      // 2. Call backend order creation API - server calculates authoritative price from public.consultation_products
+      const orderResult = await paymentService.createConsultationOrder(bookingBrief);
+
+      if (!orderResult.success || !orderResult.orderId) {
+        const errMsg = orderResult.error || 'Failed to initialize consultation payment order with server.';
+        setCheckoutStatus('failed');
+        setCheckoutError(errMsg);
+        notify(errMsg, 'error');
+        setIsSubmitting(false);
+        return;
+      }
+
+      setCheckoutStatus('opening_checkout');
+
+      // 3. Load official Razorpay Checkout SDK script
+      const scriptLoaded = await loadRazorpayCheckoutScript();
+      if (!scriptLoaded || typeof window.Razorpay !== 'function') {
+        const errMsg = 'Payment gateway interface failed to load. Please check your network connection and retry.';
+        setCheckoutStatus('failed');
+        setCheckoutError(errMsg);
+        notify(errMsg, 'error');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 4. Resolve public browser-safe key
+      const publicKey = orderResult.keyId || getClientRazorpayKeyId();
+      if (!publicKey) {
+        const errMsg = 'Payment gateway public key is not configured in this environment.';
+        setCheckoutStatus('failed');
+        setCheckoutError(errMsg);
+        notify(errMsg, 'error');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 5. Open genuine Razorpay Checkout modal using server-created order details
+      const rzpOptions = {
+        key: publicKey,
+        order_id: orderResult.orderId,
+        amount: orderResult.amount, // Server authoritative amount in paise
+        currency: orderResult.currency || 'INR',
+        name: 'Digital Muid',
+        description: orderResult.productTitle || '1-on-1 Strategic Business Consultation',
+        prefill: {
+          name: customerName.trim(),
+          email: customerEmail.trim(),
+          contact: customerPhone.trim()
+        },
+        theme: {
+          color: '#1877F2'
+        },
+        handler: async function (response: RazorpayCheckoutSuccessResponse) {
+          // STEP 4 & 5: Server-side cryptographic HMAC-SHA256 signature verification & atomic database fulfillment
+          setCheckoutStatus('verifying_signature');
+
+          try {
+            const verifyResult = await paymentService.verifyConsultationPayment({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              bookingDetails: bookingBrief
+            });
+
+            if (verifyResult.success && verifyResult.verified && verifyResult.fulfilled) {
+              setCheckoutStatus('fulfilled');
+              setConfirmedBooking(verifyResult.booking || null);
+              setConfirmedPaymentId(response.razorpay_payment_id);
+              setIsSubmitted(true);
+
+              if (onBookingConfirmed && verifyResult.booking) {
+                onBookingConfirmed(verifyResult.booking);
+              }
+
+              notify('Payment verified and consultation confirmed!', 'success');
+
+              // Refresh student bookings and payment history in background
+              try {
+                await Promise.allSettled([
+                  refreshStudentBookings?.(),
+                  fetchStudentPayments?.()
+                ]);
+              } catch (bgErr) {
+                console.warn('[Consultation] Background sync notice:', bgErr);
+              }
+            } else {
+              const verifyErrMsg = verifyResult.error || 'Payment verification failed on the server.';
+              setCheckoutStatus('failed');
+              setCheckoutError(verifyErrMsg);
+              notify(verifyErrMsg, 'error');
+            }
+          } catch (vErr: any) {
+            console.error('[Consultation Verification] Error:', vErr);
+            const vMsg = vErr?.message || 'Network error verifying payment with server. Please retry.';
+            setCheckoutStatus('failed');
+            setCheckoutError(vMsg);
+            notify(vMsg, 'error');
+          } finally {
+            setIsSubmitting(false);
+          }
+        },
+        modal: {
+          ondismiss: function () {
+            // Customer dismissed or cancelled checkout modal - NEVER create confirmed booking
+            setCheckoutStatus('idle');
+            setIsSubmitting(false);
+            notify('Payment was cancelled. Your consultation has not been booked.', 'info');
+          }
+        }
+      };
+
+      const rzpInstance = new window.Razorpay(rzpOptions);
+      rzpInstance.on('payment.failed', function (resp: any) {
+        console.warn('[Razorpay Consultation Payment Failed]:', resp?.error);
+        const failMsg = resp?.error?.description || 'Payment failed or was declined by your bank.';
+        setCheckoutStatus('failed');
+        setCheckoutError(failMsg);
+        setIsSubmitting(false);
+        notify(failMsg, 'error');
       });
 
-      if (bookingResult.success && bookingResult.booking) {
-        if (onBookingConfirmed) {
-          onBookingConfirmed(bookingResult.booking);
-        }
-        setIsSubmitted(true);
-      } else if (bookingResult.error) {
-        notify(bookingResult.error, 'error');
-      }
+      rzpInstance.open();
     } catch (err: any) {
-      notify(err?.message || 'Failed to submit consultation request. Please try again.', 'error');
-    } finally {
+      console.error('[Consultation Checkout] Initialization error:', err);
+      const errText = err?.message || 'Failed to initialize consultation payment order. Please try again.';
+      setCheckoutStatus('failed');
+      setCheckoutError(errText);
+      notify(errText, 'error');
       setIsSubmitting(false);
     }
   };
@@ -575,7 +709,7 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 <span className="font-semibold">₹{basePrice}</span>
               </div>
               <div className="flex justify-between">
-                <span>+ 18% GST:</span>
+                <span>+ {(gstRate * 100).toFixed(0)}% GST:</span>
                 <span className="font-semibold">₹{gstAmount.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-slate-900 font-bold border-t border-slate-200/60 pt-1">
@@ -609,28 +743,78 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
               <CheckCircle2 className="w-10 h-10" />
             </div>
             <div className="space-y-2">
-              <h3 className="text-2xl font-display font-bold text-slate-900">Intake Brief Received!</h3>
+              <span className="px-3 py-1 rounded-full text-[11px] font-mono font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+                Payment Verified · Booking Confirmed
+              </span>
+              <h3 className="text-2xl font-display font-bold text-slate-900 pt-1">Consultation Confirmed!</h3>
               <p className="text-slate-600 text-sm font-interface leading-relaxed">
-                Thank you, <strong className="text-slate-900">{customerName}</strong>. Our advisory team has received your brief for <strong className="text-slate-900">{businessName}</strong> regarding your preferred slot on <strong className="text-slate-900">{selectedDate} at {selectedTime}</strong>.
+                Thank you, <strong className="text-slate-900">{customerName}</strong>. Your 1-on-1 strategic advisory session for <strong className="text-slate-900">{businessName}</strong> has been secured for <strong className="text-slate-900">{selectedDate} at {selectedTime}</strong>.
               </p>
             </div>
-            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 text-left space-y-1 font-interface">
-              <div className="font-bold text-slate-800">Next Steps:</div>
-              <div>• We will review your context and send Google Meet confirmation to: <strong>{customerEmail}</strong></div>
-              <div>• You will receive calendar invite details within 24 hours.</div>
+
+            <div className="p-5 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-700 text-left space-y-2.5 font-interface">
+              <div className="font-bold text-slate-900 uppercase tracking-wider text-[11px] font-mono border-b border-slate-200 pb-2">
+                Booking & Transaction Summary:
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500">Booking Code:</span>
+                <span className="font-mono font-bold text-slate-900">{confirmedBooking?.bookingCode || 'Generated on Server'}</span>
+              </div>
+              {confirmedPaymentId && (
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Razorpay Payment ID:</span>
+                  <span className="font-mono text-slate-800">{confirmedPaymentId}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500">Scheduled Date & Time:</span>
+                <span className="font-semibold text-slate-900">{selectedDate} · {selectedTime}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500">Registered Email:</span>
+                <span className="font-semibold text-slate-900">{customerEmail}</span>
+              </div>
+              {confirmedBooking?.meetUrl && (
+                <div className="pt-2 border-t border-slate-200">
+                  <span className="text-slate-500 block mb-1">Google Meet Link:</span>
+                  <a
+                    href={confirmedBooking.meetUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#1877F2] font-mono font-medium hover:underline break-all inline-flex items-center gap-1"
+                  >
+                    <span>{confirmedBooking.meetUrl}</span>
+                  </a>
+                </div>
+              )}
             </div>
+
+            <div className="p-4 rounded-xl bg-orange-50/60 border border-orange-200 text-xs text-orange-900 text-left space-y-1 font-interface">
+              <div className="font-bold">Next Steps:</div>
+              <div>• Calendar invite and Google Meet link have been dispatched to <strong>{customerEmail}</strong>.</div>
+              <div>• Your receipt is archived in your <strong>Account Billing & Invoices</strong> history.</div>
+            </div>
+
             <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
               <button
-                onClick={() => setIsSubmitted(false)}
+                type="button"
+                onClick={() => {
+                  setIsSubmitted(false);
+                  setCheckoutStatus('idle');
+                  setConfirmedBooking(null);
+                  setConfirmedPaymentId(null);
+                }}
                 className="px-6 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs transition-all cursor-pointer"
               >
-                Submit Another Request
+                Book Another Session
               </button>
               <button
-                onClick={() => navigate('/contact')}
-                className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition-all cursor-pointer"
+                type="button"
+                onClick={() => navigate('/account?tab=billing')}
+                className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-[#FF6B00] text-white font-semibold text-xs transition-all cursor-pointer inline-flex items-center gap-1.5"
               >
-                Get in Touch Directly
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>View Receipt in Purchase History</span>
               </button>
             </div>
           </div>
@@ -810,6 +994,13 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
                   />
                 </div>
 
+                {checkoutError && (
+                  <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2">
+                    <span className="font-bold">Error:</span>
+                    <span>{checkoutError}</span>
+                  </div>
+                )}
+
                 <button
                   type="submit"
                   id="consultation-submit-btn"
@@ -818,15 +1009,30 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
                     isSubmitting || !selectedDate || !selectedTime ? 'opacity-70 cursor-not-allowed' : ''
                   }`}
                 >
-                  <CalendarIcon className="w-4 h-4" />
-                  <span>
-                    {isSubmitting
-                      ? 'Securing Strategic Session...'
-                      : selectedDate && selectedTime
-                      ? `Request Strategic Session (${selectedDate} · ${selectedTime})`
-                      : 'Select Date & Time to Continue'}
-                  </span>
-                  <ArrowRight className="w-4 h-4" />
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>
+                        {checkoutStatus === 'creating_order'
+                          ? 'Generating Secure Order...'
+                          : checkoutStatus === 'opening_checkout'
+                          ? 'Opening Razorpay Gateway...'
+                          : checkoutStatus === 'verifying_signature'
+                          ? 'Verifying Payment Cryptographically...'
+                          : 'Processing Consultation...'}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="w-4 h-4" />
+                      <span>
+                        {selectedDate && selectedTime
+                          ? `Proceed to Payment (₹${totalAmount}) · ${selectedDate}`
+                          : 'Select Date & Time to Continue'}
+                      </span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
                 </button>
               </div>
             </div>
