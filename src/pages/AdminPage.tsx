@@ -228,6 +228,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
   const [webEnquirySearch, setWebEnquirySearch] = useState('');
   const [webEnquiryStatusFilter, setWebEnquiryStatusFilter] = useState<'all' | WebEnquiryStatus>('all');
   const [webEnquiryTypeFilter, setWebEnquiryTypeFilter] = useState<'all' | string>('all');
+  const [webEnquiryDateFilter, setWebEnquiryDateFilter] = useState<'all' | 'today' | '7days' | '30days'>('all');
+  const [webEnquirySort, setWebEnquirySort] = useState<'newest' | 'oldest'>('newest');
   const [inspectingWebEnquiry, setInspectingWebEnquiry] = useState<WebEnquiry | null>(null);
   const [editingInternalNotes, setEditingInternalNotes] = useState('');
   const [editingAssignedTo, setEditingAssignedTo] = useState('');
@@ -889,7 +891,25 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
 
     const matchesStatus = webEnquiryStatusFilter === 'all' || e.status === webEnquiryStatusFilter;
     const matchesType = webEnquiryTypeFilter === 'all' || e.projectType === webEnquiryTypeFilter;
-    return matchesSearch && matchesStatus && matchesType;
+
+    let matchesDate = true;
+    if (webEnquiryDateFilter !== 'all' && e.createdAt) {
+      const createdDate = new Date(e.createdAt).getTime();
+      const now = Date.now();
+      if (webEnquiryDateFilter === 'today') {
+        matchesDate = now - createdDate <= 24 * 60 * 60 * 1000;
+      } else if (webEnquiryDateFilter === '7days') {
+        matchesDate = now - createdDate <= 7 * 24 * 60 * 60 * 1000;
+      } else if (webEnquiryDateFilter === '30days') {
+        matchesDate = now - createdDate <= 30 * 24 * 60 * 60 * 1000;
+      }
+    }
+
+    return matchesSearch && matchesStatus && matchesType && matchesDate;
+  }).sort((a, b) => {
+    const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return webEnquirySort === 'newest' ? timeB - timeA : timeA - timeB;
   });
 
   // Filtered Contact Messages
@@ -1947,35 +1967,53 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
             </div>
           </div>
 
-          {/* Quick Stats Bar */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-              <div className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Total Briefs</div>
-              <div className="text-2xl font-display font-bold text-white font-mono">{webEnquiries.length}</div>
+          {/* Summary Cards: All 7 Status Metrics */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Total</div>
+              <div className="text-xl font-display font-bold text-white font-mono">{webEnquiries.length}</div>
             </div>
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-              <div className="text-[11px] text-emerald-400 uppercase tracking-wider font-semibold">New Uncontacted</div>
-              <div className="text-2xl font-display font-bold text-emerald-400 font-mono">
+            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <div className="text-[10px] text-emerald-400 uppercase tracking-wider font-semibold">New</div>
+              <div className="text-xl font-display font-bold text-emerald-400 font-mono">
                 {webEnquiries.filter((e) => e.status === 'New').length}
               </div>
             </div>
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-              <div className="text-[11px] text-blue-400 uppercase tracking-wider font-semibold">In Discussion</div>
-              <div className="text-2xl font-display font-bold text-blue-400 font-mono">
-                {webEnquiries.filter((e) => ['Contacted', 'Qualified', 'Proposal Sent'].includes(e.status)).length}
+            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <div className="text-[10px] text-blue-400 uppercase tracking-wider font-semibold">Contacted</div>
+              <div className="text-xl font-display font-bold text-blue-400 font-mono">
+                {webEnquiries.filter((e) => e.status === 'Contacted').length}
               </div>
             </div>
-            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-              <div className="text-[11px] text-[#FF6B00] uppercase tracking-wider font-semibold">Won / Converted</div>
-              <div className="text-2xl font-display font-bold text-[#FF6B00] font-mono">
+            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <div className="text-[10px] text-indigo-400 uppercase tracking-wider font-semibold">Qualified</div>
+              <div className="text-xl font-display font-bold text-indigo-400 font-mono">
+                {webEnquiries.filter((e) => e.status === 'Qualified').length}
+              </div>
+            </div>
+            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <div className="text-[10px] text-amber-400 uppercase tracking-wider font-semibold">Proposal Sent</div>
+              <div className="text-xl font-display font-bold text-amber-400 font-mono">
+                {webEnquiries.filter((e) => e.status === 'Proposal Sent').length}
+              </div>
+            </div>
+            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <div className="text-[10px] text-[#FF6B00] uppercase tracking-wider font-semibold">Won</div>
+              <div className="text-xl font-display font-bold text-[#FF6B00] font-mono">
                 {webEnquiries.filter((e) => e.status === 'Won').length}
+              </div>
+            </div>
+            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <div className="text-[10px] text-rose-400 uppercase tracking-wider font-semibold">Lost</div>
+              <div className="text-xl font-display font-bold text-rose-400 font-mono">
+                {webEnquiries.filter((e) => e.status === 'Lost').length}
               </div>
             </div>
           </div>
 
           {/* Search & Filters */}
-          <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col md:flex-row gap-4 items-center justify-between">
-            <div className="relative w-full md:w-80">
+          <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col lg:flex-row gap-4 items-center justify-between">
+            <div className="relative w-full lg:w-72">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
@@ -1986,7 +2024,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
               <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-400 font-medium">Status:</span>
                 <select
@@ -2009,16 +2047,44 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
                 <select
                   value={webEnquiryTypeFilter}
                   onChange={(e) => setWebEnquiryTypeFilter(e.target.value)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none max-w-[200px] truncate"
+                  className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none max-w-[170px] truncate"
                 >
                   <option value="all">All Project Types</option>
-                  <option value="Business Website Design">Business Website Design</option>
-                  <option value="Website Redesign">Website Redesign</option>
-                  <option value="Service Business Website">Service Business Website</option>
-                  <option value="E-commerce Website">E-commerce Website</option>
-                  <option value="Landing Page">Landing Page</option>
-                  <option value="Portfolio & Personal Brand">Portfolio & Personal Brand</option>
-                  <option value="Custom Web Functionality">Custom Web Functionality</option>
+                  <option value="New business website">New business website</option>
+                  <option value="Redesign an existing website">Redesign an existing website</option>
+                  <option value="LMS / E-learning website">LMS / E-learning website</option>
+                  <option value="Booking website">Booking website</option>
+                  <option value="Travel website">Travel website</option>
+                  <option value="E-commerce website">E-commerce website</option>
+                  <option value="Landing page">Landing page</option>
+                  <option value="Portfolio / Personal brand">Portfolio / Personal brand</option>
+                  <option value="Custom web application">Custom web application</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-medium">Date:</span>
+                <select
+                  value={webEnquiryDateFilter}
+                  onChange={(e) => setWebEnquiryDateFilter(e.target.value as any)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none"
+                >
+                  <option value="all">All Time</option>
+                  <option value="today">Today (24h)</option>
+                  <option value="7days">Last 7 Days</option>
+                  <option value="30days">Last 30 Days</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-medium">Sort:</span>
+                <select
+                  value={webEnquirySort}
+                  onChange={(e) => setWebEnquirySort(e.target.value as any)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none"
+                >
+                  <option value="newest">Newest First</option>
+                  <option value="oldest">Oldest First</option>
                 </select>
               </div>
             </div>

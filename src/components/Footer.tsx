@@ -223,7 +223,7 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
           {/* Group 2: Services (3 cols) */}
           <div className="lg:col-span-3">
             <h4 className="font-display font-bold text-white text-xs uppercase tracking-[0.2em] mb-4">
-              Our Growth System
+              Services
             </h4>
             <ul className="space-y-2.5 text-sm">
               <li>

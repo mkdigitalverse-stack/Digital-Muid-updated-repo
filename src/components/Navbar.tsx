@@ -375,7 +375,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   : 'text-white/70 hover:text-white'
               }`}
             >
-              <span>OUR GROWTH SYSTEM</span>
+              <span>SERVICES</span>
               <ChevronDown
                 className={`w-3.5 h-3.5 transition-transform duration-200 ${
                   activeDropdown === 'services' ? 'rotate-180 text-[#FF6B00]' : 'text-white/50'
@@ -988,7 +988,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                 className="w-full min-h-[44px] px-4 py-3.5 text-left text-sm font-bold uppercase tracking-wider text-slate-200 hover:text-white flex items-center justify-between cursor-pointer focus:outline-none focus:bg-slate-800/80"
               >
                 <span className="flex items-center gap-2 font-interface">
-                  <span>OUR GROWTH SYSTEM</span>
+                  <span>SERVICES</span>
                   {isServicesActive && <span className="w-1.5 h-1.5 rounded-full bg-[#1877F2]"></span>}
                 </span>
                 <ChevronDown
