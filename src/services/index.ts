@@ -20,3 +20,4 @@ export * from './bookmarkService';
 export * from './certificateService';
 export * from './paymentService';
 export * from './courseWishlistService';
+export * from './webEnquiryService';

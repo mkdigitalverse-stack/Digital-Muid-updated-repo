@@ -203,7 +203,7 @@ export const ServicesPage: React.FC<ServicesPageProps> = ({ navigate, activeServ
             </div>
 
             <h1 className="text-3xl sm:text-5xl lg:text-6xl font-display font-bold text-white tracking-tight leading-[1.1]">
-              Strategic Services for Digital Growth & Modern Execution
+              Our Growth System for Scalable Impact & Modern Execution
             </h1>
 
             <p className="text-slate-300 text-base sm:text-lg font-interface leading-relaxed font-light">
@@ -257,7 +257,7 @@ export const ServicesPage: React.FC<ServicesPageProps> = ({ navigate, activeServ
                 : 'text-slate-600 hover:text-slate-900 bg-slate-100/60'
             }`}
           >
-            All Services ({SERVICES_LIST.length})
+            Our Growth System ({SERVICES_LIST.length})
           </button>
           {SERVICES_LIST.map((srv) => (
             <button

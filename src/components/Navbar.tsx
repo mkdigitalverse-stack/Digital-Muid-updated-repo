@@ -37,7 +37,8 @@ import {
   Linkedin,
   Instagram,
   Facebook,
-  Youtube
+  Youtube,
+  Globe
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -184,7 +185,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
     { label: 'Modern Marketing', path: '/services/modern-marketing', icon: Megaphone, desc: 'High-signal distribution & funnels' },
     { label: 'Personal Branding', path: '/services/personal-branding', icon: Award, desc: 'Founder authority & IP codification' },
     { label: 'Digital Transformation', path: '/services/digital-transformation', icon: Cpu, desc: 'Modernizing legacy digital stacks' },
-    { label: 'Education', path: '/services/education', icon: GraduationCap, desc: 'Workshops, masterclasses & cohorts' }
+    { label: 'Education', path: '/services/education', icon: GraduationCap, desc: 'Workshops, masterclasses & cohorts' },
+    { label: 'Web', path: '/web', icon: Globe, desc: 'Website design & custom web development' }
   ];
 
   const socialLinks = [
@@ -373,7 +375,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   : 'text-white/70 hover:text-white'
               }`}
             >
-              <span>SERVICES</span>
+              <span>OUR GROWTH SYSTEM</span>
               <ChevronDown
                 className={`w-3.5 h-3.5 transition-transform duration-200 ${
                   activeDropdown === 'services' ? 'rotate-180 text-[#FF6B00]' : 'text-white/50'
@@ -402,7 +404,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     onClick={() => handleNav('/services')}
                     className="text-[10px] font-bold text-[#1877F2] hover:underline cursor-pointer"
                   >
-                    All Services →
+                    Our Growth System →
                   </button>
                 </div>
 
@@ -977,7 +979,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               )}
             </div>
 
-            {/* Mobile Accordion 2: SERVICES */}
+            {/* Mobile Accordion 2: OUR GROWTH SYSTEM */}
             <div className="rounded-xl border border-slate-800/80 overflow-hidden bg-slate-900/40">
               <button
                 type="button"
@@ -986,7 +988,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                 className="w-full min-h-[44px] px-4 py-3.5 text-left text-sm font-bold uppercase tracking-wider text-slate-200 hover:text-white flex items-center justify-between cursor-pointer focus:outline-none focus:bg-slate-800/80"
               >
                 <span className="flex items-center gap-2 font-interface">
-                  <span>SERVICES</span>
+                  <span>OUR GROWTH SYSTEM</span>
                   {isServicesActive && <span className="w-1.5 h-1.5 rounded-full bg-[#1877F2]"></span>}
                 </span>
                 <ChevronDown
@@ -1002,7 +1004,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     onClick={() => handleNav('/services')}
                     className="w-full min-h-[44px] text-left px-3 py-2.5 rounded-lg text-xs font-bold text-[#1877F2] hover:bg-slate-800/40 flex items-center justify-between cursor-pointer"
                   >
-                    <span>All Services Overview</span>
+                    <span>Our Growth System Overview</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                   {servicesSubmenu.map((sub) => {

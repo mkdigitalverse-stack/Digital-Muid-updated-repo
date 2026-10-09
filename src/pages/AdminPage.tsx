@@ -45,9 +45,10 @@ import {
   Image as ImageIcon,
   Play,
   CreditCard,
-  Receipt
+  Receipt,
+  Building2
 } from 'lucide-react';
-import { Article, Video, Framework, Course, Resource, Lead, Booking, ContactMessage, NewsletterSubscriber, AvailabilityRules, LeadStatus, LeadSource, BookingStatus } from '../types';
+import { Article, Video, Framework, Course, Resource, Lead, Booking, ContactMessage, NewsletterSubscriber, AvailabilityRules, LeadStatus, LeadSource, BookingStatus, WebEnquiry, WebEnquiryStatus } from '../types';
 import { ArticleEditorModal } from '../components/ArticleEditorModal';
 import { VideoEditorModal } from '../components/VideoEditorModal';
 import { ResourceEditorModal } from '../components/ResourceEditorModal';
@@ -132,6 +133,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
     isAdminPaymentsLoading,
     adminPaymentsError,
     fetchAdminPayments,
+    webEnquiries,
+    isWebEnquiriesLoading,
+    webEnquiriesError,
+    fetchAdminWebEnquiries,
+    updateWebEnquiry,
+    deleteWebEnquiry,
     notify
   } = useApp();
 
@@ -146,10 +153,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
 
   // Tabs
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'payments' | 'bookings' | 'leads' | 'messages' | 'subscribers' | 'pricing' | 'availability' | 'settings' | 'articles' | 'videos' | 'frameworks' | 'courses' | 'resources'
+    'overview' | 'payments' | 'bookings' | 'leads' | 'web-enquiries' | 'messages' | 'subscribers' | 'pricing' | 'availability' | 'settings' | 'articles' | 'videos' | 'frameworks' | 'courses' | 'resources'
   >(() => {
     try {
-      const validTabs = ['overview', 'payments', 'bookings', 'leads', 'messages', 'subscribers', 'pricing', 'availability', 'settings', 'articles', 'videos', 'frameworks', 'courses', 'resources'];
+      const validTabs = ['overview', 'payments', 'bookings', 'leads', 'web-enquiries', 'messages', 'subscribers', 'pricing', 'availability', 'settings', 'articles', 'videos', 'frameworks', 'courses', 'resources'];
       const params = new URLSearchParams(window.location.search);
       const urlTab = params.get('tab');
       if (urlTab && validTabs.includes(urlTab)) {
@@ -209,6 +216,23 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
       fetchAdminPayments();
     }
   }, [activeTab, isAdminAuthenticated, fetchAdminPayments]);
+
+  // Sync web enquiries when navigating to Web Enquiries tab or Overview
+  useEffect(() => {
+    if ((activeTab === 'web-enquiries' || activeTab === 'overview') && isAdminAuthenticated) {
+      fetchAdminWebEnquiries();
+    }
+  }, [activeTab, isAdminAuthenticated, fetchAdminWebEnquiries]);
+
+  // Web Enquiries Filter & Inspection State
+  const [webEnquirySearch, setWebEnquirySearch] = useState('');
+  const [webEnquiryStatusFilter, setWebEnquiryStatusFilter] = useState<'all' | WebEnquiryStatus>('all');
+  const [webEnquiryTypeFilter, setWebEnquiryTypeFilter] = useState<'all' | string>('all');
+  const [inspectingWebEnquiry, setInspectingWebEnquiry] = useState<WebEnquiry | null>(null);
+  const [editingInternalNotes, setEditingInternalNotes] = useState('');
+  const [editingAssignedTo, setEditingAssignedTo] = useState('');
+  const [editingFollowUpDate, setEditingFollowUpDate] = useState('');
+  const [isUpdatingEnquiry, setIsUpdatingEnquiry] = useState(false);
 
   // Payment Ledger Filter & Search State
   const [paymentSearch, setPaymentSearch] = useState('');
@@ -848,6 +872,26 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
     return matchesSearch && matchesStatus && matchesSource;
   });
 
+  // Filtered Web Enquiries
+  const filteredWebEnquiries = webEnquiries.filter((e) => {
+    const q = (webEnquirySearch || '').toLowerCase().trim();
+    const matchesSearch =
+      q === '' ||
+      (e.referenceId || '').toLowerCase().includes(q) ||
+      (e.name || '').toLowerCase().includes(q) ||
+      (e.businessName || '').toLowerCase().includes(q) ||
+      (e.email || '').toLowerCase().includes(q) ||
+      (e.phone || '').toLowerCase().includes(q) ||
+      (e.projectType || '').toLowerCase().includes(q) ||
+      (e.timeline || '').toLowerCase().includes(q) ||
+      (e.details?.additionalRequirements || '').toLowerCase().includes(q) ||
+      (e.details?.internalNotes || '').toLowerCase().includes(q);
+
+    const matchesStatus = webEnquiryStatusFilter === 'all' || e.status === webEnquiryStatusFilter;
+    const matchesType = webEnquiryTypeFilter === 'all' || e.projectType === webEnquiryTypeFilter;
+    return matchesSearch && matchesStatus && matchesType;
+  });
+
   // Filtered Contact Messages
   const filteredMessages = contactMessages.filter(m => {
     const q = (messageSearch || '').toLowerCase().trim();
@@ -1114,6 +1158,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
           { id: 'payments', label: `Purchase History (${adminPayments.length})`, icon: CreditCard },
           { id: 'bookings', label: `Consultations (${bookings.length})`, icon: Calendar },
           { id: 'leads', label: `Leads & CRM (${leads.length})`, icon: Users },
+          { id: 'web-enquiries', label: `Web Enquiries (${webEnquiries.length})`, icon: Globe },
           { id: 'messages', label: `Inquiries (${contactMessages.length})`, icon: MessageSquare },
           { id: 'subscribers', label: `Subscribers (${subscribers.length})`, icon: UserCheck },
           { id: 'pricing', label: 'Consultation Pricing', icon: DollarSign },
@@ -1150,36 +1195,50 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
       {activeTab === 'overview' && (
         <div className="space-y-8">
           {/* Key Metrics */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-2">
               <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Total Revenue</div>
-              <div className="text-3xl font-display font-black text-white font-mono">₹{totalRevenue.toFixed(2)}</div>
+              <div className="text-2xl lg:text-3xl font-display font-black text-white font-mono">₹{totalRevenue.toFixed(2)}</div>
               <div className="text-[11px] text-emerald-400 flex items-center gap-1 font-mono">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Live Supabase Bookings
+                <CheckCircle2 className="w-3.5 h-3.5" /> Live Payments
               </div>
             </div>
 
-            <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-2">
+            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-2">
               <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Booked Sessions</div>
-              <div className="text-3xl font-display font-black text-white font-mono">{bookings.length}</div>
+              <div className="text-2xl lg:text-3xl font-display font-black text-white font-mono">{bookings.length}</div>
               <div className="text-[11px] text-[#FF6B00]">
                 {bookings.filter((b) => b.status === 'confirmed').length} Active / Confirmed
               </div>
             </div>
 
-            <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-2">
+            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-2">
               <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">CRM Leads</div>
-              <div className="text-3xl font-display font-black text-white font-mono">{leads.length}</div>
+              <div className="text-2xl lg:text-3xl font-display font-black text-white font-mono">{leads.length}</div>
               <div className="text-[11px] text-[#1877F2]">
                 {leads.filter(l => l.status === 'New').length} New Uncontacted
               </div>
             </div>
 
-            <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-2">
-              <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Newsletter & Messages</div>
-              <div className="text-3xl font-display font-black text-white font-mono">{subscribers.length + contactMessages.length}</div>
-              <div className="text-[11px] text-slate-400">
-                {subscribers.length} Subs · {contactMessages.length} Messages
+            <div
+              onClick={() => handleSelectTab('web-enquiries')}
+              className="p-5 rounded-2xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-all cursor-pointer group space-y-2"
+            >
+              <div className="flex items-center justify-between text-xs text-slate-400 uppercase tracking-wider font-semibold">
+                <span>Web Enquiries</span>
+                <Globe className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
+              </div>
+              <div className="text-2xl lg:text-3xl font-display font-black text-white font-mono">{webEnquiries.length}</div>
+              <div className="text-[11px] text-emerald-400">
+                {webEnquiries.filter(e => e.status === 'New').length} New Uncontacted
+              </div>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-2">
+              <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Subscribers & Msg</div>
+              <div className="text-2xl lg:text-3xl font-display font-black text-white font-mono">{subscribers.length + contactMessages.length}</div>
+              <div className="text-[11px] text-slate-400 truncate">
+                {subscribers.length} Subs · {contactMessages.length} Msg
               </div>
             </div>
           </div>
@@ -1854,6 +1913,499 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB: WEB ENQUIRIES & PROJECT BRIEFS (CRM) */}
+      {/* ========================================================================= */}
+      {activeTab === 'web-enquiries' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Globe className="w-5 h-5 text-[#FF6B00]" />
+                <h2 className="text-xl font-display font-bold text-white">Web Enquiries & Project Briefs (CRM)</h2>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                Website design & development briefs submitted from /web. Track scope, client goals, status, and proposal progress.
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => fetchAdminWebEnquiries()}
+                disabled={isWebEnquiriesLoading}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isWebEnquiriesLoading ? 'animate-spin text-[#FF6B00]' : ''}`} />
+                <span>Refresh</span>
+              </button>
+              <span className="text-xs text-slate-400 font-mono bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
+                {filteredWebEnquiries.length} / {webEnquiries.length} Enquiries
+              </span>
+            </div>
+          </div>
+
+          {/* Quick Stats Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <div className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Total Briefs</div>
+              <div className="text-2xl font-display font-bold text-white font-mono">{webEnquiries.length}</div>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <div className="text-[11px] text-emerald-400 uppercase tracking-wider font-semibold">New Uncontacted</div>
+              <div className="text-2xl font-display font-bold text-emerald-400 font-mono">
+                {webEnquiries.filter((e) => e.status === 'New').length}
+              </div>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <div className="text-[11px] text-blue-400 uppercase tracking-wider font-semibold">In Discussion</div>
+              <div className="text-2xl font-display font-bold text-blue-400 font-mono">
+                {webEnquiries.filter((e) => ['Contacted', 'Qualified', 'Proposal Sent'].includes(e.status)).length}
+              </div>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+              <div className="text-[11px] text-[#FF6B00] uppercase tracking-wider font-semibold">Won / Converted</div>
+              <div className="text-2xl font-display font-bold text-[#FF6B00] font-mono">
+                {webEnquiries.filter((e) => e.status === 'Won').length}
+              </div>
+            </div>
+          </div>
+
+          {/* Search & Filters */}
+          <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col md:flex-row gap-4 items-center justify-between">
+            <div className="relative w-full md:w-80">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search by ref, name, business, email, phone..."
+                value={webEnquirySearch}
+                onChange={(e) => setWebEnquirySearch(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-[#FF6B00]"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-medium">Status:</span>
+                <select
+                  value={webEnquiryStatusFilter}
+                  onChange={(e) => setWebEnquiryStatusFilter(e.target.value as any)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="New">New</option>
+                  <option value="Contacted">Contacted</option>
+                  <option value="Qualified">Qualified</option>
+                  <option value="Proposal Sent">Proposal Sent</option>
+                  <option value="Won">Won</option>
+                  <option value="Lost">Lost</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-medium">Project:</span>
+                <select
+                  value={webEnquiryTypeFilter}
+                  onChange={(e) => setWebEnquiryTypeFilter(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none max-w-[200px] truncate"
+                >
+                  <option value="all">All Project Types</option>
+                  <option value="Business Website Design">Business Website Design</option>
+                  <option value="Website Redesign">Website Redesign</option>
+                  <option value="Service Business Website">Service Business Website</option>
+                  <option value="E-commerce Website">E-commerce Website</option>
+                  <option value="Landing Page">Landing Page</option>
+                  <option value="Portfolio & Personal Brand">Portfolio & Personal Brand</option>
+                  <option value="Custom Web Functionality">Custom Web Functionality</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Enquiries Table */}
+          <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-900 shadow-xl">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-950 text-slate-400 uppercase font-semibold border-b border-slate-800">
+                <tr>
+                  <th className="p-4">Ref ID</th>
+                  <th className="p-4">Client / Business</th>
+                  <th className="p-4">Project Type & Timeline</th>
+                  <th className="p-4">Contact</th>
+                  <th className="p-4">Date</th>
+                  <th className="p-4">Status & Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800 text-slate-300">
+                {filteredWebEnquiries.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-slate-500">
+                      {webEnquiries.length === 0
+                        ? 'No web enquiries received yet. Submissions from /web will appear here.'
+                        : 'No web enquiries match the search and filter criteria.'}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredWebEnquiries.map((enquiry) => (
+                    <tr key={enquiry.id} className="hover:bg-slate-850/60 transition-colors">
+                      <td className="p-4 font-mono font-bold text-slate-200">
+                        <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[11px] text-emerald-400">
+                          {enquiry.referenceId}
+                        </span>
+                      </td>
+                      <td className="p-4">
+                        <div className="font-bold text-white text-sm">{enquiry.name}</div>
+                        <div className="text-slate-400 text-xs flex items-center gap-1.5 mt-0.5">
+                          <Building2 className="w-3 h-3 text-[#FF6B00]" />
+                          <span>{enquiry.businessName}</span>
+                          {enquiry.details?.businessStage && (
+                            <span className="text-[10px] text-slate-500">· {enquiry.details.businessStage}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div className="font-semibold text-slate-200">{enquiry.projectType}</div>
+                        <div className="text-slate-400 text-[11px] flex items-center gap-1 mt-0.5">
+                          <Clock className="w-3 h-3 text-slate-500" />
+                          <span>{enquiry.timeline}</span>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        <div>
+                          <a
+                            href={`mailto:${enquiry.email}`}
+                            className="text-[#60A5FA] hover:underline flex items-center gap-1"
+                          >
+                            <Mail className="w-3 h-3" />
+                            <span>{enquiry.email}</span>
+                          </a>
+                        </div>
+                        {enquiry.phone && (
+                          <div className="mt-0.5">
+                            <a
+                              href={`https://wa.me/${enquiry.phone.replace(/[^0-9]/g, '')}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-emerald-400 hover:underline flex items-center gap-1 text-[11px]"
+                            >
+                              <Phone className="w-3 h-3" />
+                              <span>{enquiry.phone}</span>
+                            </a>
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-4 text-slate-400 text-[11px] whitespace-nowrap">
+                        {enquiry.createdAt ? new Date(enquiry.createdAt).toLocaleDateString() : '—'}
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={enquiry.status}
+                            onChange={async (e) => {
+                              const newStatus = e.target.value as WebEnquiryStatus;
+                              await updateWebEnquiry(enquiry.id, { status: newStatus });
+                              notify(`Updated enquiry ${enquiry.referenceId} status to ${newStatus}`, 'success');
+                            }}
+                            className={`px-2 py-1 rounded-lg border text-[11px] font-semibold focus:outline-none ${
+                              enquiry.status === 'New'
+                                ? 'bg-emerald-950/80 border-emerald-700 text-emerald-300'
+                                : enquiry.status === 'Won'
+                                ? 'bg-[#FF6B00]/20 border-[#FF6B00] text-[#FF6B00]'
+                                : enquiry.status === 'Lost'
+                                ? 'bg-rose-950/60 border-rose-800 text-rose-300'
+                                : 'bg-slate-950 border-slate-700 text-slate-200'
+                            }`}
+                          >
+                            <option value="New">New</option>
+                            <option value="Contacted">Contacted</option>
+                            <option value="Qualified">Qualified</option>
+                            <option value="Proposal Sent">Proposal Sent</option>
+                            <option value="Won">Won</option>
+                            <option value="Lost">Lost</option>
+                          </select>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInspectingWebEnquiry(enquiry);
+                              setEditingInternalNotes(enquiry.details?.internalNotes || '');
+                              setEditingAssignedTo(enquiry.details?.assignedTo || '');
+                              setEditingFollowUpDate(enquiry.details?.followUpDate || '');
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-slate-200 flex items-center gap-1 transition-colors cursor-pointer"
+                            title="View Full Brief Details"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>View Brief</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (window.confirm(`Delete web enquiry record ${enquiry.referenceId} for ${enquiry.name}?`)) {
+                                await deleteWebEnquiry(enquiry.id);
+                                notify(`Deleted enquiry ${enquiry.referenceId}`, 'info');
+                              }
+                            }}
+                            className="p-1 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded transition-colors cursor-pointer"
+                            title="Delete Enquiry"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* INSPECTION MODAL FOR SELECTED WEB ENQUIRY */}
+          {inspectingWebEnquiry && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+              <div className="w-full max-w-3xl my-8 p-6 sm:p-8 rounded-3xl bg-[#0A1A2F] border border-white/15 shadow-2xl space-y-6 text-left relative max-h-[90vh] overflow-y-auto">
+                <div className="flex items-start justify-between pb-4 border-b border-white/10">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-mono font-bold">
+                        {inspectingWebEnquiry.referenceId}
+                      </span>
+                      <span className="text-xs text-slate-400 font-mono">
+                        Submitted: {inspectingWebEnquiry.createdAt ? new Date(inspectingWebEnquiry.createdAt).toLocaleString() : '—'}
+                      </span>
+                    </div>
+                    <h3 className="text-xl sm:text-2xl font-display font-bold text-white mt-1">
+                      {inspectingWebEnquiry.businessName}
+                    </h3>
+                    <p className="text-xs text-slate-300">
+                      Primary Contact: <strong className="text-white">{inspectingWebEnquiry.name}</strong> ({inspectingWebEnquiry.email} · {inspectingWebEnquiry.phone})
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setInspectingWebEnquiry(null)}
+                    className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Scope & Readiness Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                    <span className="text-slate-400 font-semibold uppercase text-[10px]">Project Type</span>
+                    <p className="text-white font-medium">{inspectingWebEnquiry.projectType}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                    <span className="text-slate-400 font-semibold uppercase text-[10px]">Business Stage</span>
+                    <p className="text-white font-medium">{inspectingWebEnquiry.details?.businessStage || '—'}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                    <span className="text-slate-400 font-semibold uppercase text-[10px]">Timeline</span>
+                    <p className="text-white font-medium">{inspectingWebEnquiry.timeline}</p>
+                  </div>
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                    <span className="text-slate-400 font-semibold uppercase text-[10px]">Decision-Maker</span>
+                    <p className="text-white font-medium">{inspectingWebEnquiry.details?.decisionMaker || '—'}</p>
+                  </div>
+                </div>
+
+                {/* URLs & Content Readiness */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                    <span className="text-slate-400 font-semibold uppercase text-[10px]">Existing Website</span>
+                    <p>
+                      {inspectingWebEnquiry.details?.existingWebsiteUrl ? (
+                        <a
+                          href={inspectingWebEnquiry.details.existingWebsiteUrl.startsWith('http') ? inspectingWebEnquiry.details.existingWebsiteUrl : `https://${inspectingWebEnquiry.details.existingWebsiteUrl}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[#60A5FA] hover:underline flex items-center gap-1 font-mono"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>{inspectingWebEnquiry.details.existingWebsiteUrl}</span>
+                        </a>
+                      ) : (
+                        <span className="text-slate-500">None specified (New website)</span>
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
+                    <span className="text-slate-400 font-semibold uppercase text-[10px]">Content Readiness</span>
+                    <p className="text-slate-200">{inspectingWebEnquiry.details?.contentReadiness || 'Not specified'}</p>
+                  </div>
+                </div>
+
+                {/* Reference URLs */}
+                {inspectingWebEnquiry.details?.referenceUrls && (
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs space-y-1">
+                    <span className="text-slate-400 font-semibold uppercase text-[10px]">Inspiration / Reference Websites</span>
+                    <p className="text-slate-200 font-mono break-all">{inspectingWebEnquiry.details.referenceUrls}</p>
+                  </div>
+                )}
+
+                {/* Goals & Features */}
+                <div className="space-y-3">
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1.5">
+                      Client Goals ({inspectingWebEnquiry.details?.goals?.length || 0})
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {inspectingWebEnquiry.details?.goals && inspectingWebEnquiry.details.goals.length > 0 ? (
+                        inspectingWebEnquiry.details.goals.map((goal, idx) => (
+                          <span key={idx} className="px-2.5 py-1 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs">
+                            {goal}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-slate-500">No specific goals selected</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 block mb-1.5">
+                      Requested Features ({inspectingWebEnquiry.details?.features?.length || 0})
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {inspectingWebEnquiry.details?.features && inspectingWebEnquiry.details.features.length > 0 ? (
+                        inspectingWebEnquiry.details.features.map((feat, idx) => (
+                          <span key={idx} className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs">
+                            {feat}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-slate-500">No specific features selected</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Additional Requirements */}
+                {inspectingWebEnquiry.details?.additionalRequirements && (
+                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 text-xs space-y-1">
+                    <span className="text-slate-400 font-semibold uppercase text-[10px]">Additional Notes / Requirements</span>
+                    <p className="text-slate-200 whitespace-pre-wrap leading-relaxed">
+                      {inspectingWebEnquiry.details.additionalRequirements}
+                    </p>
+                  </div>
+                )}
+
+                {/* INTERNAL CRM MANAGEMENT */}
+                <div className="pt-4 border-t border-white/10 space-y-4">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#FF6B00]">
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Internal CRM Records</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-400 mb-1">Status</label>
+                      <select
+                        value={inspectingWebEnquiry.status}
+                        onChange={async (e) => {
+                          const newStatus = e.target.value as WebEnquiryStatus;
+                          setIsUpdatingEnquiry(true);
+                          await updateWebEnquiry(inspectingWebEnquiry.id, { status: newStatus });
+                          setInspectingWebEnquiry((prev) => prev ? { ...prev, status: newStatus } : null);
+                          setIsUpdatingEnquiry(false);
+                          notify('Status updated', 'success');
+                        }}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white"
+                      >
+                        <option value="New">New</option>
+                        <option value="Contacted">Contacted</option>
+                        <option value="Qualified">Qualified</option>
+                        <option value="Proposal Sent">Proposal Sent</option>
+                        <option value="Won">Won</option>
+                        <option value="Lost">Lost</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-400 mb-1">Assigned Team Member</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Muid"
+                        value={editingAssignedTo}
+                        onChange={(e) => setEditingAssignedTo(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium text-slate-400 mb-1">Next Follow-Up Date</label>
+                      <input
+                        type="date"
+                        value={editingFollowUpDate}
+                        onChange={(e) => setEditingFollowUpDate(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-400 mb-1">Internal Notes</label>
+                    <textarea
+                      rows={3}
+                      placeholder="Add private sales notes, call summaries, or agreed project quote..."
+                      value={editingInternalNotes}
+                      onChange={(e) => setEditingInternalNotes(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <button
+                      type="button"
+                      disabled={isUpdatingEnquiry}
+                      onClick={async () => {
+                        setIsUpdatingEnquiry(true);
+                        const res = await updateWebEnquiry(inspectingWebEnquiry.id, {
+                          internalNotes: editingInternalNotes,
+                          assignedTo: editingAssignedTo,
+                          followUpDate: editingFollowUpDate
+                        });
+                        setIsUpdatingEnquiry(false);
+                        if (res.success) {
+                          notify('CRM notes and assignment saved', 'success');
+                          setInspectingWebEnquiry((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  details: {
+                                    ...prev.details,
+                                    internalNotes: editingInternalNotes,
+                                    assignedTo: editingAssignedTo,
+                                    followUpDate: editingFollowUpDate
+                                  }
+                                }
+                              : null
+                          );
+                        } else {
+                          notify('Failed to save notes', 'error');
+                        }
+                      }}
+                      className="px-4 py-2 rounded-xl bg-[#FF6B00] hover:bg-[#e66000] text-white text-xs font-bold uppercase tracking-wider cursor-pointer"
+                    >
+                      {isUpdatingEnquiry ? 'Saving...' : 'Save CRM Details'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setInspectingWebEnquiry(null)}
+                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 cursor-pointer"
+                    >
+                      Close Brief
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

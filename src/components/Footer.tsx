@@ -223,7 +223,7 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
           {/* Group 2: Services (3 cols) */}
           <div className="lg:col-span-3">
             <h4 className="font-display font-bold text-white text-xs uppercase tracking-[0.2em] mb-4">
-              Services
+              Our Growth System
             </h4>
             <ul className="space-y-2.5 text-sm">
               <li>
@@ -254,6 +254,11 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
               <li>
                 <button onClick={() => handleNav('/services/education')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
                   Education & Workshops
+                </button>
+              </li>
+              <li>
+                <button onClick={() => handleNav('/web')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                  Web Design & Development
                 </button>
               </li>
             </ul>

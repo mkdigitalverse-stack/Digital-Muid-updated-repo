@@ -415,6 +415,8 @@ export interface Booking {
 
 export type LeadStatus = 'New' | 'Contacted' | 'Qualified' | 'Converted' | 'Lost';
 
+export type WebEnquiryStatus = 'New' | 'Contacted' | 'Qualified' | 'Proposal Sent' | 'Won' | 'Lost';
+
 export type LeadSource =
   | 'Contact Form'
   | 'Contact'
@@ -424,7 +426,44 @@ export type LeadSource =
   | 'Consultation Intake Brief'
   | 'Consultation'
   | 'Course Enquiry'
-  | 'Speaking Enquiry';
+  | 'Speaking Enquiry'
+  | 'Web Enquiry';
+
+export interface WebEnquiryDetails {
+  projectType: string;
+  businessName: string;
+  businessStage: string;
+  goals: string[];
+  features: string[];
+  contentReadiness: string;
+  existingWebsiteUrl?: string;
+  referenceUrls?: string;
+  timeline: string;
+  readiness: string;
+  decisionMaker: string;
+  additionalRequirements?: string;
+  internalNotes?: string;
+  assignedTo?: string;
+  followUpDate?: string;
+  contactAttempts?: number;
+  webStatus?: WebEnquiryStatus;
+  consentAgreed?: boolean;
+}
+
+export interface WebEnquiry {
+  id: string;
+  referenceId: string;
+  name: string;
+  email: string;
+  phone: string;
+  businessName: string;
+  projectType: string;
+  timeline: string;
+  source: 'Web Enquiry';
+  details: WebEnquiryDetails;
+  status: WebEnquiryStatus;
+  createdAt: string;
+}
 
 export interface Lead {
   id: string;

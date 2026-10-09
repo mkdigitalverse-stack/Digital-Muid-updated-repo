@@ -7,6 +7,7 @@ import { isRazorpayConfigured, isWebhookConfigured } from "./server/razorpay.js"
 import { isSupabaseServerConfigured } from "./server/supabaseServer.js";
 import { handleRazorpayWebhook } from "./server/paymentWebhook.js";
 import paymentRoutes from "./server/paymentRoutes.js";
+import webEnquiryRoutes from "./server/webEnquiryRoutes.js";
 
 async function startServer() {
   const app = express();
@@ -54,7 +55,10 @@ async function startServer() {
   // 5. Payment Gateway APIs
   app.use("/api/payments", paymentRoutes);
 
-  // 6. API 404 handler - prevents unhandled API requests from returning index.html
+  // 6. Web Project Enquiries CRM APIs
+  app.use("/api/web-enquiries", webEnquiryRoutes);
+
+  // 7. API 404 handler - prevents unhandled API requests from returning index.html
   app.all("/api/*", (_req, res) => {
     res.status(404).json({ error: "API endpoint not found" });
   });

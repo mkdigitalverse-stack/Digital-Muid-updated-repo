@@ -20,6 +20,7 @@ import { FrameworkDetailPage } from './pages/FrameworkDetailPage';
 import { ResourcesPage } from './pages/ResourcesPage';
 import { SpeakingPage } from './pages/SpeakingPage';
 import { ServicesPage } from './pages/ServicesPage';
+import { WebPage } from './pages/WebPage';
 import { ConsultationPage } from './pages/ConsultationPage';
 import { ConsultationConfirmationPage } from './pages/ConsultationConfirmationPage';
 import { ContactPage } from './pages/ContactPage';
@@ -149,6 +150,9 @@ const MainApp: React.FC = () => {
     if (path.startsWith('/services/')) {
       const serviceSlug = path.replace('/services/', '');
       return <ServicesPage navigate={navigate} activeServiceSlug={serviceSlug} />;
+    }
+    if (path === '/web' || path === '/web-services' || path === '/web-development' || path === '/web-design') {
+      return <WebPage navigate={navigate} />;
     }
     if (path === '/blog') {
       return <InsightsPage navigate={navigate} />;

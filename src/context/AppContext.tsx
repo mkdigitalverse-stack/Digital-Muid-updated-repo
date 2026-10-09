@@ -24,6 +24,7 @@ import {
   certificateService,
   paymentService,
   courseWishlistService,
+  webEnquiryService,
   extractYouTubeVideoId,
   getYouTubeEmbedUrl,
   getYouTubeThumbnail,
@@ -54,7 +55,9 @@ import {
   BookmarkContentType,
   StudentBookmark,
   Certificate,
-  PaymentRecord
+  PaymentRecord,
+  WebEnquiry,
+  WebEnquiryStatus
 } from '../types';
 import {
   INITIAL_ARTICLES,
@@ -290,6 +293,23 @@ interface AppContextType {
   isAdminPaymentsLoading: boolean;
   adminPaymentsError: string | null;
   fetchAdminPayments: () => Promise<PaymentRecord[]>;
+
+  // Web Enquiries (CRM)
+  webEnquiries: WebEnquiry[];
+  isWebEnquiriesLoading: boolean;
+  webEnquiriesError: string | null;
+  fetchAdminWebEnquiries: () => Promise<WebEnquiry[]>;
+  updateWebEnquiry: (
+    id: string,
+    updates: {
+      status?: WebEnquiryStatus;
+      internalNotes?: string;
+      assignedTo?: string;
+      followUpDate?: string;
+      contactAttempts?: number;
+    }
+  ) => Promise<{ success: boolean; data?: WebEnquiry; error?: any }>;
+  deleteWebEnquiry: (id: string) => Promise<{ success: boolean; error?: any }>;
 
 
   // Global search & UI
@@ -833,6 +853,73 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsAdminPaymentsLoading(false);
     }
   }, []);
+
+  // Web Enquiries State & Operations
+  const [webEnquiries, setWebEnquiries] = useState<WebEnquiry[]>([]);
+  const [isWebEnquiriesLoading, setIsWebEnquiriesLoading] = useState<boolean>(false);
+  const [webEnquiriesError, setWebEnquiriesError] = useState<string | null>(null);
+
+  const fetchAdminWebEnquiries = useCallback(async (): Promise<WebEnquiry[]> => {
+    setIsWebEnquiriesLoading(true);
+    setWebEnquiriesError(null);
+    try {
+      const res = await webEnquiryService.fetchAdminWebEnquiries();
+      if (res.error && (!res.data || res.data.length === 0)) {
+        setWebEnquiriesError(typeof res.error === 'string' ? res.error : res.error?.message || 'Error loading web enquiries');
+      }
+      setWebEnquiries(res.data || []);
+      return res.data || [];
+    } catch (err: any) {
+      console.error('[AppContext] Error fetching admin web enquiries:', err);
+      setWebEnquiriesError(err?.message || 'Error loading web enquiries');
+      return [];
+    } finally {
+      setIsWebEnquiriesLoading(false);
+    }
+  }, []);
+
+  const updateWebEnquiry = useCallback(
+    async (
+      id: string,
+      updates: {
+        status?: WebEnquiryStatus;
+        internalNotes?: string;
+        assignedTo?: string;
+        followUpDate?: string;
+        contactAttempts?: number;
+      }
+    ): Promise<{ success: boolean; data?: WebEnquiry; error?: any }> => {
+      try {
+        const res = await webEnquiryService.updateWebEnquiry(id, updates);
+        if (res.success && res.data) {
+          setWebEnquiries((prev) =>
+            prev.map((item) => (item.id === id ? res.data! : item))
+          );
+        }
+        return res;
+      } catch (err: any) {
+        console.error('[AppContext] Error updating web enquiry:', err);
+        return { success: false, error: err };
+      }
+    },
+    []
+  );
+
+  const deleteWebEnquiry = useCallback(
+    async (id: string): Promise<{ success: boolean; error?: any }> => {
+      try {
+        const res = await webEnquiryService.deleteWebEnquiry(id);
+        if (res.success) {
+          setWebEnquiries((prev) => prev.filter((item) => item.id !== id));
+        }
+        return res;
+      } catch (err: any) {
+        console.error('[AppContext] Error deleting web enquiry:', err);
+        return { success: false, error: err };
+      }
+    },
+    []
+  );
 
 
   const refreshStudentEnrollments = useCallback(async (): Promise<void> => {
@@ -3625,6 +3712,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isAdminPaymentsLoading,
         adminPaymentsError,
         fetchAdminPayments,
+        webEnquiries,
+        isWebEnquiriesLoading,
+        webEnquiriesError,
+        fetchAdminWebEnquiries,
+        updateWebEnquiry,
+        deleteWebEnquiry,
         courseProgressMap,
         isProgressLoading,
         fetchCourseProgress,
