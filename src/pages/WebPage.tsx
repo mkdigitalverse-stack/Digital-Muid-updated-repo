@@ -10,46 +10,43 @@ import {
   Code2,
   CheckCircle2,
   ArrowRight,
-  ArrowLeft,
   ShieldCheck,
   Zap,
   Search,
   Layout,
-  MousePointerClick,
-  Sparkles,
-  HelpCircle,
-  Building2,
-  Rocket,
-  Briefcase,
-  ChevronRight,
-  ChevronLeft,
-  Send,
-  MessageSquare,
-  Lock,
-  Compass,
-  Layers,
-  ChevronDown,
-  AlertCircle,
-  Clock,
   ExternalLink,
-  Eye,
+  ChevronDown,
+  Building2,
+  CalendarCheck,
   GraduationCap,
   Plane,
-  CalendarCheck,
+  Eye,
+  Check,
+  ChevronLeft,
+  ChevronRight,
   Star,
   Quote,
-  Check,
-  Users
+  Sparkles,
+  HelpCircle,
+  Clock,
+  Compass,
+  MessageSquare,
+  Lock,
+  Layers,
+  Send,
+  Users,
+  Briefcase,
+  Rocket
 } from 'lucide-react';
 import { webEnquiryService } from '../services/webEnquiryService';
+
+// =========================================================================
+// TYPES & CONSTANTS
+// =========================================================================
 
 interface WebPageProps {
   navigate: (path: string) => void;
 }
-
-// =========================================================================
-// DATA STRUCTURES & DEFINITIONS
-// =========================================================================
 
 export const PROJECT_TYPES = [
   'New business website',
@@ -61,48 +58,46 @@ export const PROJECT_TYPES = [
   'Landing page',
   'Portfolio / Personal brand',
   'Custom web application',
-  'Not sure — need guidance'
+  'Not sure yet — need guidance'
 ];
 
 export const BUSINESS_STAGES = [
-  'Planning a new business',
-  'Business is already operating',
-  'Growing an existing business',
-  'Personal brand or portfolio',
-  'Other'
+  'Early idea or planning stage',
+  'Newly launched business',
+  'Established business looking to grow',
+  'Expanding or redesigning an existing presence'
 ];
 
-export const GOAL_OPTIONS = [
+export const GOALS_OPTIONS = [
   'Generate relevant enquiries',
   'Present my business professionally',
-  'Showcase services or work',
-  'Sell products online',
-  'Accept bookings or appointments',
-  'Deliver courses or online learning',
-  'Promote travel services or packages',
-  'Publish articles or resources',
+  'Showcase past work & portfolio',
+  'Sell products online (E-commerce)',
+  'Accept online bookings or appointments',
+  'Provide online learning or courses',
+  'Present travel packages and itineraries',
+  'Publish content, articles, or resources',
   'Improve an existing website',
-  'Other'
+  'Other custom requirement'
 ];
 
-export const FEATURE_OPTIONS = [
+export const FEATURES_OPTIONS = [
   'Contact form',
   'WhatsApp contact',
   'Online payments',
-  'Booking or appointment system',
-  'LMS, courses, or student dashboard',
-  'Product catalogue or online store',
-  'Blog or resource section',
-  'Customer login or dashboard',
+  'Booking functionality',
+  'LMS / student dashboard',
+  'E-commerce store',
+  'Blog or CMS',
+  'Customer login / portal',
   'Third-party software integration',
   'Not sure — need guidance'
 ];
 
 export const CONTENT_READINESS_OPTIONS = [
-  'My content is ready',
-  'Some content is ready',
-  'I need help preparing content',
-  'I am not sure what content is needed'
+  'Content is ready (text and images prepared)',
+  'Content is partially ready',
+  'Need help organizing and preparing content'
 ];
 
 export const TIMELINE_OPTIONS = [
@@ -151,7 +146,7 @@ export const PORTFOLIO_PROJECTS: PortfolioItem[] = [
     features: ['High-impact video reel showcase', 'Creative production portfolio', 'Direct client contact channels', 'Responsive media player support'],
     isVerified: true,
     status: 'Live Website',
-    gradientBg: 'from-amber-950/40 via-slate-900 to-[#0A1A2F]'
+    gradientBg: 'from-amber-100 via-orange-50 to-slate-100'
   },
   {
     id: 'galaxy-physio',
@@ -164,7 +159,7 @@ export const PORTFOLIO_PROJECTS: PortfolioItem[] = [
     features: ['Structured clinical service cards', 'Patient appointment enquiry channel', 'Clinic location & operating hours', 'Mobile-first patient navigation'],
     isVerified: true,
     status: 'Live Website',
-    gradientBg: 'from-emerald-950/40 via-slate-900 to-[#0A1A2F]'
+    gradientBg: 'from-emerald-100 via-teal-50 to-slate-100'
   },
   {
     id: 'mylinip',
@@ -177,7 +172,7 @@ export const PORTFOLIO_PROJECTS: PortfolioItem[] = [
     features: ['Clear business solutions overview', 'Intuitive onboarding pathways', 'Scalable component structure', 'Fast loading and search indexability'],
     isVerified: true,
     status: 'Live Website',
-    gradientBg: 'from-blue-950/40 via-slate-900 to-[#0A1A2F]'
+    gradientBg: 'from-blue-100 via-indigo-50 to-slate-100'
   },
   {
     id: 'the-ornate',
@@ -190,7 +185,7 @@ export const PORTFOLIO_PROJECTS: PortfolioItem[] = [
     features: ['Curated collection showcase', 'Visual brand storytelling', 'Direct concierge enquiry flow', 'High-fidelity product imagery layout'],
     isVerified: true,
     status: 'Live Website',
-    gradientBg: 'from-purple-950/40 via-slate-900 to-[#0A1A2F]'
+    gradientBg: 'from-purple-100 via-violet-50 to-slate-100'
   },
   {
     id: 'mk-digitalverse',
@@ -200,10 +195,10 @@ export const PORTFOLIO_PROJECTS: PortfolioItem[] = [
     categoryTag: 'Digital & Tech',
     description:
       'Performance-focused agency website showcasing digital marketing solutions, case studies, technology competencies, and client consultation funnels.',
-    features: ['Full-stack service matrix', 'Client growth case study previews', 'Integrated lead intake forms', 'Modern typography & dark mode design'],
+    features: ['Full-stack service matrix', 'Client growth case study previews', 'Integrated lead intake forms', 'Modern typography & clean design'],
     isVerified: true,
     status: 'Live Website',
-    gradientBg: 'from-cyan-950/40 via-slate-900 to-[#0A1A2F]'
+    gradientBg: 'from-cyan-100 via-sky-50 to-slate-100'
   },
   {
     id: 'the-venetian-garden',
@@ -212,11 +207,11 @@ export const PORTFOLIO_PROJECTS: PortfolioItem[] = [
     category: 'Venue & Event Hospitality Website',
     categoryTag: 'Venue & Events',
     description:
-      'Visual hospitality and event venue presentation featuring virtual facility tours, photo galleries, event packages, and venue booking enquiry forms.',
+      'Visual hospitality and event venue presentation featuring venue space photos, event packages, and venue booking enquiry forms.',
     features: ['Interactive venue space gallery', 'Event package breakdowns', 'Direct booking & date enquiry form', 'Location & visitor directions'],
     isVerified: true,
     status: 'Live Website',
-    gradientBg: 'from-rose-950/40 via-slate-900 to-[#0A1A2F]'
+    gradientBg: 'from-rose-100 via-pink-50 to-slate-100'
   },
   {
     id: 'reserved-project-7',
@@ -229,7 +224,7 @@ export const PORTFOLIO_PROJECTS: PortfolioItem[] = [
     features: ['Enterprise account authentication', 'Custom interactive analytics', 'API software integrations', 'Pending public launch confirmation'],
     isVerified: false,
     status: 'Upcoming Showcase',
-    gradientBg: 'from-slate-900 via-slate-950 to-[#07111F]'
+    gradientBg: 'from-slate-100 via-slate-50 to-slate-200'
   },
   {
     id: 'reserved-project-8',
@@ -242,7 +237,7 @@ export const PORTFOLIO_PROJECTS: PortfolioItem[] = [
     features: ['Structured lesson hierarchy', 'Student dashboard and bookmarking', 'Modular course curriculum', 'Pending public launch confirmation'],
     isVerified: false,
     status: 'Upcoming Showcase',
-    gradientBg: 'from-slate-900 via-slate-950 to-[#07111F]'
+    gradientBg: 'from-slate-100 via-slate-50 to-slate-200'
   }
 ];
 
@@ -368,26 +363,26 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
           '@type': 'ProfessionalService',
           '@id': 'https://digitalmuid.in/#organization',
           name: 'DigitalMUID',
-          url: 'https://digitalmuid.in',
-          logo: 'https://digitalmuid.in/favicon.ico',
-          description: 'Strategic web design, custom website development, and digital growth systems.'
+          url: 'https://digitalmuid.in/web',
+          description:
+            'Professional website design and development services helping businesses build credible online presence, custom web applications, LMS portals, and booking platforms.',
+          serviceType: 'Website Design and Web Development',
+          areaServed: 'Worldwide'
         },
         {
-          '@type': 'Service',
-          '@id': 'https://digitalmuid.in/web/#service',
-          name: 'Website Design & Development Services',
+          '@type': 'WebPage',
+          '@id': 'https://digitalmuid.in/web#webpage',
           url: 'https://digitalmuid.in/web',
-          provider: {
-            '@id': 'https://digitalmuid.in/#organization'
-          },
-          serviceType: 'Website Design & Development',
+          name: 'Website Design & Development Services | DigitalMUID',
           description:
-            'Professional website design and custom development services for businesses, startups, service providers, e-commerce, and institutions.',
-          areaServed: 'Worldwide'
+            'Explore website design and development services from DigitalMUID. Discuss your business website, redesign, e-commerce, LMS, booking website, travel website, or custom web development requirements.'
         }
       ]
     });
     document.head.appendChild(script);
+
+    // Scroll to top on mount
+    window.scrollTo({ top: 0, behavior: 'instant' });
 
     return () => {
       document.title = originalTitle;
@@ -486,7 +481,6 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
   // Scroll helpers
   const scrollToForm = (preselectedType?: string) => {
     if (preselectedType) {
-      // Find matching type in PROJECT_TYPES
       const matched = PROJECT_TYPES.find(
         (t) => t.toLowerCase().includes(preselectedType.toLowerCase()) || preselectedType.toLowerCase().includes(t.toLowerCase())
       ) || preselectedType;
@@ -621,12 +615,12 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
       }
 
       setSubmissionSuccess({
-        referenceId: res.referenceId || 'WEB-CONFIRMED',
+        referenceId: res.referenceId || 'MUID-WEB',
         clientName: fullName.trim(),
         business: businessName.trim()
       });
     } catch (err: any) {
-      setStepError(err?.message || 'A network error occurred. Please try again.');
+      setStepError(err.message || 'Network error occurred while submitting. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -647,7 +641,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
   };
 
   // -------------------------------------------------------------------------
-  // 9 Tailored Service Cards (Section 8)
+  // 9 Tailored Service Cards (Section B)
   // -------------------------------------------------------------------------
   const serviceCards = [
     {
@@ -728,35 +722,34 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
         'Online stores that present products and support suitable shopping and checkout functionality.',
       icon: ShoppingBag,
       highlights: [
-        'Intuitive product catalog with search and filters',
-        'Secure checkout with Razorpay, UPI, cards, and wallets',
-        'Inventory management & automated order notices',
-        'One-page streamlined mobile checkout experience'
+        'Product catalogs with organized categories',
+        'Frictionless mobile cart & checkout experience',
+        'Secure payment gateway integrations',
+        'Inventory tracking & order notification setup'
       ]
     },
     {
-      id: 'landing-pages',
+      id: 'landing-page',
       typeValue: 'Landing page',
-      title: 'Landing Pages',
+      title: 'Landing Page Design',
       shortDesc:
-        'Focused pages designed around a particular service, campaign, product, or customer action without distracting navigation.',
-      icon: MousePointerClick,
+        'Focused single-page websites designed to explain a specific service, product, campaign, or offer with a clear call to action.',
+      icon: Layout,
       highlights: [
-        'High-converting structure crafted for single action',
-        'Engineered for paid ad campaigns, launches, and events',
-        'Distraction-free layout with prominent enquiry forms',
-        'Rapid page load speeds and tracking pixel setup'
+        'Distraction-free high-conversion layout',
+        'Persuasive copy hierarchy & proof points',
+        'Fast mobile load speed for ad campaigns',
+        'Lead capture form with instant CRM integration'
       ]
     },
     {
-      id: 'custom-web',
+      id: 'custom-web-app',
       typeValue: 'Custom web application',
-      title: 'Custom Web Applications',
+      title: 'Custom Web Application Development',
       shortDesc:
-        'Tailored web-based systems, dashboards, portals, integrations, and other agreed functionality.',
+        'Websites and portals with tailored functionality, user logins, data workflows, or custom business logic.',
       icon: Code2,
       highlights: [
-        'Tailored client account portals and dashboards',
         'Custom database logic and automated workflows',
         'API integrations with existing CRMs & internal software',
         'Secure role-based permissions and access policies'
@@ -779,7 +772,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
   ];
 
   // -------------------------------------------------------------------------
-  // 8 Audience Cards (Section 9)
+  // 8 Audience Cards (Section C)
   // -------------------------------------------------------------------------
   const whoWeHelpList = [
     {
@@ -825,7 +818,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
   ];
 
   // -------------------------------------------------------------------------
-  // 10 Pillars (Section 10)
+  // 10 Pillars (Section D)
   // -------------------------------------------------------------------------
   const goodWebsitePillars = [
     {
@@ -849,50 +842,50 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
       icon: CalendarCheck
     },
     {
-      title: 'Search-engine-friendly structure',
-      desc: 'Clean semantic HTML, sensible headings, descriptive page titles, and crawlable links help search engines index your pages.',
+      title: 'Logical structure for search engines (SEO)',
+      desc: 'Clean semantic HTML tags, metadata, fast load speeds, and well-structured headings support search visibility.',
       icon: Search
     },
     {
-      title: 'Website performance',
-      desc: 'Optimized image assets, streamlined code, and modern hosting standards ensure pages load quickly without frustrating delays.',
+      title: 'Fast page loading speed',
+      desc: 'Optimized image assets and clean code reduce bounce rates and keep visitors engaged on your website.',
       icon: Zap
     },
     {
-      title: 'Appropriate security',
-      desc: 'Standard SSL encryption, explicit contact information, and transparent business credentials give prospects peace of mind.',
+      title: 'Clear visual trust factors',
+      desc: 'Legible typography, coherent brand colors, transparent contact channels, and consistent layouts build credibility.',
       icon: ShieldCheck
     },
     {
-      title: 'Clear calls to action',
-      desc: 'Every key page gives the visitor an obvious next step — whether sending an enquiry, booking a call, or buying a product.',
-      icon: MousePointerClick
+      title: 'Security and data protection',
+      desc: 'Modern HTTPS encryption, secure form processing, and spam protection keep client information safe.',
+      icon: Lock
     },
     {
-      title: 'Analytics & measurement where configured',
-      desc: 'Understand what visitors look at and which pages generate enquiries with privacy-friendly measurement tools.',
-      icon: Sparkles
+      title: 'Useful integrations where needed',
+      desc: 'Connect your website to payment gateways, analytics tools, CRM pipelines, and messaging channels.',
+      icon: Layers
     },
     {
-      title: 'Content-management options where included',
-      desc: 'Where agreed, we configure intuitive content tools so your team can comfortably update text or articles in-house.',
-      icon: Layout
+      title: 'Maintainability and growth readiness',
+      desc: 'A modular foundation that can expand as your business introduces new offerings or expands into new markets.',
+      icon: Clock
     }
   ];
 
   // -------------------------------------------------------------------------
-  // 6 Process Steps (Section 11)
+  // 6 Process Steps (Section E)
   // -------------------------------------------------------------------------
   const processSteps = [
     {
       step: 'Step 1',
-      title: 'Understand Your Business',
-      desc: 'We start by learning about your business, target audience, core services, and what specific outcomes you want the website to achieve.'
+      title: 'Understand Goals and Scope',
+      desc: 'We discuss your business, target audience, preferred website type, and must-have functionality before suggesting a path.'
     },
     {
       step: 'Step 2',
-      title: 'Plan the Website',
-      desc: 'Together we establish the sitemap, page structure, content requirements, key features, and agreed overall scope.'
+      title: 'Plan the Structure',
+      desc: 'We map out the sitemap, page hierarchy, and essential content requirements to ensure intuitive user flows.'
     },
     {
       step: 'Step 3',
@@ -917,7 +910,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
   ];
 
   // -------------------------------------------------------------------------
-  // 13 Capabilities (Section 15)
+  // Capabilities & Why DigitalMUID Principles (Section I)
   // -------------------------------------------------------------------------
   const capabilitiesList = [
     'Responsive mobile-friendly design',
@@ -935,9 +928,6 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
     'Content management options'
   ];
 
-  // -------------------------------------------------------------------------
-  // Why DigitalMUID Principles (Section 16)
-  // -------------------------------------------------------------------------
   const whyMuidPrinciples = [
     {
       title: 'Understand business needs before recommending a solution',
@@ -958,86 +948,86 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
     {
       title: 'Test important functionality before launch',
       desc: 'Every form, button, mobile breakpoint, and page link is verified before your website goes live to the public.'
-    },
-    {
-      title: 'Communicate project expectations clearly',
-      desc: 'From kickoff to final launch, you receive transparent updates and prompt answers to all questions.'
     }
   ];
 
   // -------------------------------------------------------------------------
-  // 10 Exact FAQs (Section 17 - NO PRICING)
+  // FAQs (Section J)
   // -------------------------------------------------------------------------
   const faqs = [
     {
-      q: 'What type of website does my business need?',
-      a: 'The right website depends entirely on your business goals. If your objective is establishing credibility and generating client enquiries, a clean business website is ideal. If you sell physical or digital goods, an e-commerce platform is required. If you schedule consultations or deliver education, booking or LMS functionality can be integrated. We help you explore options during our initial scoping discussion.'
+      q: 'What types of websites can DigitalMUID develop?',
+      a: 'We develop business websites, website redesigns, booking websites, LMS and e-learning portals, travel and tourism platforms, e-commerce stores, landing pages, custom web applications, and personal brand portfolios.'
     },
     {
-      q: 'Can you redesign my existing website?',
-      a: 'Yes. We regularly help companies revamp outdated, slow, or difficult-to-navigate websites. We preserve your existing brand identity, migrate important content, protect established search engine URLs where applicable, and modernize your design for mobile devices and higher conversion rates.'
+      q: 'Can you redesign an existing website?',
+      a: 'Yes. We frequently help businesses modernize older, slow, or poorly structured websites. We improve aesthetics, optimize mobile responsiveness, clean up navigation paths, and ensure your critical content and search visibility are preserved.'
     },
     {
-      q: 'Can you build an LMS or e-learning website?',
-      a: 'Yes. We build custom and modular e-learning platforms with structured video courses, lesson modules, student dashboards, progress tracking, and certificate delivery based on your specific curriculum and requirements.'
+      q: 'Can a website be designed for mobile users?',
+      a: 'Every website we build is fully responsive by default. We design layouts, tap targets, font sizes, and forms specifically to provide an effortless experience on smartphones, tablets, laptops, and desktop screens.'
     },
     {
-      q: 'Can you create booking websites?',
-      a: 'Yes. We build appointment and scheduling workflows for consultants, healthcare clinics, service providers, and venues, allowing customers to easily request slots and receive confirmations.'
+      q: 'Can booking or payment functionality be integrated?',
+      a: 'Yes, where suitable for your business model and technical requirements. We can integrate online payment gateways (like Razorpay, Stripe, or UPI) and structured booking or consultation scheduling systems.'
     },
     {
-      q: 'Can you build websites for travel and tourism businesses?',
-      a: 'Yes. We design travel platforms with destination guides, detailed tour package breakdowns, day-by-day itineraries, photo galleries, and custom itinerary quotation forms.'
+      q: 'Can you develop an LMS or e-learning website?',
+      a: 'Yes. We design educational websites and learning management systems with course modules, video lessons, student dashboards, resource downloads, and progress tracking tailored to course creators and training academies.'
     },
     {
-      q: 'Can my website accept online payments?',
-      a: 'Yes. Where agreed and technically appropriate for your jurisdiction, we integrate verified payment gateways such as Razorpay, Stripe, UPI, credit/debit cards, and digital wallets with secure checkout workflows.'
+      q: 'Can you help with SEO-friendly website structure?',
+      a: 'Yes. We build websites using semantic HTML, clean URL structures, fast loading speeds, meta tag optimization, OpenGraph social cards, and schema structured data to give your business a solid foundation for search engines.'
     },
     {
-      q: 'Will my website rank on Google?',
-      a: 'We build every website with clean semantic HTML, descriptive metadata, mobile optimization, fast page speeds, and sensible internal linking. These provide a solid technical SEO foundation for search engine indexing. We do not make misleading guarantees of instant first-page rankings, as long-term ranking depends on ongoing content quality, competitive authority, and search engine algorithms.'
+      q: 'What information should I prepare before starting?',
+      a: 'It is helpful to have an overview of your business services, target audience, preferred branding guidelines or colors, and any reference websites you admire. If your copy and media are still being prepared, we can guide you through structuring them.'
     },
     {
-      q: 'Can I update my website after launch?',
-      a: 'Yes. If included in the agreed project scope, we configure straightforward content management tools so your team can easily edit text, publish articles, add case studies, or update services without technical coding knowledge.'
+      q: 'Can I discuss a project even if my requirements are not finalized?',
+      a: 'Yes. You do not need a completed specification document to start. Simply share your general goals and current business stage through our enquiry form, and we will help you clarify what makes practical sense for your scope and timeline.'
     },
     {
-      q: 'How long does a website project take?',
-      a: 'Project timelines vary based on scope, feature complexity, and content readiness. A focused landing page or business website typically takes 2 to 4 weeks. More comprehensive e-commerce stores, LMS platforms, or booking websites generally take 4 to 8 weeks. We agree on a realistic, dependable schedule before kickoff.'
+      q: 'How long does a typical website project take?',
+      a: 'Timelines depend on scope and readiness. A focused landing page or small business website may take 2 to 3 weeks, while comprehensive platforms, e-commerce stores, or custom LMS portals typically take 4 to 8 weeks with agreed milestones.'
     },
     {
-      q: 'Can I enquire if I do not understand technical requirements?',
-      a: 'Absolutely. Most of our clients are business owners, leaders, and creative professionals rather than developers. You only need to know what you want your website to achieve for your business. We will guide you through the technical choices step by step.'
+      q: 'Do I need technical skills to manage my website after launch?',
+      a: 'No. Most of our clients are business owners, leaders, and creative professionals rather than developers. You only need to know what you want your website to achieve for your business. We will guide you through the technical choices step by step.'
     }
   ];
 
+  // =========================================================================
+  // RENDER (70% Light / 20% Blue / 10% Orange Visual Balance)
+  // =========================================================================
+
   return (
-    <div className="min-h-screen bg-[#07111F] text-slate-100 font-sans selection:bg-[#FF6B00] selection:text-white">
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans selection:bg-[#FF6B00] selection:text-white">
       {/* ========================================================================= */}
-      {/* SECTION 1: HERO (Part B, Sec 7) */}
+      {/* SECTION A: HERO (Light 70% foundation with brand blue typography & orange CTA) */}
       {/* ========================================================================= */}
-      <section className="relative pt-12 pb-20 sm:pt-20 sm:pb-28 overflow-hidden border-b border-white/10">
-        {/* Subtle Ambient Background Gradients */}
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] sm:w-[900px] h-[400px] bg-gradient-to-tr from-[#1877F2]/15 via-[#FF6B00]/10 to-transparent rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute top-10 right-10 w-72 h-72 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
+      <section className="relative pt-12 pb-20 sm:pt-20 sm:pb-28 overflow-hidden bg-gradient-to-b from-white via-slate-50 to-[#F8FAFC] border-b border-slate-200/80">
+        {/* Subtle Ambient Brand Glow */}
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] sm:w-[900px] h-[400px] bg-gradient-to-tr from-[#1877F2]/10 via-[#FF6B00]/5 to-transparent rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute top-10 right-10 w-72 h-72 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 items-center">
             {/* Left Column: Heading, Supporting Text & CTAs */}
             <div className="lg:col-span-7 space-y-6 text-left">
-              <div className="flex items-center gap-2 text-xs text-slate-400">
+              <div className="flex items-center gap-2 text-xs text-slate-500">
                 <Globe className="w-3.5 h-3.5 text-[#FF6B00]" />
-                <span className="font-semibold text-slate-300">DigitalMUID Web Services</span>
-                <span aria-hidden="true" className="text-slate-600">·</span>
-                <span>Custom Design & Full-Stack Development</span>
+                <span className="font-semibold text-[#0A1A2F]">DigitalMUID Web Services</span>
+                <span aria-hidden="true" className="text-slate-400">·</span>
+                <span>Custom Design & Web Development</span>
               </div>
 
-              <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-5xl font-display font-extrabold text-white tracking-tight leading-[1.15]">
+              <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-5xl font-display font-extrabold text-[#0A1A2F] tracking-tight leading-[1.15]">
                 Website Design & Development Services That Help Your Business Grow
               </h1>
 
-              <p className="text-base sm:text-lg text-slate-300 leading-relaxed max-w-2xl font-light">
-                Your website is often the first place people learn about your business. DigitalMUID helps you build a professional online presence that explains what you do, builds trust, and makes it easier for customers to connect with you.
+              <p className="text-base sm:text-lg text-slate-600 leading-relaxed max-w-2xl font-normal">
+                Your website should do more than look good. DigitalMUID helps businesses create professional, user-friendly websites that communicate clearly, build trust, showcase services, and support business growth.
               </p>
 
               {/* CTAs */}
@@ -1054,45 +1044,45 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                 <button
                   type="button"
                   onClick={scrollToPortfolio}
-                  className="px-6 py-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 text-slate-200 hover:text-white font-medium text-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  className="px-6 py-3.5 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-[#0A1A2F] font-semibold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
                 >
-                  <Eye className="w-4 h-4 text-slate-400" />
+                  <Eye className="w-4 h-4 text-slate-500" />
                   <span>Explore Our Work</span>
                 </button>
               </div>
 
-              {/* Verified Trust Pillars (Zero-pill text format) */}
-              <div className="pt-4 border-t border-white/10 flex flex-wrap items-center gap-y-2 gap-x-4 text-xs text-slate-400">
+              {/* Verified Trust Pillars */}
+              <div className="pt-4 border-t border-slate-200/80 flex flex-wrap items-center gap-y-2 gap-x-4 text-xs text-slate-600">
                 <div className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>100% Mobile Responsive</span>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-medium text-slate-700">100% Mobile Responsive</span>
                 </div>
-                <span aria-hidden="true" className="text-slate-700 hidden sm:inline">·</span>
+                <span aria-hidden="true" className="text-slate-300 hidden sm:inline">·</span>
                 <div className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>Fast Loading & SEO-Structured</span>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-medium text-slate-700">Fast Loading & SEO-Structured</span>
                 </div>
-                <span aria-hidden="true" className="text-slate-700 hidden sm:inline">·</span>
+                <span aria-hidden="true" className="text-slate-300 hidden sm:inline">·</span>
                 <div className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>Real CRM-Integrated Enquiries</span>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="font-medium text-slate-700">Real CRM-Integrated Enquiries</span>
                 </div>
               </div>
             </div>
 
-            {/* Right Column: Visual Device Mockup */}
+            {/* Right Column: Visual Device Mockup (Clean Light/Dark Hybrid Frame) */}
             <div className="lg:col-span-5">
               <div className="relative mx-auto max-w-md lg:max-w-none">
                 {/* Desktop Screen Mockup Frame */}
-                <div className="rounded-2xl bg-[#0A1A2F] border border-white/15 shadow-2xl p-3 sm:p-4 backdrop-blur-md relative overflow-hidden">
+                <div className="rounded-2xl bg-white border border-slate-200 shadow-2xl p-3 sm:p-4 relative overflow-hidden">
                   {/* Browser Bar */}
-                  <div className="flex items-center justify-between pb-3 border-b border-white/10 text-xs text-slate-400">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100 text-xs text-slate-400">
                     <div className="flex items-center gap-1.5">
-                      <div className="w-2.5 h-2.5 rounded-full bg-rose-500/80" />
-                      <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
-                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-rose-400" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
                     </div>
-                    <div className="px-3 py-1 rounded-md bg-white/5 border border-white/10 text-[11px] text-slate-300 font-mono truncate max-w-[200px]">
+                    <div className="px-3 py-1 rounded-md bg-slate-100 text-[11px] text-slate-600 font-mono truncate max-w-[200px]">
                       https://yourbusiness.in
                     </div>
                     <div className="w-4" />
@@ -1101,14 +1091,14 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                   {/* Browser Content Preview */}
                   <div className="pt-3 space-y-3">
                     {/* Mock Nav */}
-                    <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-white/5 text-[11px]">
+                    <div className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-100 text-[11px]">
                       <div className="flex items-center gap-1.5">
                         <div className="w-4 h-4 rounded bg-[#FF6B00] flex items-center justify-center text-[9px] font-bold text-white">
                           M
                         </div>
-                        <span className="font-bold text-white">Your Brand</span>
+                        <span className="font-bold text-[#0A1A2F]">Your Brand</span>
                       </div>
-                      <div className="hidden sm:flex items-center gap-2.5 text-slate-400 text-[10px]">
+                      <div className="hidden sm:flex items-center gap-2.5 text-slate-500 text-[10px]">
                         <span>Services</span>
                         <span>Portfolio</span>
                         <span>About</span>
@@ -1119,21 +1109,21 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                     </div>
 
                     {/* Mock Hero Content */}
-                    <div className="p-4 rounded-xl bg-gradient-to-br from-white/5 to-transparent border border-white/5 space-y-2 text-left">
-                      <div className="text-[10px] text-blue-400 font-semibold uppercase tracking-wider">
+                    <div className="p-4 rounded-xl bg-gradient-to-br from-blue-50/60 to-slate-50 border border-blue-100 space-y-2 text-left">
+                      <div className="text-[10px] text-[#1877F2] font-bold uppercase tracking-wider">
                         Tailored Online Presence
                       </div>
-                      <h4 className="text-sm sm:text-base font-bold text-white leading-tight">
+                      <h4 className="text-sm sm:text-base font-bold text-[#0A1A2F] leading-tight">
                         Transforming Visitors Into Qualified Customer Enquiries
                       </h4>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                      <p className="text-[11px] text-slate-600 leading-relaxed">
                         Clear messaging, mobile-first design, fast loading speeds, and an intuitive customer journey.
                       </p>
                       <div className="pt-1 flex items-center gap-2">
                         <div className="px-3 py-1 rounded bg-[#FF6B00] text-white text-[10px] font-semibold">
                           Discuss Scope
                         </div>
-                        <div className="px-3 py-1 rounded bg-white/10 text-slate-300 text-[10px]">
+                        <div className="px-3 py-1 rounded bg-white border border-slate-200 text-slate-700 text-[10px] font-medium">
                           View Work
                         </div>
                       </div>
@@ -1141,37 +1131,37 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
 
                     {/* Mock Service Highlights */}
                     <div className="grid grid-cols-2 gap-2 text-left">
-                      <div className="p-2.5 rounded-lg bg-white/5 border border-white/5 space-y-1">
-                        <div className="w-5 h-5 rounded bg-blue-500/20 text-blue-400 flex items-center justify-center text-[10px]">
+                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100 space-y-1">
+                        <div className="w-5 h-5 rounded bg-blue-100 text-[#1877F2] flex items-center justify-center text-[10px]">
                           <Zap className="w-3 h-3" />
                         </div>
-                        <div className="text-[11px] font-semibold text-white">Fast & Responsive</div>
-                        <div className="text-[9px] text-slate-400">Flawless on phone, tablet & desktop.</div>
+                        <div className="text-[11px] font-semibold text-[#0A1A2F]">Fast & Responsive</div>
+                        <div className="text-[9px] text-slate-500">Flawless on phone, tablet & desktop.</div>
                       </div>
-                      <div className="p-2.5 rounded-lg bg-white/5 border border-white/5 space-y-1">
-                        <div className="w-5 h-5 rounded bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-[10px]">
+                      <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100 space-y-1">
+                        <div className="w-5 h-5 rounded bg-emerald-100 text-emerald-600 flex items-center justify-center text-[10px]">
                           <ShieldCheck className="w-3 h-3" />
                         </div>
-                        <div className="text-[11px] font-semibold text-white">Trust & Credibility</div>
-                        <div className="text-[9px] text-slate-400">Structured proof & clear calls to action.</div>
+                        <div className="text-[11px] font-semibold text-[#0A1A2F]">Trust & Credibility</div>
+                        <div className="text-[9px] text-slate-500">Structured proof & clear conversion.</div>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 {/* Mobile Preview Overlay Badge */}
-                <div className="absolute -bottom-5 -right-3 sm:-right-5 w-44 sm:w-48 p-3 rounded-xl bg-[#07111F] border border-white/20 shadow-2xl space-y-1.5 backdrop-blur-lg">
+                <div className="absolute -bottom-5 -right-3 sm:-right-5 w-44 sm:w-48 p-3 rounded-xl bg-white border border-slate-200 shadow-xl space-y-1.5">
                   <div className="flex items-center justify-between text-[10px]">
-                    <span className="font-semibold text-white flex items-center gap-1">
+                    <span className="font-semibold text-[#0A1A2F] flex items-center gap-1">
                       <Smartphone className="w-3 h-3 text-[#FF6B00]" />
                       Mobile Optimized
                     </span>
-                    <span className="text-emerald-400 font-bold">Fast</span>
+                    <span className="text-emerald-600 font-bold">Fast</span>
                   </div>
-                  <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                    <div className="h-full bg-emerald-400 rounded-full w-4/5" />
+                  <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                    <div className="h-full bg-emerald-500 rounded-full w-4/5" />
                   </div>
-                  <p className="text-[9px] text-slate-400">Engineered for real conversion across smartphones.</p>
+                  <p className="text-[9px] text-slate-500">Engineered for real conversion across smartphones.</p>
                 </div>
               </div>
             </div>
@@ -1180,19 +1170,19 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
       </section>
 
       {/* ========================================================================= */}
-      {/* SECTION 2: SERVICES OVERVIEW (Part B, Sec 8 - 9 Cards) */}
+      {/* SECTION B: WEBSITE SERVICES (Light 70% with 9 Service Cards) */}
       {/* ========================================================================= */}
-      <section id="services-section" className="py-20 sm:py-24 border-b border-white/10 relative">
+      <section id="services-section" className="py-20 sm:py-24 bg-white border-b border-slate-200/80 relative">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto space-y-4 mb-14">
-            <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
+            <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
               <Sparkles className="w-3.5 h-3.5 text-[#FF6B00]" />
-              <span className="uppercase tracking-wider font-semibold text-slate-300">Service Capabilities</span>
+              <span className="uppercase tracking-wider font-semibold text-[#0A1A2F]">Service Capabilities</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-white tracking-tight">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-[#0A1A2F] tracking-tight">
               Website Solutions for Different Business Needs
             </h2>
-            <p className="text-base text-slate-300 leading-relaxed font-light">
+            <p className="text-base text-slate-600 leading-relaxed font-normal">
               Whether you are building your first website, improving an existing one, or planning a more advanced online experience, we can help you explore the right solution for your goals.
             </p>
           </div>
@@ -1203,40 +1193,40 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
               return (
                 <div
                   key={service.id}
-                  className="rounded-2xl bg-[#0A1A2F]/80 hover:bg-[#0A1A2F] border border-white/10 hover:border-white/20 p-6 sm:p-7 flex flex-col justify-between transition-all duration-200 group shadow-lg"
+                  className="rounded-2xl bg-slate-50/80 hover:bg-white border border-slate-200/90 hover:border-blue-400/60 p-6 sm:p-7 flex flex-col justify-between transition-all duration-200 group shadow-sm hover:shadow-md"
                 >
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <div className="w-12 h-12 rounded-xl flex items-center justify-center border border-white/10 bg-white/5 text-[#FF6B00] group-hover:bg-[#FF6B00]/15 group-hover:border-[#FF6B00]/30 transition-all">
+                      <div className="w-12 h-12 rounded-xl flex items-center justify-center border border-blue-100 bg-blue-50 text-[#1877F2] group-hover:bg-[#FF6B00] group-hover:text-white group-hover:border-[#FF6B00] transition-all">
                         <Icon className="w-6 h-6" />
                       </div>
-                      <span className="text-[11px] text-slate-500 font-mono">Service</span>
+                      <span className="text-[11px] text-slate-400 font-mono">Service</span>
                     </div>
 
                     <div>
-                      <h3 className="text-lg sm:text-xl font-display font-bold text-white group-hover:text-[#FF6B00] transition-colors">
+                      <h3 className="text-lg sm:text-xl font-display font-bold text-[#0A1A2F] group-hover:text-[#1877F2] transition-colors">
                         {service.title}
                       </h3>
-                      <p className="text-xs sm:text-sm text-slate-300 mt-2 leading-relaxed">
+                      <p className="text-xs sm:text-sm text-slate-600 mt-2 leading-relaxed">
                         {service.shortDesc}
                       </p>
                     </div>
 
-                    <div className="pt-2 border-t border-white/5 space-y-2">
+                    <div className="pt-2 border-t border-slate-200/60 space-y-2">
                       {service.highlights.map((item, idx) => (
-                        <div key={idx} className="flex items-start gap-2 text-xs text-slate-300">
-                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                        <div key={idx} className="flex items-start gap-2 text-xs text-slate-700">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
                           <span>{item}</span>
                         </div>
                       ))}
                     </div>
                   </div>
 
-                  <div className="pt-6 mt-6 border-t border-white/10">
+                  <div className="pt-6 mt-6 border-t border-slate-200/70">
                     <button
                       type="button"
                       onClick={() => scrollToForm(service.typeValue)}
-                      className="w-full py-2.5 px-4 rounded-xl bg-white/5 hover:bg-[#FF6B00] text-slate-200 hover:text-white border border-white/10 hover:border-[#FF6B00] text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer"
+                      className="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-[#FF6B00] text-slate-700 hover:text-white border border-slate-300 hover:border-[#FF6B00] text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm hover:shadow"
                     >
                       <span>Discuss This Service</span>
                       <ArrowRight className="w-3.5 h-3.5" />
@@ -1247,26 +1237,26 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
             })}
           </div>
 
-          <p className="text-center text-xs text-slate-400 mt-8 max-w-2xl mx-auto">
+          <p className="text-center text-xs text-slate-500 mt-8 max-w-2xl mx-auto">
             Available features depend on your project requirements, technical feasibility, third-party services, and the scope agreed for your website.
           </p>
         </div>
       </section>
 
       {/* ========================================================================= */}
-      {/* SECTION 3: WHO WE HELP (Part B, Sec 9 - 8 Cards) */}
+      {/* SECTION C: WHO WE HELP (Light 70% with 8 Audience Cards) */}
       {/* ========================================================================= */}
-      <section className="py-20 sm:py-24 border-b border-white/10 bg-[#060E1A]/60 relative">
+      <section className="py-20 sm:py-24 bg-[#F8FAFC] border-b border-slate-200/80 relative">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto space-y-4 mb-14">
-            <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
+            <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
               <Users className="w-3.5 h-3.5 text-[#FF6B00]" />
-              <span className="uppercase tracking-wider font-semibold text-slate-300">Tailored Partnerships</span>
+              <span className="uppercase tracking-wider font-semibold text-[#0A1A2F]">Audience Alignment</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-white tracking-tight">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-[#0A1A2F] tracking-tight">
               Websites Designed Around Your Business Goals
             </h2>
-            <p className="text-base text-slate-300 leading-relaxed font-light">
+            <p className="text-base text-slate-600 leading-relaxed font-normal">
               We work with founders, leaders, and professionals across diverse stages who value clear communication and real business utility.
             </p>
           </div>
@@ -1277,15 +1267,15 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
               return (
                 <div
                   key={idx}
-                  className="rounded-2xl bg-[#0A1A2F]/60 border border-white/10 p-6 space-y-3 hover:border-white/20 transition-all text-left"
+                  className="rounded-2xl bg-white border border-slate-200 p-6 space-y-3 hover:border-blue-400/50 hover:shadow-md transition-all text-left shadow-sm"
                 >
-                  <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-[#FF6B00]">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-[#1877F2]">
                     <Icon className="w-5 h-5" />
                   </div>
-                  <h3 className="text-sm sm:text-base font-bold text-white">
+                  <h3 className="text-sm sm:text-base font-bold text-[#0A1A2F]">
                     {item.title}
                   </h3>
-                  <p className="text-xs text-slate-300 leading-relaxed">
+                  <p className="text-xs text-slate-600 leading-relaxed">
                     {item.desc}
                   </p>
                 </div>
@@ -1296,19 +1286,19 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
       </section>
 
       {/* ========================================================================= */}
-      {/* SECTION 4: WEBSITE QUALITY AND BENEFITS (Part B, Sec 10 - 10 Pillars) */}
+      {/* SECTION D: WHAT MAKES A USEFUL BUSINESS WEBSITE? (10 Quality Pillars) */}
       {/* ========================================================================= */}
-      <section className="py-20 sm:py-24 border-b border-white/10 relative">
+      <section className="py-20 sm:py-24 bg-white border-b border-slate-200/80 relative">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto space-y-4 mb-14">
-            <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
+            <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
               <ShieldCheck className="w-3.5 h-3.5 text-[#FF6B00]" />
-              <span className="uppercase tracking-wider font-semibold text-slate-300">Core Quality Standards</span>
+              <span className="uppercase tracking-wider font-semibold text-[#0A1A2F]">Core Standards</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-white tracking-tight">
-              More Than Just a Good-Looking Website
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-[#0A1A2F] tracking-tight">
+              What Makes a Useful Business Website?
             </h2>
-            <p className="text-base text-slate-300 leading-relaxed font-light">
+            <p className="text-base text-slate-600 leading-relaxed font-normal">
               Visual aesthetics matter, but a truly successful website balances messaging clarity, technical reliability, user comfort, and conversion focus.
             </p>
           </div>
@@ -1319,28 +1309,28 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
               return (
                 <div
                   key={idx}
-                  className="p-5 rounded-2xl bg-[#0A1A2F]/60 border border-white/10 space-y-2.5 text-left hover:bg-[#0A1A2F] transition-all"
+                  className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5 text-left hover:bg-white hover:shadow-md transition-all"
                 >
-                  <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-100 text-[#1877F2] flex items-center justify-center">
                     <Icon className="w-4 h-4" />
                   </div>
-                  <h3 className="text-xs sm:text-sm font-bold text-white leading-tight">{pillar.title}</h3>
-                  <p className="text-[11px] sm:text-xs text-slate-300 leading-relaxed">{pillar.desc}</p>
+                  <h3 className="text-xs sm:text-sm font-bold text-[#0A1A2F] leading-tight">{pillar.title}</h3>
+                  <p className="text-[11px] sm:text-xs text-slate-600 leading-relaxed">{pillar.desc}</p>
                 </div>
               );
             })}
           </div>
 
-          <div className="mt-12 p-4 rounded-xl bg-white/5 border border-white/10 max-w-2xl mx-auto text-center text-xs text-slate-400">
+          <div className="mt-12 p-4 rounded-xl bg-slate-50 border border-slate-200 max-w-2xl mx-auto text-center text-xs text-slate-500">
             We follow proven design and development best practices without making unsupported guarantees about overnight search rankings, sudden viral traffic, or unrealistic revenue spikes.
           </div>
         </div>
       </section>
 
       {/* ========================================================================= */}
-      {/* SECTION 5: OUR PROCESS (Part B, Sec 11 - 6 Steps) */}
+      {/* SECTION E: OUR PROCESS (20% Brand Blue Section Transition) */}
       {/* ========================================================================= */}
-      <section className="py-20 sm:py-24 border-b border-white/10 bg-[#060E1A]/60 relative">
+      <section className="py-20 sm:py-24 bg-[#0A1A2F] text-white border-b border-[#0A1A2F] relative">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto space-y-4 mb-14">
             <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
@@ -1359,13 +1349,13 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
             {processSteps.map((step, idx) => (
               <div
                 key={idx}
-                className="relative rounded-2xl bg-[#0A1A2F] border border-white/10 p-6 sm:p-7 space-y-3 text-left hover:border-white/20 transition-all shadow-lg"
+                className="relative rounded-2xl bg-[#0F233A] border border-white/10 p-6 sm:p-7 space-y-3 text-left hover:border-white/25 transition-all shadow-lg"
               >
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-mono font-bold text-[#FF6B00]">
                     {step.step}
                   </span>
-                  <span className="text-slate-500 font-mono">0{idx + 1}</span>
+                  <span className="text-slate-400 font-mono">0{idx + 1}</span>
                 </div>
                 <h3 className="text-base sm:text-lg font-bold text-white pt-1">
                   {step.title}
@@ -1384,25 +1374,25 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
       </section>
 
       {/* ========================================================================= */}
-      {/* PART C: PORTFOLIO SECTION WITH REAL WEBSITE LINKS (Sec 12) */}
+      {/* SECTION F: PORTFOLIO SHOWCASE (Light 70% with verified project links) */}
       {/* ========================================================================= */}
-      <section ref={portfolioRef} id="portfolio" className="py-20 sm:py-28 border-b border-white/10 relative">
+      <section ref={portfolioRef} id="portfolio" className="py-20 sm:py-28 bg-[#F8FAFC] border-b border-slate-200/80 relative">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto space-y-4 mb-10">
-            <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
+            <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
               <Monitor className="w-3.5 h-3.5 text-[#FF6B00]" />
-              <span className="uppercase tracking-wider font-semibold text-slate-300">Client Projects & Work</span>
+              <span className="uppercase tracking-wider font-semibold text-[#0A1A2F]">Portfolio & Case Studies</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-white tracking-tight">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-[#0A1A2F] tracking-tight">
               Our Website Portfolio
             </h2>
-            <p className="text-base text-slate-300 leading-relaxed font-light">
+            <p className="text-base text-slate-600 leading-relaxed font-normal">
               Explore website projects across different industries and business needs. Each project offers an example of how a website can present a brand, communicate its services, or support a customer journey.
             </p>
           </div>
 
-          {/* Interactive Category Filter Controls (Buttons/Tabs per zero-pill discipline) */}
-          <div className="flex flex-wrap items-center justify-center gap-1.5 p-1.5 rounded-2xl bg-slate-900/90 border border-slate-800 max-w-2xl mx-auto mb-12">
+          {/* Interactive Category Filter Controls (Zero-pill button group) */}
+          <div className="flex flex-wrap items-center justify-center gap-1.5 p-1.5 rounded-2xl bg-white border border-slate-200 shadow-sm max-w-2xl mx-auto mb-12">
             {PORTFOLIO_CATEGORIES.map((cat) => {
               const isSelected = selectedPortfolioCategory === cat;
               return (
@@ -1410,10 +1400,10 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                   key={cat}
                   type="button"
                   onClick={() => setSelectedPortfolioCategory(cat)}
-                  className={`px-3.5 py-1.5 text-xs font-medium rounded-xl transition-all cursor-pointer ${
+                  className={`px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
                     isSelected
-                      ? 'bg-[#FF6B00] text-white font-semibold shadow-md shadow-[#FF6B00]/20'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                      ? 'bg-[#FF6B00] text-white shadow-md shadow-[#FF6B00]/20'
+                      : 'text-slate-600 hover:text-[#0A1A2F] hover:bg-slate-100'
                   }`}
                 >
                   {cat}
@@ -1427,38 +1417,38 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
             {filteredPortfolio.map((item) => (
               <div
                 key={item.id}
-                className="rounded-2xl bg-[#0A1A2F] border border-white/10 hover:border-white/25 overflow-hidden flex flex-col justify-between transition-all duration-200 group shadow-xl"
+                className="rounded-2xl bg-white border border-slate-200/90 hover:border-blue-400/60 overflow-hidden flex flex-col justify-between transition-all duration-200 group shadow-sm hover:shadow-lg"
               >
                 {/* Visual Preview / Browser Frame */}
                 <div>
-                  <div className={`h-48 w-full bg-gradient-to-br ${item.gradientBg} p-4 border-b border-white/10 flex flex-col justify-between relative`}>
+                  <div className={`h-48 w-full bg-gradient-to-br ${item.gradientBg} p-4 border-b border-slate-200 flex flex-col justify-between relative`}>
                     {/* Browser chrome header */}
-                    <div className="flex items-center justify-between text-xs text-slate-400">
+                    <div className="flex items-center justify-between text-xs text-slate-500">
                       <div className="flex items-center gap-1.5">
-                        <div className="w-2 h-2 rounded-full bg-rose-500/80" />
-                        <div className="w-2 h-2 rounded-full bg-amber-500/80" />
-                        <div className="w-2 h-2 rounded-full bg-emerald-500/80" />
+                        <div className="w-2 h-2 rounded-full bg-rose-400" />
+                        <div className="w-2 h-2 rounded-full bg-amber-400" />
+                        <div className="w-2 h-2 rounded-full bg-emerald-400" />
                       </div>
-                      <span className="text-[10px] font-mono text-slate-400 truncate max-w-[170px]">
+                      <span className="text-[10px] font-mono text-slate-500 truncate max-w-[170px]">
                         {item.url !== '#' ? item.url.replace('https://', '') : 'In Development'}
                       </span>
                     </div>
 
                     {/* Brand card representation */}
                     <div className="text-left space-y-1">
-                      <div className="text-lg font-display font-bold text-white group-hover:text-[#FF6B00] transition-colors">
+                      <div className="text-lg font-display font-bold text-[#0A1A2F] group-hover:text-[#1877F2] transition-colors">
                         {item.name}
                       </div>
-                      <div className="text-xs text-slate-400">
+                      <div className="text-xs text-slate-600">
                         {item.category}
                       </div>
                     </div>
 
                     {/* Status badge */}
-                    <div className="flex items-center justify-between text-[11px] pt-1 border-t border-white/10">
-                      <span className="text-slate-400 text-[10px]">{item.categoryTag}</span>
-                      <span className={`text-[10px] font-medium flex items-center gap-1 ${item.isVerified ? 'text-emerald-400' : 'text-amber-400'}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${item.isVerified ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                    <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-200/60">
+                      <span className="text-slate-500 text-[10px] font-medium">{item.categoryTag}</span>
+                      <span className={`text-[10px] font-semibold flex items-center gap-1 ${item.isVerified ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${item.isVerified ? 'bg-emerald-600' : 'bg-amber-600'}`} />
                         {item.status}
                       </span>
                     </div>
@@ -1466,14 +1456,14 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
 
                   {/* Body Content */}
                   <div className="p-6 text-left space-y-4">
-                    <p className="text-xs sm:text-sm text-slate-300 leading-relaxed min-h-[56px]">
+                    <p className="text-xs sm:text-sm text-slate-600 leading-relaxed min-h-[56px]">
                       {item.description}
                     </p>
 
-                    <div className="space-y-1.5 pt-2 border-t border-white/5">
+                    <div className="space-y-1.5 pt-2 border-t border-slate-100">
                       {item.features.slice(0, 3).map((feat, idx) => (
-                        <div key={idx} className="flex items-center gap-2 text-xs text-slate-400">
-                          <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                        <div key={idx} className="flex items-center gap-2 text-xs text-slate-600">
+                          <Check className="w-3.5 h-3.5 text-[#1877F2] shrink-0" />
                           <span className="truncate">{feat}</span>
                         </div>
                       ))}
@@ -1482,11 +1472,11 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                 </div>
 
                 {/* Actions Footer */}
-                <div className="p-6 pt-0 border-t border-white/5 grid grid-cols-2 gap-2 mt-4">
+                <div className="p-6 pt-0 border-t border-slate-100 grid grid-cols-2 gap-2 mt-4">
                   <button
                     type="button"
                     onClick={() => setPreviewingProject(item)}
-                    className="py-2.5 px-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-200 hover:text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                   >
                     <Eye className="w-3.5 h-3.5" />
                     <span>Preview</span>
@@ -1497,7 +1487,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                       href={item.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="py-2.5 px-3 rounded-xl bg-[#FF6B00] hover:bg-[#e66000] text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      className="py-2.5 px-3 rounded-xl bg-[#FF6B00] hover:bg-[#e66000] text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-sm shadow-[#FF6B00]/20"
                     >
                       <span>Visit Site</span>
                       <ExternalLink className="w-3 h-3" />
@@ -1506,7 +1496,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                     <button
                       type="button"
                       disabled
-                      className="py-2.5 px-3 rounded-xl bg-slate-800 text-slate-500 text-xs font-semibold cursor-not-allowed"
+                      className="py-2.5 px-3 rounded-xl bg-slate-100 text-slate-400 text-xs font-semibold cursor-not-allowed"
                     >
                       Launching Soon
                     </button>
@@ -1520,48 +1510,48 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
 
       {/* PORTFOLIO PREVIEW MODAL */}
       {previewingProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
-          <div className="w-full max-w-2xl my-8 p-6 sm:p-8 rounded-3xl bg-[#0A1A2F] border border-white/20 shadow-2xl space-y-6 text-left relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm overflow-y-auto">
+          <div className="w-full max-w-2xl my-8 p-6 sm:p-8 rounded-3xl bg-white border border-slate-200 shadow-2xl space-y-6 text-left relative max-h-[90vh] overflow-y-auto">
             {/* Modal Header */}
-            <div className="flex items-start justify-between pb-4 border-b border-white/10">
+            <div className="flex items-start justify-between pb-4 border-b border-slate-100">
               <div>
-                <div className="flex items-center gap-2 text-xs text-slate-400">
+                <div className="flex items-center gap-2 text-xs text-slate-500">
                   <span className="text-[#FF6B00] font-semibold">{previewingProject.categoryTag}</span>
                   <span aria-hidden="true">·</span>
                   <span>{previewingProject.status}</span>
                 </div>
-                <h3 className="text-xl sm:text-2xl font-display font-bold text-white mt-1">
+                <h3 className="text-xl sm:text-2xl font-display font-bold text-[#0A1A2F] mt-1">
                   {previewingProject.name}
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setPreviewingProject(null)}
-                className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+                className="p-2 rounded-xl bg-slate-100 text-slate-500 hover:text-slate-800 hover:bg-slate-200 cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            {/* Simulated Desktop / Browser Preview Frame */}
-            <div className="rounded-2xl border border-white/10 bg-[#07111F] p-4 space-y-3">
-              <div className="flex items-center justify-between text-xs text-slate-400 pb-2 border-b border-white/10 font-mono">
+            {/* Simulated Desktop Preview Frame */}
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+              <div className="flex items-center justify-between text-xs text-slate-500 pb-2 border-b border-slate-200 font-mono">
                 <span>{previewingProject.url !== '#' ? previewingProject.url : 'Reserved Preview Slot'}</span>
                 {previewingProject.url !== '#' && (
-                  <span className="text-emerald-400 text-[11px]">Online</span>
+                  <span className="text-emerald-700 font-semibold text-[11px]">Online</span>
                 )}
               </div>
-              <div className="p-6 rounded-xl bg-gradient-to-br from-white/5 to-transparent border border-white/5 space-y-3">
-                <div className="text-xs uppercase font-semibold text-slate-400">{previewingProject.category}</div>
-                <p className="text-sm text-slate-200 leading-relaxed">
+              <div className="p-6 rounded-xl bg-white border border-slate-200 space-y-3">
+                <div className="text-xs uppercase font-bold text-[#1877F2]">{previewingProject.category}</div>
+                <p className="text-sm text-slate-600 leading-relaxed">
                   {previewingProject.description}
                 </p>
                 <div className="pt-2">
-                  <div className="text-xs font-semibold text-white mb-2">Key Functional Highlights:</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-300">
+                  <div className="text-xs font-bold text-[#0A1A2F] mb-2">Key Functional Highlights:</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-700">
                     {previewingProject.features.map((feat, idx) => (
                       <div key={idx} className="flex items-center gap-2">
-                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                         <span>{feat}</span>
                       </div>
                     ))}
@@ -1571,7 +1561,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
             </div>
 
             {/* Modal Actions */}
-            <div className="flex items-center justify-between pt-4 border-t border-white/10">
+            <div className="flex items-center justify-between pt-4 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => {
@@ -1587,7 +1577,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                 <button
                   type="button"
                   onClick={() => setPreviewingProject(null)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700 cursor-pointer"
                 >
                   Close
                 </button>
@@ -1596,7 +1586,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                     href={previewingProject.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-5 py-2 rounded-xl bg-[#FF6B00] hover:bg-[#e66000] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    className="px-5 py-2 rounded-xl bg-[#FF6B00] hover:bg-[#e66000] text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm shadow-[#FF6B00]/20"
                   >
                     <span>Visit Live Website</span>
                     <ExternalLink className="w-3.5 h-3.5" />
@@ -1609,27 +1599,27 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
       )}
 
       {/* ========================================================================= */}
-      {/* PART D: ASSOCIATED BRANDS (Sec 13) */}
+      {/* SECTION G: BRANDS AND BUSINESSES (Light 70%) */}
       {/* ========================================================================= */}
-      <section className="py-16 sm:py-20 border-b border-white/10 bg-[#060E1A]/40 relative">
+      <section className="py-16 sm:py-20 bg-white border-b border-slate-200/80 relative">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-2xl mx-auto space-y-2 mb-10">
-            <h2 className="text-xl sm:text-2xl font-display font-bold text-white tracking-tight">
+            <h2 className="text-xl sm:text-2xl font-display font-bold text-[#0A1A2F] tracking-tight">
               Brands and Businesses We Work With
             </h2>
-            <p className="text-xs sm:text-sm text-slate-400 font-light">
+            <p className="text-xs sm:text-sm text-slate-500 font-normal">
               Collaborations and digital platforms developed across creative, clinical, and corporate sectors.
             </p>
           </div>
 
-          {/* Clean Brand Reference Grid (Text-based authority labels) */}
+          {/* Clean Brand Reference Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 items-center">
             {PORTFOLIO_PROJECTS.slice(0, 6).map((brand) => (
               <div
                 key={brand.id}
-                className="p-4 rounded-xl bg-[#0A1A2F]/50 border border-white/5 hover:border-white/15 text-center space-y-1 transition-all"
+                className="p-4 rounded-xl bg-slate-50 border border-slate-200 hover:border-slate-300 text-center space-y-1 transition-all"
               >
-                <div className="text-xs font-bold text-slate-200 tracking-wide">
+                <div className="text-xs font-bold text-[#0A1A2F] tracking-wide">
                   {brand.name}
                 </div>
                 <div className="text-[10px] text-slate-500 truncate">
@@ -1642,19 +1632,19 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
       </section>
 
       {/* ========================================================================= */}
-      {/* PART E: TESTIMONIALS AND REVIEWS SLIDER (Sec 14) */}
+      {/* SECTION H: TESTIMONIALS AND REVIEWS (Light 70% with slider) */}
       {/* ========================================================================= */}
-      <section className="py-20 sm:py-24 border-b border-white/10 relative">
+      <section className="py-20 sm:py-24 bg-[#F8FAFC] border-b border-slate-200/80 relative">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto space-y-4 mb-12">
-            <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
+            <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
               <Quote className="w-3.5 h-3.5 text-[#FF6B00]" />
-              <span className="uppercase tracking-wider font-semibold text-slate-300">Client Feedback</span>
+              <span className="uppercase tracking-wider font-semibold text-[#0A1A2F]">Client Feedback</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-white tracking-tight">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-[#0A1A2F] tracking-tight">
               What Our Clients Say
             </h2>
-            <p className="text-base text-slate-300 leading-relaxed font-light">
+            <p className="text-base text-slate-600 leading-relaxed font-normal">
               Feedback helps potential customers understand what it is like to work with a web design and development partner.
             </p>
           </div>
@@ -1672,52 +1662,51 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                 {(() => {
                   const t = TESTIMONIALS[testimonialSlideIndex];
                   return (
-                    <div className="p-6 sm:p-8 rounded-2xl bg-[#0A1A2F] border border-white/10 space-y-4 text-left shadow-xl flex flex-col justify-between">
+                    <div className="p-6 sm:p-8 rounded-2xl bg-white border border-slate-200 space-y-4 text-left shadow-sm flex flex-col justify-between">
                       <div className="space-y-3">
-                        {/* Rating stars */}
                         <div className="flex items-center gap-1 text-[#FF6B00]">
                           {[...Array(t.rating)].map((_, i) => (
                             <Star key={i} className="w-4 h-4 fill-[#FF6B00]" />
                           ))}
                         </div>
-                        <p className="text-sm sm:text-base text-slate-200 leading-relaxed italic">
+                        <p className="text-sm sm:text-base text-slate-700 leading-relaxed italic">
                           "{t.comment}"
                         </p>
                       </div>
 
-                      <div className="pt-4 border-t border-white/10 flex items-center justify-between text-xs">
+                      <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs">
                         <div>
-                          <div className="font-bold text-white">{t.name}</div>
-                          <div className="text-slate-400 text-[11px]">{t.role} · {t.businessName}</div>
+                          <div className="font-bold text-[#0A1A2F]">{t.name}</div>
+                          <div className="text-slate-500 text-[11px]">{t.role} · {t.businessName}</div>
                         </div>
-                        <span className="text-[10px] text-slate-500 font-mono">{t.verifiedSource}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">{t.verifiedSource}</span>
                       </div>
                     </div>
                   );
                 })()}
 
-                {/* Active Card 2 (Adjacent) */}
+                {/* Active Card 2 */}
                 {(() => {
                   const t = TESTIMONIALS[(testimonialSlideIndex + 1) % TESTIMONIALS.length];
                   return (
-                    <div className="p-6 sm:p-8 rounded-2xl bg-[#0A1A2F] border border-white/10 space-y-4 text-left shadow-xl hidden md:flex flex-col justify-between">
+                    <div className="p-6 sm:p-8 rounded-2xl bg-white border border-slate-200 space-y-4 text-left shadow-sm hidden md:flex flex-col justify-between">
                       <div className="space-y-3">
                         <div className="flex items-center gap-1 text-[#FF6B00]">
                           {[...Array(t.rating)].map((_, i) => (
                             <Star key={i} className="w-4 h-4 fill-[#FF6B00]" />
                           ))}
                         </div>
-                        <p className="text-sm sm:text-base text-slate-200 leading-relaxed italic">
+                        <p className="text-sm sm:text-base text-slate-700 leading-relaxed italic">
                           "{t.comment}"
                         </p>
                       </div>
 
-                      <div className="pt-4 border-t border-white/10 flex items-center justify-between text-xs">
+                      <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs">
                         <div>
-                          <div className="font-bold text-white">{t.name}</div>
-                          <div className="text-slate-400 text-[11px]">{t.role} · {t.businessName}</div>
+                          <div className="font-bold text-[#0A1A2F]">{t.name}</div>
+                          <div className="text-slate-500 text-[11px]">{t.role} · {t.businessName}</div>
                         </div>
-                        <span className="text-[10px] text-slate-500 font-mono">{t.verifiedSource}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">{t.verifiedSource}</span>
                       </div>
                     </div>
                   );
@@ -1734,7 +1723,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                     type="button"
                     onClick={() => setTestimonialSlideIndex(idx)}
                     className={`h-2 rounded-full transition-all cursor-pointer ${
-                      testimonialSlideIndex === idx ? 'w-8 bg-[#FF6B00]' : 'w-2 bg-white/20 hover:bg-white/40'
+                      testimonialSlideIndex === idx ? 'w-8 bg-[#FF6B00]' : 'w-2 bg-slate-300 hover:bg-slate-400'
                     }`}
                     aria-label={`Go to slide ${idx + 1}`}
                   />
@@ -1745,7 +1734,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                 <button
                   type="button"
                   onClick={handlePrevTestimonial}
-                  className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                  className="w-10 h-10 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center transition-colors cursor-pointer shadow-sm"
                   aria-label="Previous testimonial"
                 >
                   <ChevronLeft className="w-5 h-5" />
@@ -1753,7 +1742,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                 <button
                   type="button"
                   onClick={handleNextTestimonial}
-                  className="w-10 h-10 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                  className="w-10 h-10 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center transition-colors cursor-pointer shadow-sm"
                   aria-label="Next testimonial"
                 >
                   <ChevronRight className="w-5 h-5" />
@@ -1765,9 +1754,9 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
       </section>
 
       {/* ========================================================================= */}
-      {/* PART F: WEBSITE CAPABILITIES & WHY US (Sec 15-16) */}
+      {/* SECTION I: WHY DIGITALMUID & CAPABILITIES (Light 70%) */}
       {/* ========================================================================= */}
-      <section className="py-20 sm:py-24 border-b border-white/10 bg-[#060E1A]/60 relative">
+      <section className="py-20 sm:py-24 bg-white border-b border-slate-200/80 relative">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-start">
             {/* Left Col: 13 Features Grid */}
@@ -1776,10 +1765,10 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                 <div className="text-xs font-semibold text-[#FF6B00] uppercase tracking-wider">
                   Technical Deliverables
                 </div>
-                <h2 className="text-2xl sm:text-3xl font-display font-extrabold text-white">
+                <h2 className="text-2xl sm:text-3xl font-display font-extrabold text-[#0A1A2F]">
                   What Your Website Can Include
                 </h2>
-                <p className="text-sm text-slate-300 font-light">
+                <p className="text-sm text-slate-600 font-normal">
                   Available features depend on your project requirements, technical feasibility, third-party services, and the scope agreed for your website.
                 </p>
               </div>
@@ -1788,9 +1777,9 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                 {capabilitiesList.map((cap, idx) => (
                   <div
                     key={idx}
-                    className="p-3.5 rounded-xl bg-[#0A1A2F] border border-white/5 flex items-center gap-2.5 text-xs text-slate-200"
+                    className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-2.5 text-xs text-slate-700"
                   >
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                     <span>{cap}</span>
                   </div>
                 ))}
@@ -1800,13 +1789,13 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
             {/* Right Col: Why DigitalMUID Principles */}
             <div className="lg:col-span-6 space-y-6 text-left">
               <div className="space-y-2">
-                <div className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
+                <div className="text-xs font-semibold text-[#1877F2] uppercase tracking-wider">
                   Working Principles
                 </div>
-                <h2 className="text-2xl sm:text-3xl font-display font-extrabold text-white">
+                <h2 className="text-2xl sm:text-3xl font-display font-extrabold text-[#0A1A2F]">
                   A Practical Approach to Building Your Website
                 </h2>
-                <p className="text-sm text-slate-300 font-light">
+                <p className="text-sm text-slate-600 font-normal">
                   How we operate to ensure clarity, predictable schedules, and dependable project execution.
                 </p>
               </div>
@@ -1815,15 +1804,15 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                 {whyMuidPrinciples.map((principle, idx) => (
                   <div
                     key={idx}
-                    className="p-4 rounded-xl bg-[#0A1A2F] border border-white/5 space-y-1 text-left"
+                    className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1 text-left"
                   >
-                    <h3 className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-white/10 text-[#FF6B00] flex items-center justify-center text-[10px] font-mono">
+                    <h3 className="text-xs sm:text-sm font-bold text-[#0A1A2F] flex items-center gap-2">
+                      <span className="w-5 h-5 rounded-full bg-blue-100 text-[#1877F2] flex items-center justify-center text-[10px] font-mono">
                         {idx + 1}
                       </span>
                       <span>{principle.title}</span>
                     </h3>
-                    <p className="text-xs text-slate-300 pl-7 leading-relaxed font-light">
+                    <p className="text-xs text-slate-600 pl-7 leading-relaxed font-normal">
                       {principle.desc}
                     </p>
                   </div>
@@ -1835,19 +1824,19 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
       </section>
 
       {/* ========================================================================= */}
-      {/* PART F: FREQUENTLY ASKED QUESTIONS (Sec 17 - 10 Exact FAQs) */}
+      {/* SECTION J: FREQUENTLY ASKED QUESTIONS (Light 70%) */}
       {/* ========================================================================= */}
-      <section className="py-20 sm:py-24 border-b border-white/10 relative">
+      <section className="py-20 sm:py-24 bg-[#F8FAFC] border-b border-slate-200/80 relative">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center space-y-4 mb-12">
-            <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
+            <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
               <HelpCircle className="w-3.5 h-3.5 text-[#FF6B00]" />
-              <span className="uppercase tracking-wider font-semibold text-slate-300">Common Inquiries</span>
+              <span className="uppercase tracking-wider font-semibold text-[#0A1A2F]">Common Inquiries</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl font-display font-extrabold text-white tracking-tight">
+            <h2 className="text-2xl sm:text-3xl font-display font-extrabold text-[#0A1A2F] tracking-tight">
               Frequently Asked Questions
             </h2>
-            <p className="text-sm sm:text-base text-slate-300 leading-relaxed font-light">
+            <p className="text-sm sm:text-base text-slate-600 leading-relaxed font-normal">
               Clear, honest answers to help you navigate your website project choices.
             </p>
           </div>
@@ -1858,14 +1847,14 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
               return (
                 <div
                   key={index}
-                  className="rounded-2xl bg-[#0A1A2F]/80 border border-white/10 overflow-hidden transition-all text-left"
+                  className="rounded-2xl bg-white border border-slate-200 overflow-hidden transition-all text-left shadow-sm"
                 >
                   <button
                     type="button"
                     onClick={() => setOpenFaqIndex(isOpen ? null : index)}
-                    className="w-full p-5 sm:p-6 text-left flex items-center justify-between gap-4 cursor-pointer hover:bg-white/5 transition-colors"
+                    className="w-full p-5 sm:p-6 text-left flex items-center justify-between gap-4 cursor-pointer hover:bg-slate-50 transition-colors"
                   >
-                    <span className="font-semibold text-white text-sm sm:text-base">
+                    <span className="font-semibold text-[#0A1A2F] text-sm sm:text-base">
                       {faq.q}
                     </span>
                     <ChevronDown
@@ -1875,7 +1864,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                     />
                   </button>
                   {isOpen && (
-                    <div className="px-5 pb-5 sm:px-6 sm:pb-6 text-xs sm:text-sm text-slate-300 leading-relaxed border-t border-white/5 pt-4 font-light">
+                    <div className="px-5 pb-5 sm:px-6 sm:pb-6 text-xs sm:text-sm text-slate-600 leading-relaxed border-t border-slate-100 pt-4 font-normal">
                       {faq.a}
                     </div>
                   )}
@@ -1887,46 +1876,44 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
       </section>
 
       {/* ========================================================================= */}
-      {/* PART G: 4-STEP DEDICATED WEBSITE PROJECT ENQUIRY FORM (Sec 18) */}
+      {/* SECTION K & ENQUIRY FORM: DEDICATED WEB SERVICES DISCOVERY BRIEF */}
       {/* ========================================================================= */}
-      <section ref={formRef} id="enquiry-form" className="py-20 sm:py-28 relative">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[500px] bg-gradient-to-tr from-[#FF6B00]/10 via-[#1877F2]/10 to-transparent rounded-full blur-3xl pointer-events-none" />
-
+      <section ref={formRef} id="enquiry-form" className="py-20 sm:py-28 bg-white relative">
         <div className="relative max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center space-y-4 mb-10">
-            <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
+            <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
               <Send className="w-3.5 h-3.5 text-[#FF6B00]" />
-              <span className="uppercase tracking-wider font-semibold text-slate-300">Project Discovery Brief</span>
+              <span className="uppercase tracking-wider font-semibold text-[#0A1A2F]">Start Your Enquiry</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-white tracking-tight">
-              Tell Us About Your Website Project
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-[#0A1A2F] tracking-tight">
+              Let’s Discuss Your Website Project
             </h2>
-            <p className="text-sm sm:text-base text-slate-300 leading-relaxed max-w-2xl mx-auto font-light">
-              Share a few details about your business and what you want your website to achieve. You do not need technical knowledge to complete this form. Your answers will help us understand your needs and discuss suitable next steps.
+            <p className="text-sm sm:text-base text-slate-600 leading-relaxed max-w-2xl mx-auto font-normal">
+              Tell us about your business, your goals, and the website you have in mind. We’ll review your requirements and get in touch to discuss the next steps.
             </p>
           </div>
 
           {/* CONFIRMATION SCREEN */}
           {submissionSuccess ? (
-            <div className="p-8 sm:p-12 rounded-3xl bg-[#0A1A2F] border border-emerald-500/30 shadow-2xl text-center space-y-6">
-              <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center mx-auto">
+            <div className="p-8 sm:p-12 rounded-3xl bg-white border border-emerald-300 shadow-xl text-center space-y-6">
+              <div className="w-16 h-16 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mx-auto">
                 <CheckCircle2 className="w-8 h-8" />
               </div>
 
               <div className="space-y-2">
-                <div className="inline-block px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-mono font-bold tracking-wider">
+                <div className="inline-block px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-mono font-bold tracking-wider">
                   Enquiry Reference: {submissionSuccess.referenceId}
                 </div>
-                <h3 className="text-2xl sm:text-3xl font-display font-bold text-white">
+                <h3 className="text-2xl sm:text-3xl font-display font-bold text-[#0A1A2F]">
                   Thank You, {submissionSuccess.clientName}!
                 </h3>
-                <p className="text-slate-300 text-sm sm:text-base max-w-xl mx-auto leading-relaxed">
-                  Your project enquiry for <strong className="text-white">{submissionSuccess.business}</strong> has been logged into our CRM. Our team will review your requirements and reach out within 1 business day.
+                <p className="text-slate-600 text-sm sm:text-base max-w-xl mx-auto leading-relaxed">
+                  Your project enquiry for <strong className="text-[#0A1A2F]">{submissionSuccess.business}</strong> has been logged into our CRM. Our team will review your requirements and reach out within 1 business day.
                 </p>
               </div>
 
-              <div className="p-4 sm:p-6 rounded-2xl bg-white/5 border border-white/10 max-w-lg mx-auto text-left text-xs sm:text-sm space-y-2 text-slate-300">
-                <p className="font-semibold text-white">What happens next?</p>
+              <div className="p-4 sm:p-6 rounded-2xl bg-slate-50 border border-slate-200 max-w-lg mx-auto text-left text-xs sm:text-sm space-y-2 text-slate-700">
+                <p className="font-bold text-[#0A1A2F]">What happens next?</p>
                 <div className="flex items-start gap-2">
                   <span className="font-bold text-[#FF6B00]">1.</span>
                   <span>We inspect your goals, timeline, and reference notes.</span>
@@ -1945,445 +1932,447 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
                 <button
                   type="button"
                   onClick={handleResetForm}
-                  className="px-6 py-3 rounded-xl bg-[#FF6B00] hover:bg-[#e66000] text-white text-xs font-bold uppercase tracking-wider cursor-pointer"
+                  className="px-6 py-3 rounded-xl bg-[#FF6B00] hover:bg-[#e66000] text-white text-xs font-bold uppercase tracking-wider cursor-pointer shadow-md shadow-[#FF6B00]/25"
                 >
                   Submit Another Project Brief
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate('/')}
-                  className="px-6 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-xs font-semibold cursor-pointer"
-                >
-                  Return to Home
                 </button>
               </div>
             </div>
           ) : (
-            /* 4-STEP FORM CONTAINER */
-            <div className="p-6 sm:p-10 rounded-3xl bg-[#0A1A2F] border border-white/15 shadow-2xl space-y-8">
-              {/* Progress Indicator */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span className="font-semibold text-white">Step {formStep} of 4</span>
-                  <span>
-                    {formStep === 1 && 'About Your Business'}
-                    {formStep === 2 && 'What Do You Need?'}
-                    {formStep === 3 && 'Timeline & Readiness'}
-                    {formStep === 4 && 'Contact Information'}
-                  </span>
+            /* MULTI-STEP DISCOVERY FORM */
+            <div className="rounded-3xl bg-white border border-slate-200 shadow-xl overflow-hidden text-left">
+              {/* Form Progress Header */}
+              <div className="bg-slate-50 px-6 sm:px-8 py-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="text-xs font-mono font-bold text-[#FF6B00] uppercase">
+                    Step {formStep} of 4
+                  </div>
+                  <div className="text-sm sm:text-base font-bold text-[#0A1A2F] mt-0.5">
+                    {formStep === 1 && '1. Project & Business Overview'}
+                    {formStep === 2 && '2. Goals, Features & Content'}
+                    {formStep === 3 && '3. Planning & Timeline'}
+                    {formStep === 4 && '4. Contact Information'}
+                  </div>
                 </div>
-                {/* Visual Progress Bar */}
-                <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
-                  <div
-                    className="h-full bg-[#FF6B00] transition-all duration-300 rounded-full"
-                    style={{ width: `${(formStep / 4) * 100}%` }}
-                  />
-                </div>
-                {/* Step labels */}
-                <div className="grid grid-cols-4 gap-2 text-[11px] text-center text-slate-500 font-medium">
-                  <span className={formStep >= 1 ? 'text-[#FF6B00]' : ''}>1. Business</span>
-                  <span className={formStep >= 2 ? 'text-[#FF6B00]' : ''}>2. Requirements</span>
-                  <span className={formStep >= 3 ? 'text-[#FF6B00]' : ''}>3. Timeline</span>
-                  <span className={formStep >= 4 ? 'text-[#FF6B00]' : ''}>4. Contact</span>
+
+                {/* Progress Indicators */}
+                <div className="flex items-center gap-2">
+                  {[1, 2, 3, 4].map((stepNum) => (
+                    <div
+                      key={stepNum}
+                      className={`h-2 rounded-full transition-all ${
+                        formStep === stepNum
+                          ? 'w-8 bg-[#FF6B00]'
+                          : formStep > stepNum
+                          ? 'w-4 bg-[#0A1A2F]'
+                          : 'w-4 bg-slate-200'
+                      }`}
+                    />
+                  ))}
                 </div>
               </div>
 
-              {stepError && (
-                <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start gap-3 text-xs sm:text-sm text-left">
-                  <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold text-white">Please check: </span>
-                    {stepError}
+              {/* Form Body */}
+              <form onSubmit={handleSubmit} className="p-6 sm:p-8 space-y-6">
+                {stepError && (
+                  <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs sm:text-sm font-medium flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-rose-600 shrink-0" />
+                    <span>{stepError}</span>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* STEP 1: ABOUT YOUR BUSINESS */}
-              {formStep === 1 && (
-                <div className="space-y-6 text-left">
-                  <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-white uppercase tracking-wider">
-                      Project Type <span className="text-rose-400">*</span>
-                    </label>
-                    <p className="text-xs text-slate-400">Select the primary type of website you are planning.</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                      {PROJECT_TYPES.map((type) => {
-                        const isSelected = projectType === type;
-                        return (
+                {/* ------------------------------------------------------------- */}
+                {/* STEP 1: ABOUT YOUR BUSINESS */}
+                {/* ------------------------------------------------------------- */}
+                {formStep === 1 && (
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                        What type of website are you looking for? <span className="text-[#FF6B00]">*</span>
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {PROJECT_TYPES.map((type) => (
                           <button
                             key={type}
                             type="button"
                             onClick={() => setProjectType(type)}
-                            className={`p-3.5 rounded-xl text-left text-xs font-medium border transition-all cursor-pointer flex items-center justify-between ${
-                              isSelected
-                                ? 'bg-[#FF6B00]/15 border-[#FF6B00] text-white shadow-md shadow-[#FF6B00]/10 font-bold'
-                                : 'bg-[#07111F] border-white/10 text-slate-300 hover:border-white/20 hover:text-white'
+                            className={`p-3 rounded-xl text-xs text-left transition-all cursor-pointer border ${
+                              projectType === type
+                                ? 'bg-blue-50 border-[#1877F2] text-[#0A1A2F] font-bold shadow-sm'
+                                : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                             }`}
                           >
-                            <span>{type}</span>
-                            {isSelected && <Check className="w-4 h-4 text-[#FF6B00] shrink-0 ml-1.5" />}
+                            {type}
                           </button>
-                        );
-                      })}
+                        ))}
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
                     <div>
-                      <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                        Business or Project Name <span className="text-rose-400">*</span>
+                      <label htmlFor="businessName" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                        Business or Project Name <span className="text-[#FF6B00]">*</span>
                       </label>
                       <input
+                        id="businessName"
                         type="text"
-                        required
+                        placeholder="e.g. Acme Studio, Dr. Sharma Clinic"
                         value={businessName}
                         onChange={(e) => setBusinessName(e.target.value)}
-                        placeholder="e.g. Acme Tech Solutions"
-                        className="w-full px-4 py-3 rounded-xl bg-[#07111F] border border-white/10 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-[#FF6B00]"
+                        className="w-full px-4 py-3 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none focus:border-[#FF6B00] focus:ring-1 focus:ring-[#FF6B00]"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                        Business Stage <span className="text-rose-400">*</span>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                        Current Business Stage <span className="text-[#FF6B00]">*</span>
                       </label>
-                      <select
-                        value={businessStage}
-                        onChange={(e) => setBusinessStage(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl bg-[#07111F] border border-white/10 text-white text-xs sm:text-sm focus:outline-none focus:border-[#FF6B00]"
-                      >
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {BUSINESS_STAGES.map((stage) => (
-                          <option key={stage} value={stage}>
+                          <button
+                            key={stage}
+                            type="button"
+                            onClick={() => setBusinessStage(stage)}
+                            className={`p-3 rounded-xl text-xs text-left transition-all cursor-pointer border ${
+                              businessStage === stage
+                                ? 'bg-blue-50 border-[#1877F2] text-[#0A1A2F] font-bold shadow-sm'
+                                : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
                             {stage}
-                          </option>
+                          </button>
                         ))}
-                      </select>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* STEP 2: WHAT DO YOU NEED? */}
-              {formStep === 2 && (
-                <div className="space-y-6 text-left">
-                  <div>
-                    <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                      Main Website Goals <span className="text-rose-400">*</span>
-                    </label>
-                    <p className="text-xs text-slate-400 mb-2.5">Select all outcomes you want the website to achieve.</p>
-                    <div className="flex flex-wrap gap-2">
-                      {GOAL_OPTIONS.map((goal) => {
-                        const isSelected = selectedGoals.includes(goal);
-                        return (
+                {/* ------------------------------------------------------------- */}
+                {/* STEP 2: WHAT DO YOU NEED? */}
+                {/* ------------------------------------------------------------- */}
+                {formStep === 2 && (
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                        What are the main goals of your website? (Select all that apply) <span className="text-[#FF6B00]">*</span>
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {GOALS_OPTIONS.map((goal) => {
+                          const isChecked = selectedGoals.includes(goal);
+                          return (
+                            <button
+                              key={goal}
+                              type="button"
+                              onClick={() => toggleGoal(goal)}
+                              className={`p-3 rounded-xl text-xs text-left transition-all cursor-pointer border flex items-center justify-between ${
+                                isChecked
+                                  ? 'bg-blue-50 border-[#1877F2] text-[#0A1A2F] font-bold shadow-sm'
+                                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              <span>{goal}</span>
+                              {isChecked && <Check className="w-4 h-4 text-[#1877F2] shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                        Key features or integrations you may need <span className="text-[#FF6B00]">*</span>
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {FEATURES_OPTIONS.map((feat) => {
+                          const isChecked = selectedFeatures.includes(feat);
+                          return (
+                            <button
+                              key={feat}
+                              type="button"
+                              onClick={() => toggleFeature(feat)}
+                              className={`p-3 rounded-xl text-xs text-left transition-all cursor-pointer border flex items-center justify-between ${
+                                isChecked
+                                  ? 'bg-blue-50 border-[#1877F2] text-[#0A1A2F] font-bold shadow-sm'
+                                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              <span>{feat}</span>
+                              {isChecked && <Check className="w-4 h-4 text-[#1877F2] shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                        Content readiness <span className="text-[#FF6B00]">*</span>
+                      </label>
+                      <div className="space-y-2">
+                        {CONTENT_READINESS_OPTIONS.map((option) => (
                           <button
-                            key={goal}
+                            key={option}
                             type="button"
-                            onClick={() => toggleGoal(goal)}
-                            className={`px-3.5 py-2 rounded-xl text-xs font-medium border transition-all cursor-pointer flex items-center gap-1.5 ${
-                              isSelected
-                                ? 'bg-blue-600/20 border-blue-500 text-white'
-                                : 'bg-[#07111F] border-white/10 text-slate-400 hover:text-white'
+                            onClick={() => setContentReadiness(option)}
+                            className={`w-full p-3 rounded-xl text-xs text-left transition-all cursor-pointer border ${
+                              contentReadiness === option
+                                ? 'bg-blue-50 border-[#1877F2] text-[#0A1A2F] font-bold shadow-sm'
+                                : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                             }`}
                           >
-                            <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-blue-400' : 'bg-slate-600'}`} />
-                            <span>{goal}</span>
+                            {option}
                           </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                      Features You May Need <span className="text-rose-400">*</span>
-                    </label>
-                    <p className="text-xs text-slate-400 mb-2.5">Select functionality you would like included.</p>
-                    <div className="flex flex-wrap gap-2">
-                      {FEATURE_OPTIONS.map((feat) => {
-                        const isSelected = selectedFeatures.includes(feat);
-                        return (
-                          <button
-                            key={feat}
-                            type="button"
-                            onClick={() => toggleFeature(feat)}
-                            className={`px-3.5 py-2 rounded-xl text-xs font-medium border transition-all cursor-pointer flex items-center gap-1.5 ${
-                              isSelected
-                                ? 'bg-emerald-600/20 border-emerald-500 text-white'
-                                : 'bg-[#07111F] border-white/10 text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-emerald-400' : 'bg-slate-600'}`} />
-                            <span>{feat}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                    <div>
-                      <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                        Content Readiness <span className="text-rose-400">*</span>
-                      </label>
-                      <select
-                        value={contentReadiness}
-                        onChange={(e) => setContentReadiness(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl bg-[#07111F] border border-white/10 text-white text-xs sm:text-sm focus:outline-none focus:border-[#FF6B00]"
-                      >
-                        {CONTENT_READINESS_OPTIONS.map((c) => (
-                          <option key={c} value={c}>
-                            {c}
-                          </option>
                         ))}
-                      </select>
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                        Existing Website URL <span className="text-slate-500">(Optional)</span>
-                      </label>
-                      <input
-                        type="url"
-                        value={existingWebsiteUrl}
-                        onChange={(e) => setExistingWebsiteUrl(e.target.value)}
-                        placeholder="https://example.com"
-                        className="w-full px-4 py-3 rounded-xl bg-[#07111F] border border-white/10 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-[#FF6B00]"
-                      />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="existingUrl" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                          Existing Website URL (if any)
+                        </label>
+                        <input
+                          id="existingUrl"
+                          type="text"
+                          placeholder="https://example.com"
+                          value={existingWebsiteUrl}
+                          onChange={(e) => setExistingWebsiteUrl(e.target.value)}
+                          className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-400 text-xs focus:outline-none focus:border-[#FF6B00]"
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor="refUrls" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                          Reference Websites You Like
+                        </label>
+                        <input
+                          id="refUrls"
+                          type="text"
+                          placeholder="e.g. stripe.com, apple.com"
+                          value={referenceUrls}
+                          onChange={(e) => setReferenceUrls(e.target.value)}
+                          className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-400 text-xs focus:outline-none focus:border-[#FF6B00]"
+                        />
+                      </div>
                     </div>
                   </div>
+                )}
 
-                  <div>
-                    <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                      Reference Website URLs <span className="text-slate-500">(Optional inspiration)</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={referenceUrls}
-                      onChange={(e) => setReferenceUrls(e.target.value)}
-                      placeholder="e.g. stripe.com, apple.com"
-                      className="w-full px-4 py-3 rounded-xl bg-[#07111F] border border-white/10 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-[#FF6B00]"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* STEP 3: TIMELINE AND READINESS */}
-              {formStep === 3 && (
-                <div className="space-y-6 text-left">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* ------------------------------------------------------------- */}
+                {/* STEP 3: TIMELINE AND READINESS */}
+                {/* ------------------------------------------------------------- */}
+                {formStep === 3 && (
+                  <div className="space-y-6">
                     <div>
-                      <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                        Expected Project Timeline <span className="text-rose-400">*</span>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                        Expected Project Timeline <span className="text-[#FF6B00]">*</span>
                       </label>
-                      <select
-                        value={timeline}
-                        onChange={(e) => setTimeline(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl bg-[#07111F] border border-white/10 text-white text-xs sm:text-sm focus:outline-none focus:border-[#FF6B00]"
-                      >
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {TIMELINE_OPTIONS.map((t) => (
-                          <option key={t} value={t}>
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => setTimeline(t)}
+                            className={`p-3 rounded-xl text-xs text-left transition-all cursor-pointer border ${
+                              timeline === t
+                                ? 'bg-blue-50 border-[#1877F2] text-[#0A1A2F] font-bold shadow-sm'
+                                : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
                             {t}
-                          </option>
+                          </button>
                         ))}
-                      </select>
+                      </div>
                     </div>
 
                     <div>
-                      <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                        Current Readiness <span className="text-rose-400">*</span>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                        Current Project Readiness <span className="text-[#FF6B00]">*</span>
                       </label>
-                      <select
-                        value={readiness}
-                        onChange={(e) => setReadiness(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl bg-[#07111F] border border-white/10 text-white text-xs sm:text-sm focus:outline-none focus:border-[#FF6B00]"
-                      >
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {READINESS_OPTIONS.map((r) => (
-                          <option key={r} value={r}>
+                          <button
+                            key={r}
+                            type="button"
+                            onClick={() => setReadiness(r)}
+                            className={`p-3 rounded-xl text-xs text-left transition-all cursor-pointer border ${
+                              readiness === r
+                                ? 'bg-blue-50 border-[#1877F2] text-[#0A1A2F] font-bold shadow-sm'
+                                : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
                             {r}
-                          </option>
+                          </button>
                         ))}
-                      </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                        Decision-Making Role <span className="text-[#FF6B00]">*</span>
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        {DECISION_MAKER_OPTIONS.map((d) => (
+                          <button
+                            key={d}
+                            type="button"
+                            onClick={() => setDecisionMaker(d)}
+                            className={`p-3 rounded-xl text-xs text-left transition-all cursor-pointer border ${
+                              decisionMaker === d
+                                ? 'bg-blue-50 border-[#1877F2] text-[#0A1A2F] font-bold shadow-sm'
+                                : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
+                            {d}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label htmlFor="additionalNotes" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                        Additional details or notes about your project
+                      </label>
+                      <textarea
+                        id="additionalNotes"
+                        rows={3}
+                        placeholder="Tell us any specific ideas, target launch dates, or questions you have..."
+                        value={additionalRequirements}
+                        onChange={(e) => setAdditionalRequirements(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-400 text-xs focus:outline-none focus:border-[#FF6B00]"
+                      />
                     </div>
                   </div>
+                )}
 
-                  <div>
-                    <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                      Decision-Making Responsibility <span className="text-rose-400">*</span>
-                    </label>
-                    <select
-                      value={decisionMaker}
-                      onChange={(e) => setDecisionMaker(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl bg-[#07111F] border border-white/10 text-white text-xs sm:text-sm focus:outline-none focus:border-[#FF6B00]"
+                {/* ------------------------------------------------------------- */}
+                {/* STEP 4: CONTACT INFORMATION */}
+                {/* ------------------------------------------------------------- */}
+                {formStep === 4 && (
+                  <div className="space-y-6">
+                    <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-100 text-xs text-[#0A1A2F] space-y-1">
+                      <div className="font-bold flex items-center gap-1.5 text-[#1877F2]">
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Brief Summary: {projectType}</span>
+                      </div>
+                      <p className="text-slate-600">
+                        For <strong>{businessName}</strong> · Expected: <strong>{timeline}</strong>
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="fullName" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                          Your Full Name <span className="text-[#FF6B00]">*</span>
+                        </label>
+                        <input
+                          id="fullName"
+                          type="text"
+                          required
+                          placeholder="e.g. Rahul Sharma"
+                          value={fullName}
+                          onChange={(e) => setFullName(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none focus:border-[#FF6B00]"
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor="businessEmail" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                          Business Email <span className="text-[#FF6B00]">*</span>
+                        </label>
+                        <input
+                          id="businessEmail"
+                          type="email"
+                          required
+                          placeholder="name@company.com"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none focus:border-[#FF6B00]"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label htmlFor="phoneNum" className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+                        Phone / WhatsApp Number <span className="text-[#FF6B00]">*</span>
+                      </label>
+                      <input
+                        id="phoneNum"
+                        type="tel"
+                        required
+                        placeholder="+91 98765 43210"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-400 text-sm focus:outline-none focus:border-[#FF6B00]"
+                      />
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        We respect your privacy. We will use this only to review your brief and reply with project guidance.
+                      </p>
+                    </div>
+
+                    {/* Consent Checkbox */}
+                    <div className="pt-2">
+                      <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={consentAgreed}
+                          onChange={(e) => setConsentAgreed(e.target.checked)}
+                          className="mt-1 w-4 h-4 rounded border-slate-300 text-[#FF6B00] focus:ring-[#FF6B00]"
+                        />
+                        <span className="text-xs text-slate-600 leading-relaxed">
+                          I agree to share these details with DigitalMUID so their team can evaluate my project requirements and contact me regarding this enquiry.
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {/* Form Navigation Controls */}
+                <div className="flex items-center justify-between pt-6 border-t border-slate-200">
+                  {formStep > 1 ? (
+                    <button
+                      type="button"
+                      onClick={handlePrevStep}
+                      disabled={isSubmitting}
+                      className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold uppercase tracking-wider cursor-pointer transition-colors"
                     >
-                      {DECISION_MAKER_OPTIONS.map((d) => (
-                        <option key={d} value={d}>
-                          {d}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      ← Back
+                    </button>
+                  ) : (
+                    <div />
+                  )}
 
-                  <div>
-                    <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                      Additional Requirements or Questions <span className="text-slate-500">(Optional)</span>
-                    </label>
-                    <textarea
-                      rows={4}
-                      value={additionalRequirements}
-                      onChange={(e) => setAdditionalRequirements(e.target.value)}
-                      placeholder="Share details about your audience, special functionality, integrations, or specific questions..."
-                      className="w-full px-4 py-3 rounded-xl bg-[#07111F] border border-white/10 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-[#FF6B00]"
-                    />
-                  </div>
+                  {formStep < 4 ? (
+                    <button
+                      type="button"
+                      onClick={handleNextStep}
+                      className="px-7 py-3 rounded-xl bg-[#0A1A2F] hover:bg-[#1877F2] text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-all shadow-md"
+                    >
+                      <span>Continue</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="px-8 py-3.5 rounded-xl bg-[#FF6B00] hover:bg-[#e66000] disabled:bg-slate-400 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer shadow-lg shadow-[#FF6B00]/25 transition-all transform hover:-translate-y-0.5"
+                    >
+                      {isSubmitting ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Submitting Brief...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Submit Project Brief</span>
+                          <Send className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+                  )}
                 </div>
-              )}
-
-              {/* STEP 4: CONTACT DETAILS */}
-              {formStep === 4 && (
-                <div className="space-y-6 text-left">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                        Full Name <span className="text-rose-400">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={fullName}
-                        onChange={(e) => setFullName(e.target.value)}
-                        placeholder="e.g. Alex Johnson"
-                        className="w-full px-4 py-3 rounded-xl bg-[#07111F] border border-white/10 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-[#FF6B00]"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                        Business Email <span className="text-rose-400">*</span>
-                      </label>
-                      <input
-                        type="email"
-                        required
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="e.g. alex@company.com"
-                        className="w-full px-4 py-3 rounded-xl bg-[#07111F] border border-white/10 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-[#FF6B00]"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-white uppercase tracking-wider mb-1">
-                      Phone or WhatsApp Number <span className="text-rose-400">*</span>
-                    </label>
-                    <input
-                      type="tel"
-                      required
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="e.g. +91 98765 43210"
-                      className="w-full px-4 py-3 rounded-xl bg-[#07111F] border border-white/10 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-[#FF6B00]"
-                    />
-                  </div>
-
-                  {/* Summary Review of Brief */}
-                  <div className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-2 text-xs text-slate-300">
-                    <div className="font-semibold text-white">Brief Summary Before Sending:</div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px] pt-1">
-                      <div><span className="text-slate-500">Project:</span> <strong className="text-white">{projectType}</strong></div>
-                      <div><span className="text-slate-500">Business:</span> <strong className="text-white">{businessName}</strong></div>
-                      <div><span className="text-slate-500">Timeline:</span> <strong className="text-white">{timeline}</strong></div>
-                    </div>
-                  </div>
-
-                  {/* Privacy Notice & Consent (Never pre-checked) */}
-                  <div className="space-y-3 pt-2">
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      Privacy Notice: The submitted information is strictly used to evaluate your project brief, discuss suitable next steps, and contact you directly. We do not sell or share your information.
-                    </p>
-
-                    <label className="flex items-start gap-3 text-xs text-slate-300 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        required
-                        checked={consentAgreed}
-                        onChange={(e) => setConsentAgreed(e.target.checked)}
-                        className="w-4 h-4 rounded border-white/20 bg-[#07111F] text-[#FF6B00] focus:ring-[#FF6B00] mt-0.5"
-                      />
-                      <span>
-                        I confirm this is a genuine business enquiry, and I agree to be contacted by DigitalMUID regarding my website project requirements.
-                      </span>
-                    </label>
-                  </div>
-                </div>
-              )}
-
-              {/* Form Controls: Back, Continue, Submit */}
-              <div className="flex items-center justify-between pt-4 border-t border-white/10">
-                {formStep > 1 ? (
-                  <button
-                    type="button"
-                    onClick={handlePrevStep}
-                    className="px-5 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-2 cursor-pointer transition-colors"
-                  >
-                    <ArrowLeft className="w-4 h-4" />
-                    <span>Back</span>
-                  </button>
-                ) : (
-                  <div />
-                )}
-
-                {formStep < 4 ? (
-                  <button
-                    type="button"
-                    onClick={handleNextStep}
-                    className="px-7 py-3 rounded-xl bg-[#FF6B00] hover:bg-[#e66000] text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer transition-colors"
-                  >
-                    <span>Continue</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={handleSubmit}
-                    className="px-8 py-3.5 rounded-xl bg-[#FF6B00] hover:bg-[#e66000] disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-xs font-bold uppercase tracking-wider flex items-center gap-2 shadow-xl shadow-[#FF6B00]/25 cursor-pointer transition-all"
-                  >
-                    {isSubmitting ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        <span>Submitting Brief...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Submit Project Brief</span>
-                        <Send className="w-4 h-4" />
-                      </>
-                    )}
-                  </button>
-                )}
-              </div>
+              </form>
             </div>
           )}
-
-          {/* Direct Contact Alternative */}
-          <div className="mt-8 text-center text-xs text-slate-400 space-y-1">
-            <p>Prefer to reach out directly first?</p>
-            <p className="text-slate-300">
-              Email:{' '}
-              <a href="mailto:muid@digitalmuid.in" className="text-[#FF6B00] hover:underline font-medium">
-                muid@digitalmuid.in
-              </a>{' '}
-              · WhatsApp:{' '}
-              <a
-                href="https://wa.me/919934333671"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-emerald-400 hover:underline font-medium"
-              >
-                +91 99343 33671
-              </a>
-            </p>
-          </div>
         </div>
       </section>
     </div>
