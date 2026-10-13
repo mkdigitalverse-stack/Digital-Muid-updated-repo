@@ -3,7 +3,27 @@
   RewriteBase /
 
   # -------------------------------------------------------------
-  # WordPress Migration 301 Redirects & 410 Retirements
+  # 1. Canonical Domain (Force HTTPS and non-WWW)
+  # -------------------------------------------------------------
+  RewriteCond %{HTTP_HOST} ^www\.digitalmuid\.in$ [NC]
+  RewriteRule ^(.*)$ https://digitalmuid.in/$1 [R=301,L]
+
+  # -------------------------------------------------------------
+  # 2. Trailing Slash Normalization (Remove trailing slash on non-dir)
+  # -------------------------------------------------------------
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{REQUEST_URI} ^(.+)/$
+  RewriteRule ^(.+)/$ /$1 [R=301,L]
+
+  # -------------------------------------------------------------
+  # 3. Route Canonicalization Aliases
+  # -------------------------------------------------------------
+  RewriteRule ^consultation/?$ /business-growth-consultation [R=301,L]
+  RewriteRule ^courses/?$ /learn [R=301,L]
+  RewriteRule ^web-(services|development|design)/?$ /web [R=301,L]
+
+  # -------------------------------------------------------------
+  # 4. WordPress Migration 301 Redirects & 410 Retirements
   # -------------------------------------------------------------
   # URL 1: Old Services page -> /services
   RewriteRule ^services-3/?$ /services [R=301,L]
@@ -20,11 +40,11 @@
   # URL 2: Old Pricing page -> 410 Gone
   RewriteRule ^price/?$ - [G,L]
 
-  # URL 4: Old Terms & Conditions -> 410 Gone
-  RewriteRule ^terms-conditions/?$ - [G,L]
+  # URL 4: Old Terms & Conditions -> /terms
+  RewriteRule ^terms-conditions/?$ /terms [R=301,L]
 
   # -------------------------------------------------------------
-  # Standard SPA Fallback
+  # 5. Standard SPA Fallback
   # -------------------------------------------------------------
   RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_FILENAME} !-f

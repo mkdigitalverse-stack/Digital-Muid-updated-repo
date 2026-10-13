@@ -19,9 +19,9 @@ export const ConsultationConfirmationPage: React.FC<ConsultationConfirmationPage
     return (
       <div className="pt-32 pb-24 text-center space-y-4">
         <h1 className="text-2xl font-bold text-white">No active booking found</h1>
-        <button onClick={() => navigate('/consultation')} className="text-[#FF6B00] underline">
+        <a href="/business-growth-consultation" onClick={(e) => { e.preventDefault(); navigate('/business-growth-consultation'); }} className="text-[#FF6B00] underline">
           Book a consultation
-        </button>
+        </a>
       </div>
     );
   }

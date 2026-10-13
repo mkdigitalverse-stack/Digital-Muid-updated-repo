@@ -1091,13 +1091,16 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                       <span>Explore Courses</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => navigate('/consultation')}
+                    <a
+                      href="/business-growth-consultation"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        navigate('/business-growth-consultation');
+                      }}
                       className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-2 cursor-pointer"
                     >
                       <span>Book Consultation</span>
-                    </button>
+                    </a>
                   </div>
                 </div>
               ) : (
@@ -1181,14 +1184,17 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                               </p>
                             </div>
                             <div className="pt-1">
-                              <button
-                                type="button"
-                                onClick={() => navigate(billingSubFilter === 'courses' ? '/learn' : '/consultation')}
+                              <a
+                                href={billingSubFilter === 'courses' ? '/learn' : '/business-growth-consultation'}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  navigate(billingSubFilter === 'courses' ? '/learn' : '/business-growth-consultation');
+                                }}
                                 className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-[#FF6B00] text-white text-xs font-semibold transition-colors cursor-pointer inline-flex items-center gap-1.5"
                               >
                                 <span>{billingSubFilter === 'courses' ? 'Browse Masterclasses' : 'Book a Consultation'}</span>
                                 <ArrowRight className="w-3.5 h-3.5" />
-                              </button>
+                              </a>
                             </div>
                           </div>
                         ) : (

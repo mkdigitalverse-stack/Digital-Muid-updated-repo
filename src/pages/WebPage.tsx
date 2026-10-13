@@ -39,6 +39,7 @@ import {
   Rocket
 } from 'lucide-react';
 import { webEnquiryService } from '../services/webEnquiryService';
+import { SEOHead } from '../components/SEOHead';
 
 // =========================================================================
 // TYPES & CONSTANTS
@@ -1003,6 +1004,7 @@ export const WebPage: React.FC<WebPageProps> = ({ navigate }) => {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans selection:bg-[#FF6B00] selection:text-white">
+      <SEOHead path="/web" />
       {/* ========================================================================= */}
       {/* SECTION A: HERO (Light 70% foundation with brand blue typography & orange CTA) */}
       {/* ========================================================================= */}

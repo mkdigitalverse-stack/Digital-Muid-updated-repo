@@ -22,9 +22,32 @@
 /price/                                                                                         /410.html                  410!
 /price                                                                                          /410.html                  410!
 
-# URL 4: Old Subdomain Terms & Conditions page (Permanently Retired) -> 410 Gone
-/terms-conditions/                                                                              /410.html                  410!
-/terms-conditions                                                                               /410.html                  410!
+# URL 4: Old Subdomain & legacy Terms & Conditions page -> Current Terms page
+/terms-conditions/                                                                              /terms                     301!
+/terms-conditions                                                                               /terms                     301!
+
+# =========================================================================
+# Route Canonicalization & Duplicate Aliases
+# =========================================================================
+/consultation/                                                                                  /business-growth-consultation 301!
+/consultation                                                                                   /business-growth-consultation 301!
+/courses/                                                                                       /learn                        301!
+/courses                                                                                        /learn                        301!
+/web-services/                                                                                  /web                          301!
+/web-services                                                                                   /web                          301!
+/web-development/                                                                               /web                          301!
+/web-development                                                                                /web                          301!
+/web-design/                                                                                    /web                          301!
+/web-design                                                                                     /web                          301!
+
+# Trailing Slash Normalization
+/web/                                                                                           /web                          301!
+/learn/                                                                                         /learn                        301!
+/contact/                                                                                       /contact                      301!
+/business-growth-consultation/                                                                  /business-growth-consultation 301!
+/services/                                                                                      /services                     301!
+/about/                                                                                         /about                        301!
+/terms/                                                                                         /terms                        301!
 
 # =========================================================================
 # SPA Catch-all Fallback (Direct dynamic routes to React index.html)

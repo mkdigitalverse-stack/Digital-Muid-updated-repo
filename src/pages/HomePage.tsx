@@ -130,7 +130,7 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate, onOpenResourceModa
       title: 'Digital Transformation',
       desc: 'Connect technology, people, and processes into a unified operating ecosystem.',
       icon: Globe,
-      route: '/consultation',
+      route: '/business-growth-consultation',
       tag: 'Enterprise Advisory'
     },
     {

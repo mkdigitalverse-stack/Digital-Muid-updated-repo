@@ -5,6 +5,7 @@ import { Footer } from './components/Footer';
 import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { ToastNotification } from './components/ToastNotification';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { SEOHead } from './components/SEOHead';
 
 // Pages
 import { HomePage } from './pages/HomePage';
@@ -26,6 +27,7 @@ import { ConsultationPage } from './pages/ConsultationPage';
 import { ConsultationConfirmationPage } from './pages/ConsultationConfirmationPage';
 import { ContactPage } from './pages/ContactPage';
 import { AdminPage } from './pages/AdminPage';
+import { TermsPage } from './pages/TermsPage';
 import { AuthPage } from './pages/AuthPage';
 import { StudentDashboardPage } from './pages/StudentDashboardPage';
 import { MyCoursesPage } from './pages/MyCoursesPage';
@@ -106,7 +108,11 @@ const MainApp: React.FC = () => {
       const slug = path.replace('/videos/', '');
       return <VideoDetailPage slug={slug} navigate={navigate} />;
     }
-    if (path === '/learn' || path === '/courses') {
+    if (path === '/courses') {
+      window.history.replaceState({}, '', '/learn');
+      return <LearnPage navigate={navigate} />;
+    }
+    if (path === '/learn') {
       return <LearnPage navigate={navigate} />;
     }
     if (path.startsWith('/learn/') && path.endsWith('/player')) {
@@ -152,7 +158,11 @@ const MainApp: React.FC = () => {
       const serviceSlug = path.replace('/services/', '');
       return <ServicesPage navigate={navigate} activeServiceSlug={serviceSlug} />;
     }
-    if (path === '/web' || path === '/web-services' || path === '/web-development' || path === '/web-design') {
+    if (path === '/web-services' || path === '/web-development' || path === '/web-design') {
+      window.history.replaceState({}, '', '/web');
+      return <WebPage navigate={navigate} />;
+    }
+    if (path === '/web') {
       return <WebPage navigate={navigate} />;
     }
     if (path === '/blog') {
@@ -162,7 +172,16 @@ const MainApp: React.FC = () => {
       const slug = path.replace('/blog/', '');
       return <ArticleDetailPage slug={slug} navigate={navigate} />;
     }
-    if (path === '/consultation' || path === '/business-growth-consultation') {
+    if (path === '/consultation') {
+      window.history.replaceState({}, '', '/business-growth-consultation');
+      return (
+        <ConsultationPage
+          navigate={navigate}
+          onBookingConfirmed={(bk) => setLastConfirmedBooking(bk)}
+        />
+      );
+    }
+    if (path === '/business-growth-consultation') {
       return (
         <ConsultationPage
           navigate={navigate}
@@ -180,6 +199,9 @@ const MainApp: React.FC = () => {
     }
     if (path === '/contact') {
       return <ContactPage navigate={navigate} />;
+    }
+    if (path === '/terms' || path === '/terms-of-service' || path === '/terms-and-conditions') {
+      return <TermsPage navigate={navigate} />;
     }
     if (path === '/login' || path === '/signin') {
       return <AuthPage initialMode="login" navigate={navigate} />;
@@ -236,7 +258,7 @@ const MainApp: React.FC = () => {
       return <NotFoundPage navigate={navigate} statusCode={410} reason="pricing-retired" />;
     }
     if (path === '/terms-conditions' || path === '/terms-conditions/') {
-      return <NotFoundPage navigate={navigate} statusCode={410} reason="terms-retired" />;
+      return <TermsPage navigate={navigate} />;
     }
 
     // Root Homepage
@@ -262,6 +284,7 @@ const MainApp: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] selection:bg-[#FF6B00] selection:text-white relative flex flex-col justify-between">
+      <SEOHead path={normalizedCurrentPath} />
       {!isAdminView && !isPlayerView && (
         <Navbar
           currentPath={currentPath}

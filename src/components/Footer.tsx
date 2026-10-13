@@ -150,14 +150,18 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
 
             {/* Primary Footer CTA */}
             <div className="pt-2">
-              <button
-                onClick={() => handleNav('/business-growth-consultation')}
+              <a
+                href="/business-growth-consultation"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleNav('/business-growth-consultation');
+                }}
                 className="w-full sm:w-auto px-6 py-3 bg-[#FF6B00] hover:bg-[#e66000] text-white text-xs font-bold uppercase tracking-widest flex items-center justify-center gap-2 shadow-lg shadow-[#FF6B00]/20 transition-all cursor-pointer rounded-none"
               >
                 <Calendar className="w-4 h-4 text-white" />
                 <span>BOOK A CONSULTATION</span>
                 <ArrowRight className="w-4 h-4" />
-              </button>
+              </a>
             </div>
 
             {/* Social Links (Strict Order: LinkedIn | Instagram | Facebook | YouTube) */}
@@ -188,34 +192,34 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
             </h4>
             <ul className="space-y-2.5 text-sm">
               <li>
-                <button onClick={() => handleNav('/about')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                <a href="/about" onClick={(e) => { e.preventDefault(); handleNav('/about'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                   About Digital Muid
-                </button>
+                </a>
               </li>
               <li>
-                <button onClick={() => handleNav('/insights')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                <a href="/insights" onClick={(e) => { e.preventDefault(); handleNav('/insights'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                   Insights & Essays
-                </button>
+                </a>
               </li>
               <li>
-                <button onClick={() => handleNav('/watch')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                <a href="/watch" onClick={(e) => { e.preventDefault(); handleNav('/watch'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                   Watch (Keynotes & Talks)
-                </button>
+                </a>
               </li>
               <li>
-                <button onClick={() => handleNav('/frameworks')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                <a href="/frameworks" onClick={(e) => { e.preventDefault(); handleNav('/frameworks'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                   Proprietary Frameworks
-                </button>
+                </a>
               </li>
               <li>
-                <button onClick={() => handleNav('/resources')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                <a href="/resources" onClick={(e) => { e.preventDefault(); handleNav('/resources'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                   Resources & Playbooks
-                </button>
+                </a>
               </li>
               <li>
-                <button onClick={() => handleNav('/speaking')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                <a href="/speaking" onClick={(e) => { e.preventDefault(); handleNav('/speaking'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                   Speaking & Keynotes
-                </button>
+                </a>
               </li>
             </ul>
           </div>
@@ -227,39 +231,39 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
             </h4>
             <ul className="space-y-2.5 text-sm">
               <li>
-                <button onClick={() => handleNav('/services/growth-strategy')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                <a href="/services/growth-strategy" onClick={(e) => { e.preventDefault(); handleNav('/services/growth-strategy'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                   Growth Strategy
-                </button>
+                </a>
               </li>
               <li>
-                <button onClick={() => handleNav('/services/ai-automation')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                <a href="/services/ai-automation" onClick={(e) => { e.preventDefault(); handleNav('/services/ai-automation'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                   AI & Automation
-                </button>
+                </a>
               </li>
               <li>
-                <button onClick={() => handleNav('/services/modern-marketing')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                <a href="/services/modern-marketing" onClick={(e) => { e.preventDefault(); handleNav('/services/modern-marketing'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                   Modern Marketing
-                </button>
+                </a>
               </li>
               <li>
-                <button onClick={() => handleNav('/services/personal-branding')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                <a href="/services/personal-branding" onClick={(e) => { e.preventDefault(); handleNav('/services/personal-branding'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                   Personal Branding
-                </button>
+                </a>
               </li>
               <li>
-                <button onClick={() => handleNav('/services/digital-transformation')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                <a href="/services/digital-transformation" onClick={(e) => { e.preventDefault(); handleNav('/services/digital-transformation'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                   Digital Transformation
-                </button>
+                </a>
               </li>
               <li>
-                <button onClick={() => handleNav('/services/education')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                <a href="/services/education" onClick={(e) => { e.preventDefault(); handleNav('/services/education'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                   Education & Workshops
-                </button>
+                </a>
               </li>
               <li>
-                <button onClick={() => handleNav('/web')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                <a href="/web" onClick={(e) => { e.preventDefault(); handleNav('/web'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block font-medium text-emerald-400">
                   Web Design & Development
-                </button>
+                </a>
               </li>
             </ul>
           </div>
@@ -272,9 +276,9 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
               </h4>
               <ul className="space-y-2.5 text-sm">
                 <li>
-                  <button onClick={() => handleNav('/learn')} className="text-[#60A5FA] font-medium hover:underline cursor-pointer text-left">
+                  <a href="/learn" onClick={(e) => { e.preventDefault(); handleNav('/learn'); }} className="text-[#60A5FA] font-medium hover:underline cursor-pointer text-left block">
                     Learn With Digital Muid
-                  </button>
+                  </a>
                 </li>
               </ul>
             </div>
@@ -285,19 +289,19 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
               </h4>
               <ul className="space-y-2.5 text-sm">
                 <li>
-                  <button onClick={() => handleNav('/blog')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                  <a href="/blog" onClick={(e) => { e.preventDefault(); handleNav('/blog'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                     Blog & Articles
-                  </button>
+                  </a>
                 </li>
                 <li>
-                  <button onClick={() => handleNav('/contact')} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left">
+                  <a href="/contact" onClick={(e) => { e.preventDefault(); handleNav('/contact'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block font-medium text-blue-400">
                     Get in Touch
-                  </button>
+                  </a>
                 </li>
                 <li>
-                  <button onClick={() => handleNav('/admin')} className="text-white/40 hover:text-white text-xs flex items-center gap-1 pt-2 cursor-pointer">
+                  <a href="/admin" onClick={(e) => { e.preventDefault(); handleNav('/admin'); }} className="text-white/40 hover:text-white text-xs flex items-center gap-1 pt-2 cursor-pointer">
                     <ShieldCheck className="w-3 h-3" /> Admin Center
-                  </button>
+                  </a>
                 </li>
               </ul>
             </div>
@@ -308,9 +312,9 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
         <div className="flex flex-col sm:flex-row items-center justify-between text-xs text-white/40 gap-4 font-interface">
           <p>© {new Date().getFullYear()} Digital Muid. All rights reserved. Intellectual property & strategic frameworks.</p>
           <div className="flex items-center gap-6">
-            <button onClick={() => handleNav('/contact')} className="hover:text-white cursor-pointer">Privacy Policy</button>
-            <button onClick={() => handleNav('/contact')} className="hover:text-white cursor-pointer">Terms of Service</button>
-            <button onClick={() => handleNav('/business-growth-consultation')} className="hover:text-white cursor-pointer">Consultation Terms</button>
+            <a href="/contact" onClick={(e) => { e.preventDefault(); handleNav('/contact'); }} className="hover:text-white cursor-pointer">Privacy Policy</a>
+            <a href="/terms" onClick={(e) => { e.preventDefault(); handleNav('/terms'); }} className="hover:text-white cursor-pointer">Terms & Conditions</a>
+            <a href="/terms" onClick={(e) => { e.preventDefault(); handleNav('/terms'); }} className="hover:text-white cursor-pointer">Consultation Terms</a>
           </div>
         </div>
       </div>

@@ -351,14 +351,18 @@ export const FrameworkDetailPage: React.FC<FrameworkDetailPageProps> = ({ slug, 
         <p className="text-slate-300 text-sm sm:text-base max-w-xl mx-auto">
           Book a 1-on-1 strategic consultation with Digital Muid to tailor this framework to your exact market positioning and business model.
         </p>
-        <button
-          onClick={() => navigate('/consultation')}
+        <a
+          href="/business-growth-consultation"
+          onClick={(e) => {
+            e.preventDefault();
+            navigate('/business-growth-consultation');
+          }}
           className="px-8 py-4 rounded-xl bg-[#FF6B00] hover:bg-[#FF7A1A] text-white font-bold text-base shadow-xl inline-flex items-center gap-2 cursor-pointer transition-all"
         >
           <Calendar className="w-5 h-5" />
           <span>Book Implementation Session (₹{totalCalculated})</span>
           <ArrowRight className="w-4 h-4" />
-        </button>
+        </a>
       </div>
     </div>
   );

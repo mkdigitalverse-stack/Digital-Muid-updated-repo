@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { GraduationCap, Sparkles, Clock, Users, CheckCircle2, ArrowRight, BookOpen, ShieldCheck, Heart } from 'lucide-react';
+import { SEOHead } from '../components/SEOHead';
 
 interface LearnPageProps {
   navigate: (path: string) => void;
@@ -17,6 +18,7 @@ export const LearnPage: React.FC<LearnPageProps> = ({ navigate }) => {
 
   return (
     <div id="learn-page-root" className="pt-28 sm:pt-32 pb-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-16">
+      <SEOHead path="/learn" />
       {/* Header */}
       <div className="max-w-3xl space-y-4">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold uppercase tracking-wider font-interface">

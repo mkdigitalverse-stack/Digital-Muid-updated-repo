@@ -326,14 +326,18 @@ export const VideoDetailPage: React.FC<VideoDetailPageProps> = ({ slug, navigate
         <p className="text-slate-300 text-sm max-w-lg mx-auto">
           Book a 1-on-1 strategic consultation with Digital Muid to unpack your specific operational roadmap.
         </p>
-        <button
-          onClick={() => navigate('/consultation')}
+        <a
+          href="/business-growth-consultation"
+          onClick={(e) => {
+            e.preventDefault();
+            navigate('/business-growth-consultation');
+          }}
           className="px-6 py-3 rounded-xl bg-[#FF6B00] hover:bg-[#FF7A1A] text-white font-bold text-sm inline-flex items-center gap-2 shadow-lg shadow-[#FF6B00]/30 transition-all cursor-pointer"
         >
           <Calendar className="w-4 h-4" />
           <span>Book Consultation (₹{totalCalculated})</span>
           <ArrowRight className="w-4 h-4" />
-        </button>
+        </a>
       </div>
 
       {/* Related Videos */}

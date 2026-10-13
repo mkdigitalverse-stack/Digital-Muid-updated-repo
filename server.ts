@@ -1,3 +1,4 @@
+process.env.DISABLE_HMR = "true";
 import "dotenv/config";
 import express from "express";
 import path from "path";
@@ -9,6 +10,7 @@ import { handleRazorpayWebhook } from "./server/paymentWebhook.js";
 import paymentRoutes from "./server/paymentRoutes.js";
 import webEnquiryRoutes from "./server/webEnquiryRoutes.js";
 import { seoRedirectMiddleware } from "./server/seoRedirects.js";
+import { injectSeoIntoHtml } from "./server/htmlSeoInjector.js";
 
 async function startServer() {
   const app = express();
@@ -70,24 +72,46 @@ async function startServer() {
   // 9. Vite middleware for development / Static fallback for production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
+      server: { middlewareMode: true, hmr: false },
+      appType: "custom",
     });
     app.use(vite.middlewares);
+
+    app.get("*", async (req, res, next) => {
+      if (req.path.startsWith("/api") || req.path.includes(".")) {
+        return next();
+      }
+      try {
+        const templatePath = path.resolve(process.cwd(), "index.html");
+        let template = fs.readFileSync(templatePath, "utf-8");
+        template = await vite.transformIndexHtml(req.originalUrl || req.url, template);
+        const finalHtml = injectSeoIntoHtml(template, req.path);
+        res.status(200).set({ "Content-Type": "text/html; charset=utf-8" }).end(finalHtml);
+      } catch (e) {
+        next(e);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), "dist");
     const indexPath = path.join(distPath, "index.html");
 
-    app.use(express.static(distPath, { index: false }));
+    app.use(express.static(distPath, { index: false, redirect: false }));
 
-    app.get("*", (_req, res) => {
+    app.get("*", (req, res) => {
       try {
         if (!fs.existsSync(indexPath)) {
           res.setHeader("Content-Type", "text/html; charset=utf-8");
           return res.status(200).send("<!doctype html><html><head><title>Loading...</title></head><body>Application is starting up...</body></html>");
         }
 
-        let html = fs.readFileSync(indexPath, "utf8");
+        const cleanSubdir = req.path.replace(/^\/+/, "").replace(/\/+$/, "");
+        const specificHtmlPath = cleanSubdir ? path.join(distPath, cleanSubdir, "index.html") : indexPath;
+
+        let html = fs.existsSync(specificHtmlPath)
+          ? fs.readFileSync(specificHtmlPath, "utf8")
+          : fs.readFileSync(indexPath, "utf8");
+
+        html = injectSeoIntoHtml(html, req.path);
 
         // Strictly client-safe environment variables - server secrets MUST NEVER be included
         const clientEnv = {

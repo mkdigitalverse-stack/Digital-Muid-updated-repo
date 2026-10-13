@@ -243,13 +243,17 @@ export const FrameworksPage: React.FC<FrameworksPageProps> = ({ navigate }) => {
           Book a 1-on-1 consultation to customize these models for your organization or explore our masterclasses and advisory engagements.
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
-          <button
-            onClick={() => navigate('/consultation')}
+          <a
+            href="/business-growth-consultation"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate('/business-growth-consultation');
+            }}
             className="px-8 py-3.5 rounded-xl bg-[#FF6B00] hover:bg-[#e66000] text-white font-bold text-xs uppercase tracking-widest shadow-xl inline-flex items-center gap-2 cursor-pointer transition-all"
           >
             <span>BOOK A CONSULTATION</span>
             <ArrowRight className="w-4 h-4" />
-          </button>
+          </a>
           <button
             onClick={() => navigate('/learn')}
             className="px-8 py-3.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs uppercase tracking-widest border border-white/20 inline-flex items-center gap-2 cursor-pointer transition-all"

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { Mail, MessageSquare, Send, CheckCircle2, Calendar, MapPin, Globe, ArrowRight, Linkedin, Instagram, Facebook, Youtube } from 'lucide-react';
+import { SEOHead } from '../components/SEOHead';
 
 interface ContactPageProps {
   navigate: (path: string) => void;
@@ -73,6 +74,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ navigate }) => {
 
   return (
     <div id="contact-page-root" className="pt-28 sm:pt-32 pb-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-16">
+      <SEOHead path="/contact" />
       {/* Header */}
       <div className="max-w-3xl space-y-4">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-[#1877F2] text-xs font-bold uppercase tracking-wider font-interface">

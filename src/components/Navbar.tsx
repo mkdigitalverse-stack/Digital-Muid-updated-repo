@@ -399,13 +399,16 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                       Strategies and systems for modern growth.
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleNav('/services')}
+                  <a
+                    href="/services"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleNav('/services');
+                    }}
                     className="text-[10px] font-bold text-[#1877F2] hover:underline cursor-pointer"
                   >
                     Our Growth System →
-                  </button>
+                  </a>
                 </div>
 
                 <div className="space-y-1">
@@ -413,10 +416,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     const Icon = item.icon;
                     const isActive = currentPath === item.path;
                     return (
-                      <button
+                      <a
                         key={item.path}
-                        type="button"
-                        onClick={() => handleNav(item.path)}
+                        href={item.path}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          handleNav(item.path);
+                        }}
                         className={`w-full text-left px-3 py-2 rounded-xl transition-all flex items-center gap-3 cursor-pointer group ${
                           isActive
                             ? 'bg-[#FF6B00]/20 border border-[#FF6B00]/40 text-white'
@@ -430,7 +436,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                           <div className="text-xs font-semibold text-white tracking-wide">{item.label}</div>
                           <div className="text-[10px] text-slate-400 truncate">{item.desc}</div>
                         </div>
-                      </button>
+                      </a>
                     );
                   })}
                 </div>
@@ -439,10 +445,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
           </div>
 
           {/* 3. LEARN */}
-          <button
+          <a
             id="nav-link-learn"
-            type="button"
-            onClick={() => handleNav('/learn')}
+            href="/learn"
+            onClick={(e) => {
+              e.preventDefault();
+              handleNav('/learn');
+            }}
             className={`text-[11px] font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer py-1.5 ${
               isLearnActive
                 ? 'text-white border-b-2 border-[#FF6B00] font-bold'
@@ -450,13 +459,16 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             }`}
           >
             LEARN
-          </button>
+          </a>
 
           {/* 4. BLOG */}
-          <button
+          <a
             id="nav-link-blog"
-            type="button"
-            onClick={() => handleNav('/blog')}
+            href="/blog"
+            onClick={(e) => {
+              e.preventDefault();
+              handleNav('/blog');
+            }}
             className={`text-[11px] font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer py-1.5 ${
               isBlogActive
                 ? 'text-white border-b-2 border-[#FF6B00] font-bold'
@@ -464,13 +476,16 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             }`}
           >
             BLOG
-          </button>
+          </a>
 
           {/* 5. CONTACT */}
-          <button
+          <a
             id="nav-link-contact"
-            type="button"
-            onClick={() => handleNav('/contact')}
+            href="/contact"
+            onClick={(e) => {
+              e.preventDefault();
+              handleNav('/contact');
+            }}
             className={`text-[11px] font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer py-1.5 ${
               isContactActive
                 ? 'text-white border-b-2 border-[#FF6B00] font-bold'
@@ -478,7 +493,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             }`}
           >
             CONTACT
-          </button>
+          </a>
         </nav>
 
         {/* Right Action Area */}
@@ -863,16 +878,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
           )}
 
           {/* Primary Consultation CTA Button (Tablet & Desktop: >= 640px) */}
-          <button
+          <a
             id="nav-book-consultation-btn"
-            type="button"
-            onClick={() => handleNav('/business-growth-consultation')}
+            href="/business-growth-consultation"
+            onClick={(e) => {
+              e.preventDefault();
+              handleNav('/business-growth-consultation');
+            }}
             className="hidden sm:inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 bg-[#FF6B00] hover:bg-[#e66000] text-white text-xs font-bold uppercase tracking-widest transition-all cursor-pointer shadow-lg shadow-[#FF6B00]/20 active:scale-[0.98] rounded-none font-interface min-h-[44px]"
           >
             <Calendar className="w-3.5 h-3.5 text-white" />
             <span>BOOK A CONSULTATION</span>
             <ArrowRight className="w-3.5 h-3.5" />
-          </button>
+          </a>
 
           {/* Mobile & Tablet Hamburger Toggle (< 1024px) */}
           <button
@@ -1034,9 +1052,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             </div>
 
             {/* Mobile Direct Links */}
-            <button
-              type="button"
-              onClick={() => handleNav('/learn')}
+            <a
+              href="/learn"
+              onClick={(e) => {
+                e.preventDefault();
+                handleNav('/learn');
+              }}
               className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all flex items-center justify-between cursor-pointer font-interface ${
                 isLearnActive
                   ? 'text-white bg-[#1877F2]/20 border border-[#1877F2]/40'
@@ -1045,11 +1066,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             >
               <span>LEARN WITH DIGITAL MUID</span>
               <ArrowRight className="w-4 h-4 text-slate-400" />
-            </button>
+            </a>
 
-            <button
-              type="button"
-              onClick={() => handleNav('/blog')}
+            <a
+              href="/blog"
+              onClick={(e) => {
+                e.preventDefault();
+                handleNav('/blog');
+              }}
               className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all flex items-center justify-between cursor-pointer font-interface ${
                 isBlogActive
                   ? 'text-white bg-[#1877F2]/20 border border-[#1877F2]/40'
@@ -1058,11 +1082,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             >
               <span>BLOG</span>
               <ArrowRight className="w-4 h-4 text-slate-400" />
-            </button>
+            </a>
 
-            <button
-              type="button"
-              onClick={() => handleNav('/contact')}
+            <a
+              href="/contact"
+              onClick={(e) => {
+                e.preventDefault();
+                handleNav('/contact');
+              }}
               className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all flex items-center justify-between cursor-pointer font-interface ${
                 isContactActive
                   ? 'text-white bg-[#1877F2]/20 border border-[#1877F2]/40'
@@ -1071,7 +1098,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             >
               <span>GET IN TOUCH</span>
               <ArrowRight className="w-4 h-4 text-slate-400" />
-            </button>
+            </a>
 
             {/* Member / Student Navigation Section */}
             {currentUser && !isAdminAuthenticated ? (
@@ -1278,16 +1305,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
           {/* Bottom Mobile Action CTAs & Social Links */}
           <div className="pt-4 pb-6 border-t border-slate-800/80 space-y-3 mt-4">
             {/* Primary Mobile CTA: Book a Consultation */}
-            <button
+            <a
               id="mobile-book-consultation-btn"
-              type="button"
-              onClick={() => handleNav('/business-growth-consultation')}
+              href="/business-growth-consultation"
+              onClick={(e) => {
+                e.preventDefault();
+                handleNav('/business-growth-consultation');
+              }}
               className="w-full min-h-[48px] py-3.5 px-4 bg-[#FF6B00] hover:bg-[#e66000] text-white font-bold text-xs uppercase tracking-widest text-center flex items-center justify-center gap-2 shadow-lg shadow-[#FF6B00]/30 cursor-pointer active:scale-98 transition-all font-interface"
             >
               <Calendar className="w-4 h-4" />
               <span>BOOK A CONSULTATION</span>
               <ArrowRight className="w-4 h-4" />
-            </button>
+            </a>
             <p className="text-center text-[11px] text-slate-400 font-interface">
               30-min strategic 1-on-1 session with Digital Muid
             </p>

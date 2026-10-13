@@ -206,14 +206,17 @@ export const MyConsultationsPage: React.FC<MyConsultationsPageProps> = ({ naviga
           >
             <RefreshCw className={`w-4 h-4 ${isRefreshing || isBookingsLoading ? 'animate-spin text-[#FF6B00]' : ''}`} />
           </button>
-          <button
-            type="button"
-            onClick={() => navigate('/consultation')}
+          <a
+            href="/business-growth-consultation"
+            onClick={(e) => {
+              e.preventDefault();
+              navigate('/business-growth-consultation');
+            }}
             className="px-5 py-2.5 bg-[#FF6B00] hover:bg-[#e66000] text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-sm shadow-[#FF6B00]/20"
           >
             <CalendarClock className="w-4 h-4" />
             <span>Book New Session</span>
-          </button>
+          </a>
         </div>
       </div>
 
@@ -348,15 +351,18 @@ export const MyConsultationsPage: React.FC<MyConsultationsPageProps> = ({ naviga
           </div>
 
           <div className="pt-2">
-            <button
-              type="button"
-              onClick={() => navigate('/consultation')}
+            <a
+              href="/business-growth-consultation"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/business-growth-consultation');
+              }}
               className="px-6 py-3 bg-[#FF6B00] hover:bg-[#e66000] text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-all inline-flex items-center gap-2 cursor-pointer shadow-md shadow-[#FF6B00]/20"
             >
               <Video className="w-4 h-4" />
               <span>Book Strategy Session</span>
               <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+            </a>
           </div>
         </div>
       ) : (
@@ -496,14 +502,17 @@ export const MyConsultationsPage: React.FC<MyConsultationsPageProps> = ({ naviga
                         <span>Open Meet Room</span>
                       </a>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => navigate('/consultation')}
-                      className="text-xs font-bold text-[#FF6B00] hover:text-[#e66000] flex items-center gap-1"
+                    <a
+                      href="/business-growth-consultation"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        navigate('/business-growth-consultation');
+                      }}
+                      className="text-xs font-bold text-[#FF6B00] hover:text-[#e66000] flex items-center gap-1 cursor-pointer"
                     >
                       <span>Book Another</span>
                       <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
+                    </a>
                   </div>
                 </div>
               </div>

@@ -26,6 +26,7 @@ import {
 import { paymentService } from '../services/paymentService';
 import { loadRazorpayCheckoutScript, getClientRazorpayKeyId } from '../lib/razorpay';
 import { Booking, RazorpayCheckoutSuccessResponse } from '../types';
+import { SEOHead } from '../components/SEOHead';
 
 interface ConsultationPageProps {
   navigate: (path: string) => void;
@@ -468,6 +469,7 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
   return (
     <div id="consultation-page-root" className="pt-28 sm:pt-32 pb-24 space-y-20">
+      <SEOHead path="/business-growth-consultation" />
       {/* ========================================================================= */}
       {/* 1. HERO SECTION */}
       {/* ========================================================================= */}
