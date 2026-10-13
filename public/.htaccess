@@ -43,6 +43,10 @@
   # URL 4: Old Terms & Conditions -> /terms
   RewriteRule ^terms-conditions/?$ /terms [R=301,L]
 
+  # Legacy WordPress Sitemap Index & Sub-sitemaps -> 301 to /sitemap.xml
+  RewriteRule ^sitemap_index\.xml/?$ https://digitalmuid.in/sitemap.xml [R=301,L]
+  RewriteRule ^(page|post|category)-sitemap\.xml/?$ https://digitalmuid.in/sitemap.xml [R=301,L]
+
   # -------------------------------------------------------------
   # 5. Standard SPA Fallback
   # -------------------------------------------------------------

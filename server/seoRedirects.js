@@ -124,6 +124,17 @@ export function seoRedirectMiddleware(req, res, next) {
     return res.redirect(301, '/terms' + queryPart);
   }
 
+  // URL 7: Legacy WordPress Sitemap Index & Sub-sitemaps -> 301 /sitemap.xml
+  if (
+    normalizedPath === '/sitemap_index.xml' ||
+    normalizedPath === '/sitemap_index' ||
+    normalizedPath === '/page-sitemap.xml' ||
+    normalizedPath === '/post-sitemap.xml' ||
+    normalizedPath === '/category-sitemap.xml'
+  ) {
+    return res.redirect(301, 'https://digitalmuid.in/sitemap.xml');
+  }
+
   // -------------------------------------------------------------------------
   // 4. DUPLICATE ROUTE ALIASES -> PRIMARY CANONICAL URLS (Permanent 301)
   // -------------------------------------------------------------------------

@@ -77,6 +77,16 @@ async function startServer() {
     });
     app.use(vite.middlewares);
 
+    // Guard: nonexistent XML files must return genuine HTTP 404 in development
+    app.use((req, res, next) => {
+      if (req.path.endsWith(".xml") && req.path !== "/sitemap.xml") {
+        res.status(404);
+        res.setHeader("Content-Type", "application/xml; charset=utf-8");
+        return res.send(`<?xml version="1.0" encoding="UTF-8"?><error><status>404</status><message>XML resource not found</message></error>`);
+      }
+      next();
+    });
+
     app.get("*", async (req, res, next) => {
       if (req.path.startsWith("/api") || req.path.includes(".")) {
         return next();
@@ -96,6 +106,16 @@ async function startServer() {
     const indexPath = path.join(distPath, "index.html");
 
     app.use(express.static(distPath, { index: false, redirect: false }));
+
+    // Guard: nonexistent XML files must return genuine HTTP 404, never fall through to HTML SPA
+    app.use((req, res, next) => {
+      if (req.path.endsWith(".xml")) {
+        res.status(404);
+        res.setHeader("Content-Type", "application/xml; charset=utf-8");
+        return res.send(`<?xml version="1.0" encoding="UTF-8"?><error><status>404</status><message>XML resource not found</message></error>`);
+      }
+      next();
+    });
 
     app.get("*", (req, res) => {
       try {
