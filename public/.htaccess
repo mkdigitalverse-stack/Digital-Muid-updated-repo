@@ -1,6 +1,31 @@
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
+
+  # -------------------------------------------------------------
+  # WordPress Migration 301 Redirects & 410 Retirements
+  # -------------------------------------------------------------
+  # URL 1: Old Services page -> /services
+  RewriteRule ^services-3/?$ /services [R=301,L]
+
+  # URL 5: Old Social Media Marketing -> /services/modern-marketing
+  RewriteRule ^services-3/social-media-marketing/?$ /services/modern-marketing [R=301,L]
+
+  # URL 6: Old SMM Packages in Lucknow -> /services/modern-marketing
+  RewriteRule ^smm-packages-in-lucknow/?$ /services/modern-marketing [R=301,L]
+
+  # URL 3: Old Meta Ads Course -> /learn/meta-ads-mastery
+  RewriteRule ^courses/complete-meta-ads-mastery-course-why-its-essential-to-start-early-in-your-career/?$ /learn/meta-ads-mastery [R=301,L]
+
+  # URL 2: Old Pricing page -> 410 Gone
+  RewriteRule ^price/?$ - [G,L]
+
+  # URL 4: Old Terms & Conditions -> 410 Gone
+  RewriteRule ^terms-conditions/?$ - [G,L]
+
+  # -------------------------------------------------------------
+  # Standard SPA Fallback
+  # -------------------------------------------------------------
   RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d

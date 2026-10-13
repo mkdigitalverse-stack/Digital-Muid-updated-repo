@@ -8,6 +8,7 @@ import { isSupabaseServerConfigured } from "./server/supabaseServer.js";
 import { handleRazorpayWebhook } from "./server/paymentWebhook.js";
 import paymentRoutes from "./server/paymentRoutes.js";
 import webEnquiryRoutes from "./server/webEnquiryRoutes.js";
+import { seoRedirectMiddleware } from "./server/seoRedirects.js";
 
 async function startServer() {
   const app = express();
@@ -63,7 +64,10 @@ async function startServer() {
     res.status(404).json({ error: "API endpoint not found" });
   });
 
-  // 7. Vite middleware for development / Static fallback for production
+  // 8. Legacy WordPress 301 Redirects & 410 Retirements Middleware
+  app.use(seoRedirectMiddleware);
+
+  // 9. Vite middleware for development / Static fallback for production
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

@@ -1,1 +1,32 @@
-/*    /index.html   200
+# =========================================================================
+# DIGITALMUID — WordPress Migration 301 Redirects & 410 Retirements
+# =========================================================================
+
+# URL 1: Old Services page -> Current Services page
+/services-3/                                                                                    /services                  301!
+/services-3                                                                                     /services                  301!
+
+# URL 5: Old Social Media Marketing service page -> Current Modern Marketing service page
+/services-3/social-media-marketing/                                                             /services/modern-marketing 301!
+/services-3/social-media-marketing                                                              /services/modern-marketing 301!
+
+# URL 6: Old SMM Packages in Lucknow page -> Current Modern Marketing service page (retains SMM intent)
+/smm-packages-in-lucknow/                                                                       /services/modern-marketing 301!
+/smm-packages-in-lucknow                                                                        /services/modern-marketing 301!
+
+# URL 3: Old Meta Ads Course page -> Live Meta Ads Mastery Masterclass page
+/courses/complete-meta-ads-mastery-course-why-its-essential-to-start-early-in-your-career/     /learn/meta-ads-mastery    301!
+/courses/complete-meta-ads-mastery-course-why-its-essential-to-start-early-in-your-career      /learn/meta-ads-mastery    301!
+
+# URL 2: Old Pricing page (Permanently Retired) -> 410 Gone
+/price/                                                                                         /410.html                  410!
+/price                                                                                          /410.html                  410!
+
+# URL 4: Old Subdomain Terms & Conditions page (Permanently Retired) -> 410 Gone
+/terms-conditions/                                                                              /410.html                  410!
+/terms-conditions                                                                               /410.html                  410!
+
+# =========================================================================
+# SPA Catch-all Fallback (Direct dynamic routes to React index.html)
+# =========================================================================
+/*                                                                                              /index.html                200

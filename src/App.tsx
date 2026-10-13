@@ -21,6 +21,7 @@ import { ResourcesPage } from './pages/ResourcesPage';
 import { SpeakingPage } from './pages/SpeakingPage';
 import { ServicesPage } from './pages/ServicesPage';
 import { WebPage } from './pages/WebPage';
+import { NotFoundPage } from './pages/NotFoundPage';
 import { ConsultationPage } from './pages/ConsultationPage';
 import { ConsultationConfirmationPage } from './pages/ConsultationConfirmationPage';
 import { ContactPage } from './pages/ContactPage';
@@ -218,16 +219,41 @@ const MainApp: React.FC = () => {
       return <AdminPage navigate={navigate} />;
     }
 
-    // Default Fallback to HomePage
-    return (
-      <HomePage
-        navigate={navigate}
-        onOpenResourceModal={(id) => {
-          setSelectedResourceIdForModal(id);
-          navigate('/resources');
-        }}
-      />
-    );
+    // Legacy WordPress URLs Handling (Client-side routing fallback)
+    if (path === '/services-3' || path === '/services-3/') {
+      return <ServicesPage navigate={navigate} />;
+    }
+    if (path === '/services-3/social-media-marketing' || path === '/services-3/social-media-marketing/') {
+      return <ServicesPage navigate={navigate} activeServiceSlug="modern-marketing" />;
+    }
+    if (path === '/smm-packages-in-lucknow' || path === '/smm-packages-in-lucknow/') {
+      return <ServicesPage navigate={navigate} activeServiceSlug="modern-marketing" />;
+    }
+    if (path.includes('complete-meta-ads-mastery-course')) {
+      return <CourseDetailPage slug="meta-ads-mastery" navigate={navigate} />;
+    }
+    if (path === '/price' || path === '/price/') {
+      return <NotFoundPage navigate={navigate} statusCode={410} reason="pricing-retired" />;
+    }
+    if (path === '/terms-conditions' || path === '/terms-conditions/') {
+      return <NotFoundPage navigate={navigate} statusCode={410} reason="terms-retired" />;
+    }
+
+    // Root Homepage
+    if (path === '/' || path === '') {
+      return (
+        <HomePage
+          navigate={navigate}
+          onOpenResourceModal={(id) => {
+            setSelectedResourceIdForModal(id);
+            navigate('/resources');
+          }}
+        />
+      );
+    }
+
+    // Unknown URL: 404 Not Found Page (Prevents soft-404 homepage fallback)
+    return <NotFoundPage navigate={navigate} statusCode={404} />;
   };
 
   const normalizedCurrentPath = currentPath.split('?')[0].split('#')[0].replace(/\/+$/, '') || '/';
