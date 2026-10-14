@@ -314,14 +314,15 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
         </div>
 
         {/* Bottom Bar */}
-        <div className="flex flex-col sm:flex-row items-center justify-between text-xs text-white/40 gap-4 font-interface">
-          <p>Copyright © 2026 Digital Muid.</p>
-          <div className="flex items-center gap-6">
-            <a href="/about" onClick={(e) => { e.preventDefault(); handleNav('/about'); }} className="hover:text-white cursor-pointer">About</a>
-            <a href="/services" onClick={(e) => { e.preventDefault(); handleNav('/services'); }} className="hover:text-white cursor-pointer">Services</a>
-            <a href="/learn" onClick={(e) => { e.preventDefault(); handleNav('/learn'); }} className="hover:text-white cursor-pointer">Courses</a>
-            <a href="/terms" onClick={(e) => { e.preventDefault(); handleNav('/terms'); }} className="hover:text-white cursor-pointer">Privacy Policy</a>
-            <a href="/terms" onClick={(e) => { e.preventDefault(); handleNav('/terms'); }} className="hover:text-white cursor-pointer">Terms & Conditions</a>
+        <div className="flex flex-col sm:flex-row items-center justify-between text-xs text-white/50 gap-4 font-interface">
+          <p>© 2026 Digital Muid.</p>
+          <div className="flex flex-wrap items-center justify-center gap-6">
+            <a href="/services" onClick={(e) => { e.preventDefault(); handleNav('/services'); }} className="hover:text-white transition-colors cursor-pointer">Services</a>
+            <a href="/learn" onClick={(e) => { e.preventDefault(); handleNav('/learn'); }} className="hover:text-white transition-colors cursor-pointer">Courses</a>
+            <a href="/about" onClick={(e) => { e.preventDefault(); handleNav('/about'); }} className="hover:text-white transition-colors cursor-pointer">About</a>
+            <a href="/blog" onClick={(e) => { e.preventDefault(); handleNav('/blog'); }} className="hover:text-white transition-colors cursor-pointer">Blog</a>
+            <a href="/contact" onClick={(e) => { e.preventDefault(); handleNav('/contact'); }} className="hover:text-white transition-colors cursor-pointer">Contact</a>
+            <a href="/terms" onClick={(e) => { e.preventDefault(); handleNav('/terms'); }} className="hover:text-white transition-colors cursor-pointer">Privacy Policy</a>
           </div>
         </div>
       </div>

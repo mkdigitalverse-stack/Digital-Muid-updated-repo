@@ -81,5 +81,20 @@ export const analytics = {
       file_name: fileName,
       status: 'delivered'
     });
+  },
+
+  trackArticleClick: (articleSlug: string, articleTitle: string) => {
+    trackEvent('article_card_click', {
+      article_slug: articleSlug,
+      article_title: articleTitle,
+      destination: `/blog/${articleSlug}`
+    });
+  },
+
+  trackVslInteraction: (action: string) => {
+    trackEvent('vsl_interaction', {
+      action: action,
+      video_title: 'How we engineer digital growth in 2026'
+    });
   }
 };
