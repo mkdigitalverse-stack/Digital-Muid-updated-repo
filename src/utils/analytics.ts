@@ -98,17 +98,52 @@ export const analytics = {
     });
   },
 
-  trackProofInteraction: (action: string, label: string) => {
-    trackEvent('proof_interaction', {
-      action,
-      label
+  trackGrowthAuditFormStart: () => {
+    trackEvent('growth_audit_form_start', {
+      form_name: 'Request Growth Audit Qualification',
+      timestamp: new Date().toISOString()
     });
   },
 
-  trackTeardownReview: (teardownId: string, teardownTitle: string) => {
-    trackEvent('teardown_review_click', {
-      teardown_id: teardownId,
-      teardown_title: teardownTitle
+  trackGrowthAuditStepComplete: (stepNumber: number, stepName: string) => {
+    trackEvent('growth_audit_step_complete', {
+      step_number: stepNumber,
+      step_name: stepName
+    });
+  },
+
+  trackGrowthAuditFormSubmit: (status: 'qualified' | 'academy_nurture' | 'startup_review') => {
+    trackEvent('growth_audit_form_submit', {
+      qualification_status: status,
+      status: 'submitted'
+    });
+  },
+
+  trackGrowthAuditQualified: (qualificationStatus: string) => {
+    trackEvent('growth_audit_qualified', {
+      qualification_status: qualificationStatus
+    });
+  },
+
+  trackGrowthAuditAcademyRedirect: () => {
+    trackEvent('growth_audit_academy_redirect', {
+      destination: '/learn',
+      action: 'explore_academy_click'
+    });
+  },
+
+  trackGrowthAuditBookingStart: () => {
+    trackEvent('growth_audit_booking_start', {
+      action: 'calendar_opened'
+    });
+  },
+
+  trackGrowthAuditBookingConfirmed: (bookingRef: string, date: string, time: string) => {
+    trackEvent('growth_audit_booking_confirmed', {
+      booking_reference: bookingRef,
+      appointment_date: date,
+      appointment_time: time,
+      status: 'confirmed'
     });
   }
 };

@@ -152,7 +152,7 @@ const MainApp: React.FC = () => {
     if (path === '/speaking') {
       return <SpeakingPage navigate={navigate} />;
     }
-    if (path === '/services/growth-systems') {
+    if (path === '/services/growth-systems' || path === '/growth-systems') {
       return <GrowthSystemsPage navigate={navigate} />;
     }
     if (path === '/services') {
@@ -176,7 +176,7 @@ const MainApp: React.FC = () => {
       const slug = path.replace('/blog/', '');
       return <ArticleDetailPage slug={slug} navigate={navigate} />;
     }
-    if (path === '/consultation') {
+    if (path === '/consultation' || path === '/growth-audit' || path === '/request-growth-audit') {
       window.history.replaceState({}, '', '/business-growth-consultation');
       return (
         <ConsultationPage

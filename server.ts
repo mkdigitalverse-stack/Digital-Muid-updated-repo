@@ -9,6 +9,7 @@ import { isSupabaseServerConfigured } from "./server/supabaseServer.js";
 import { handleRazorpayWebhook } from "./server/paymentWebhook.js";
 import paymentRoutes from "./server/paymentRoutes.js";
 import webEnquiryRoutes from "./server/webEnquiryRoutes.js";
+import growthAuditRoutes from "./server/growthAuditRoutes.js";
 import { seoRedirectMiddleware } from "./server/seoRedirects.js";
 import { injectSeoIntoHtml } from "./server/htmlSeoInjector.js";
 
@@ -61,7 +62,10 @@ async function startServer() {
   // 6. Web Project Enquiries CRM APIs
   app.use("/api/web-enquiries", webEnquiryRoutes);
 
-  // 7. API 404 handler - prevents unhandled API requests from returning index.html
+  // 7. Growth Audit Qualification CRM & Booking APIs
+  app.use("/api/growth-audit", growthAuditRoutes);
+
+  // 8. API 404 handler - prevents unhandled API requests from returning index.html
   app.all("/api/*", (_req, res) => {
     res.status(404).json({ error: "API endpoint not found" });
   });
