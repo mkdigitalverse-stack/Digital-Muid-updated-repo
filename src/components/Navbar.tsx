@@ -69,11 +69,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Dropdown states for Desktop
-  const [activeDropdown, setActiveDropdown] = useState<'services' | 'learn' | 'frameworks' | 'user' | 'notifications' | null>(null);
+  const [activeDropdown, setActiveDropdown] = useState<'about' | 'services' | 'user' | 'notifications' | null>(null);
   const dropdownTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Accordion state for Mobile Menu
-  const [mobileExpandedSection, setMobileExpandedSection] = useState<'services' | 'learn' | 'frameworks' | 'student' | null>(null);
+  const [mobileExpandedSection, setMobileExpandedSection] = useState<'about' | 'services' | 'student' | null>(null);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -152,7 +152,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleMouseEnter = (menu: 'services' | 'learn' | 'frameworks' | 'user' | 'notifications') => {
+  const handleMouseEnter = (menu: 'about' | 'services' | 'user' | 'notifications') => {
     if (dropdownTimeoutRef.current) {
       clearTimeout(dropdownTimeoutRef.current);
     }
@@ -162,94 +162,34 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
   const handleMouseLeave = () => {
     dropdownTimeoutRef.current = setTimeout(() => {
       setActiveDropdown(null);
-    }, 180);
+    }, 150);
   };
 
-  const toggleDropdown = (menu: 'services' | 'learn' | 'frameworks' | 'user' | 'notifications') => {
+  const toggleDropdown = (menu: 'about' | 'services' | 'user' | 'notifications') => {
     setActiveDropdown((prev) => (prev === menu ? null : menu));
   };
 
-  const toggleMobileAccordion = (menu: 'services' | 'learn' | 'frameworks' | 'student') => {
+  const toggleMobileAccordion = (menu: 'about' | 'services' | 'student') => {
     setMobileExpandedSection((prev) => (prev === menu ? null : menu));
   };
 
+  const aboutSubmenu = [
+    { label: 'Insights', path: '/insights', icon: Lightbulb, desc: 'Essays on AI, strategy & economics' },
+    { label: 'Watch', path: '/watch', icon: Video, desc: 'Keynotes, breakdowns & talks' },
+    { label: 'Frameworks', path: '/frameworks', icon: Layers, desc: 'Proprietary models & mental architecture' },
+    { label: 'Resources', path: '/resources', icon: FileText, desc: 'Guides, toolkits & operational SOPs' },
+    { label: 'Speaking', path: '/speaking', icon: Mic, desc: 'Keynotes, panels & fireside sessions' }
+  ];
+
   const servicesSubmenu = [
-    {
-      label: 'Agency',
-      path: '/agency-services',
-      icon: Briefcase,
-      desc: 'Enterprise performance & bespoke custom development',
-      badge: 'Bespoke'
-    },
-    {
-      label: 'Growth Systems',
-      path: '/services/growth-systems',
-      icon: TrendingUp,
-      desc: 'The 6-stage scalable acquisition & retention operating engine',
-      badge: 'Signature'
-    },
-    {
-      label: 'Consultation Business Growth',
-      path: '/business-growth-consultation',
-      icon: Calendar,
-      desc: 'Private 1-on-1 strategic growth consultation with Digital Muid',
-      badge: 'Paid 1-on-1'
-    }
-  ];
-
-  const learnSubmenu = [
-    {
-      label: 'Academy',
-      path: '/academy',
-      icon: GraduationCap,
-      desc: 'Brand philosophy, curriculums, toolkits & community',
-      badge: 'Featured'
-    },
-    {
-      label: 'Course Catalog',
-      path: '/learn',
-      icon: BookOpen,
-      desc: 'Browse all practical courses, lesson modules & student portal'
-    }
-  ];
-
-  const frameworksSubmenu = [
-    {
-      label: 'Growth Strategies',
-      path: '/frameworks/growth-strategies',
-      icon: TrendingUp,
-      desc: 'The Digital Growth Stack™ — 6-stage integrated operating engine'
-    },
-    {
-      label: 'AI Automation',
-      path: '/frameworks/ai-automation',
-      icon: Bot,
-      desc: 'Autonomous enterprise workflows & scoped agentic systems'
-    },
-    {
-      label: 'Modern Marketing',
-      path: '/frameworks/modern-marketing',
-      icon: Megaphone,
-      desc: 'High-signal editorial distribution & algorithmic ad orchestration'
-    },
-    {
-      label: 'Personal Branding',
-      path: '/frameworks/personal-branding',
-      icon: Award,
-      desc: 'Personal Authority Framework™ — expert to industry reference point'
-    },
-    {
-      label: 'Digital Transformation',
-      path: '/frameworks/digital-transformation',
-      icon: Cpu,
-      desc: 'Modernizing legacy architectures into real-time autonomous systems'
-    },
-    {
-      label: 'Education',
-      path: '/frameworks/education',
-      icon: GraduationCap,
-      desc: 'Growth operator pedagogical mechanics & live teardowns'
-    }
+    { label: 'Agency Services', path: '/agency-services', icon: Briefcase, desc: 'Enterprise performance & custom development' },
+    { label: 'Growth Strategy', path: '/services/growth-strategy', icon: TrendingUp, desc: 'Acquisition loops & CAC/LTV scaling' },
+    { label: 'AI & Automation', path: '/services/ai-automation', icon: Bot, desc: 'Operational LLM & agent workflows' },
+    { label: 'Modern Marketing', path: '/services/modern-marketing', icon: Megaphone, desc: 'High-signal distribution & funnels' },
+    { label: 'Personal Branding', path: '/services/personal-branding', icon: Award, desc: 'Founder authority & IP codification' },
+    { label: 'Digital Transformation', path: '/services/digital-transformation', icon: Cpu, desc: 'Modernizing legacy digital stacks' },
+    { label: 'Education', path: '/services/education', icon: GraduationCap, desc: 'Workshops, masterclasses & cohorts' },
+    { label: 'Web', path: '/web', icon: Globe, desc: 'Website design & custom web development' }
   ];
 
   const socialLinks = [
@@ -279,29 +219,17 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
     }
   ];
 
-  const isAboutActive = currentPath === '/about';
+  const isAboutActive = ['/about', '/insights', '/watch', '/frameworks', '/resources', '/speaking'].some(
+    (p) => currentPath === p || currentPath.startsWith(p + '/')
+  );
+
   const isServicesActive =
-    currentPath === '/agency-services' ||
-    currentPath === '/services/growth-systems' ||
-    currentPath === '/growth-systems' ||
     currentPath === '/services' ||
     currentPath.startsWith('/services/') ||
-    currentPath === '/business-growth-consultation' ||
-    currentPath === '/consultation';
-  const isLearnActive =
-    currentPath === '/academy' ||
-    currentPath === '/learn' ||
-    currentPath.startsWith('/learn/') ||
-    currentPath === '/courses' ||
-    currentPath.startsWith('/courses/');
-  const isFrameworksActive =
-    currentPath === '/frameworks' || currentPath.startsWith('/frameworks/');
-  const isBlogActive =
-    currentPath === '/blog' ||
-    currentPath.startsWith('/blog/') ||
-    currentPath === '/insights' ||
-    currentPath.startsWith('/insights/') ||
-    currentPath.startsWith('/articles/');
+    currentPath === '/growth-systems' ||
+    currentPath === '/agency-services';
+  const isLearnActive = currentPath === '/learn' || currentPath.startsWith('/learn/');
+  const isBlogActive = currentPath === '/blog' || currentPath.startsWith('/blog/');
   const isContactActive = currentPath === '/contact';
 
   return (
@@ -350,331 +278,104 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
         </div>
 
         {/* Desktop Navigation Links (>= 1024px) */}
-        <nav className="hidden lg:flex items-center gap-5 xl:gap-7 font-interface" aria-label="Main Navigation">
-          {/* 1. About */}
+        <nav className="hidden lg:flex items-center gap-6 xl:gap-8 font-interface" aria-label="Main Navigation">
           <a
-            id="nav-link-about"
+            id="nav-link-growth-systems"
+            href="/services/growth-systems"
+            onClick={(e) => {
+              e.preventDefault();
+              handleNav('/services/growth-systems');
+            }}
+            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
+              currentPath === '/services' || currentPath.startsWith('/services/') || currentPath === '/growth-systems'
+                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            Growth systems
+          </a>
+
+          <a
+            id="nav-link-agency-services"
+            href="/agency-services"
+            onClick={(e) => {
+              e.preventDefault();
+              handleNav('/agency-services');
+            }}
+            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
+              currentPath === '/agency-services'
+                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            Agency services
+          </a>
+
+          <a
+            id="nav-link-academy"
+            href="/academy"
+            onClick={(e) => {
+              e.preventDefault();
+              analytics.trackAcademyCta('navbar', '/academy');
+              handleNav('/academy');
+            }}
+            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
+              currentPath === '/academy'
+                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            Academy
+          </a>
+
+          <a
+            id="nav-link-learn"
+            href="/learn"
+            onClick={(e) => {
+              e.preventDefault();
+              handleNav('/learn');
+            }}
+            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
+              currentPath === '/learn' || currentPath.startsWith('/learn/')
+                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            Learn
+          </a>
+
+          <a
+            id="nav-link-growth-stack"
+            href="/frameworks/digital-growth-stack"
+            onClick={(e) => {
+              e.preventDefault();
+              analytics.trackFrameworkClick('digital-growth-stack', 'The Digital Growth Stack™');
+              handleNav('/frameworks/digital-growth-stack');
+            }}
+            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
+              currentPath === '/frameworks/digital-growth-stack'
+                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            The growth stack™
+          </a>
+
+          <a
+            id="nav-link-operator"
             href="/about"
             onClick={(e) => {
               e.preventDefault();
+              analytics.trackOperatorProfileClick();
               handleNav('/about');
             }}
             className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
-              isAboutActive
+              currentPath === '/about'
                 ? 'text-white border-b-2 border-[#FF6B00] font-bold'
                 : 'text-slate-300 hover:text-white'
             }`}
           >
-            About
-          </a>
-
-          {/* 2. Services — Dropdown */}
-          <div
-            className="relative"
-            onMouseEnter={() => handleMouseEnter('services')}
-            onMouseLeave={handleMouseLeave}
-          >
-            <button
-              id="nav-btn-services"
-              type="button"
-              aria-haspopup="true"
-              aria-expanded={activeDropdown === 'services'}
-              aria-controls="nav-dropdown-services"
-              onClick={() => toggleDropdown('services')}
-              onKeyDown={(e) => {
-                if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setActiveDropdown('services');
-                }
-              }}
-              className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-[#FF6B00]/60 rounded-md px-1 ${
-                isServicesActive
-                  ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              <span>Services</span>
-              <ChevronDown
-                className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                  activeDropdown === 'services' ? 'rotate-180 text-[#FF6B00]' : 'text-slate-400'
-                }`}
-              />
-            </button>
-
-            {activeDropdown === 'services' && (
-              <div
-                id="nav-dropdown-services"
-                role="menu"
-                aria-labelledby="nav-btn-services"
-                className="absolute left-0 top-full mt-2 w-80 rounded-2xl bg-[#0B1526]/98 backdrop-blur-xl border border-white/10 shadow-2xl shadow-black/70 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
-              >
-                <div className="px-3 py-1.5 border-b border-white/5 mb-1 flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Services & Solutions</span>
-                </div>
-                <div className="space-y-1">
-                  {servicesSubmenu.map((item) => {
-                    const Icon = item.icon;
-                    const isItemActive = currentPath === item.path || (item.path === '/services/growth-systems' && (currentPath === '/growth-systems' || currentPath === '/services'));
-                    return (
-                      <a
-                        key={item.path}
-                        role="menuitem"
-                        href={item.path}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          handleNav(item.path);
-                        }}
-                        className={`w-full p-2.5 rounded-xl transition-all flex items-start gap-3 cursor-pointer text-left ${
-                          isItemActive
-                            ? 'bg-[#FF6B00]/15 text-white border border-[#FF6B00]/30'
-                            : 'hover:bg-white/5 text-slate-200'
-                        }`}
-                      >
-                        <div className={`p-2 rounded-lg mt-0.5 shrink-0 ${
-                          isItemActive ? 'bg-[#FF6B00] text-white' : 'bg-white/5 text-[#FF6B00]'
-                        }`}>
-                          <Icon className="w-4 h-4" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="text-xs font-bold text-white tracking-tight">{item.label}</span>
-                            {item.badge && (
-                              <span className="px-1.5 py-0.2 bg-[#FF6B00]/20 text-[#FF6B00] text-[9px] font-bold rounded-full uppercase tracking-wider border border-[#FF6B00]/30">
-                                {item.badge}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-slate-400 mt-0.5 leading-snug line-clamp-2">
-                            {item.desc}
-                          </p>
-                        </div>
-                      </a>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 3. Learn — Dropdown */}
-          <div
-            className="relative"
-            onMouseEnter={() => handleMouseEnter('learn')}
-            onMouseLeave={handleMouseLeave}
-          >
-            <button
-              id="nav-btn-learn"
-              type="button"
-              aria-haspopup="true"
-              aria-expanded={activeDropdown === 'learn'}
-              aria-controls="nav-dropdown-learn"
-              onClick={() => toggleDropdown('learn')}
-              onKeyDown={(e) => {
-                if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setActiveDropdown('learn');
-                }
-              }}
-              className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-[#FF6B00]/60 rounded-md px-1 ${
-                isLearnActive
-                  ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              <span>Learn</span>
-              <ChevronDown
-                className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                  activeDropdown === 'learn' ? 'rotate-180 text-[#FF6B00]' : 'text-slate-400'
-                }`}
-              />
-            </button>
-
-            {activeDropdown === 'learn' && (
-              <div
-                id="nav-dropdown-learn"
-                role="menu"
-                aria-labelledby="nav-btn-learn"
-                className="absolute left-0 top-full mt-2 w-72 rounded-2xl bg-[#0B1526]/98 backdrop-blur-xl border border-white/10 shadow-2xl shadow-black/70 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
-              >
-                <div className="px-3 py-1.5 border-b border-white/5 mb-1 flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Education & Courses</span>
-                </div>
-                <div className="space-y-1">
-                  {learnSubmenu.map((item) => {
-                    const Icon = item.icon;
-                    const isItemActive = currentPath === item.path || (item.path === '/learn' && currentPath.startsWith('/learn/'));
-                    return (
-                      <a
-                        key={item.path}
-                        role="menuitem"
-                        href={item.path}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          if (item.path === '/academy') {
-                            analytics.trackAcademyCta('navbar', '/academy');
-                          }
-                          handleNav(item.path);
-                        }}
-                        className={`w-full p-2.5 rounded-xl transition-all flex items-start gap-3 cursor-pointer text-left ${
-                          isItemActive
-                            ? 'bg-[#FF6B00]/15 text-white border border-[#FF6B00]/30'
-                            : 'hover:bg-white/5 text-slate-200'
-                        }`}
-                      >
-                        <div className={`p-2 rounded-lg mt-0.5 shrink-0 ${
-                          isItemActive ? 'bg-[#FF6B00] text-white' : 'bg-white/5 text-[#FF6B00]'
-                        }`}>
-                          <Icon className="w-4 h-4" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="text-xs font-bold text-white tracking-tight">{item.label}</span>
-                            {item.badge && (
-                              <span className="px-1.5 py-0.2 bg-[#FF6B00]/20 text-[#FF6B00] text-[9px] font-bold rounded-full uppercase tracking-wider border border-[#FF6B00]/30">
-                                {item.badge}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-slate-400 mt-0.5 leading-snug line-clamp-2">
-                            {item.desc}
-                          </p>
-                        </div>
-                      </a>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 4. Frameworks — Dropdown */}
-          <div
-            className="relative"
-            onMouseEnter={() => handleMouseEnter('frameworks')}
-            onMouseLeave={handleMouseLeave}
-          >
-            <button
-              id="nav-btn-frameworks"
-              type="button"
-              aria-haspopup="true"
-              aria-expanded={activeDropdown === 'frameworks'}
-              aria-controls="nav-dropdown-frameworks"
-              onClick={() => toggleDropdown('frameworks')}
-              onKeyDown={(e) => {
-                if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setActiveDropdown('frameworks');
-                }
-              }}
-              className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-[#FF6B00]/60 rounded-md px-1 ${
-                isFrameworksActive
-                  ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                  : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              <span>Frameworks</span>
-              <ChevronDown
-                className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                  activeDropdown === 'frameworks' ? 'rotate-180 text-[#FF6B00]' : 'text-slate-400'
-                }`}
-              />
-            </button>
-
-            {activeDropdown === 'frameworks' && (
-              <div
-                id="nav-dropdown-frameworks"
-                role="menu"
-                aria-labelledby="nav-btn-frameworks"
-                className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-[440px] rounded-2xl bg-[#0B1526]/98 backdrop-blur-xl border border-white/10 shadow-2xl shadow-black/70 p-2.5 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
-              >
-                <div className="px-3 py-1.5 border-b border-white/5 mb-1.5 flex items-center justify-between">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Proprietary Frameworks</span>
-                  <a
-                    href="/frameworks"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      handleNav('/frameworks');
-                    }}
-                    className="text-[10px] text-[#FF6B00] hover:text-[#FF8533] font-semibold flex items-center gap-1 cursor-pointer"
-                  >
-                    <span>View All</span>
-                    <ArrowRight className="w-2.5 h-2.5" />
-                  </a>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                  {frameworksSubmenu.map((item) => {
-                    const Icon = item.icon;
-                    const isItemActive = currentPath === item.path ||
-                      (item.path === '/frameworks/growth-strategies' && currentPath === '/frameworks/digital-growth-stack') ||
-                      (item.path === '/frameworks/ai-automation' && currentPath === '/frameworks/ai-transformation-framework') ||
-                      (item.path === '/frameworks/personal-branding' && currentPath === '/frameworks/personal-authority-framework');
-                    return (
-                      <a
-                        key={item.path}
-                        role="menuitem"
-                        href={item.path}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          analytics.trackFrameworkClick(item.path.replace('/frameworks/', ''), item.label);
-                          handleNav(item.path);
-                        }}
-                        className={`p-2 rounded-xl transition-all flex items-start gap-2.5 cursor-pointer text-left ${
-                          isItemActive
-                            ? 'bg-[#FF6B00]/15 text-white border border-[#FF6B00]/30'
-                            : 'hover:bg-white/5 text-slate-200'
-                        }`}
-                      >
-                        <div className={`p-1.5 rounded-lg mt-0.5 shrink-0 ${
-                          isItemActive ? 'bg-[#FF6B00] text-white' : 'bg-white/5 text-[#FF6B00]'
-                        }`}>
-                          <Icon className="w-3.5 h-3.5" />
-                        </div>
-                        <div className="min-w-0">
-                          <span className="text-xs font-bold text-white tracking-tight block truncate">{item.label}</span>
-                          <p className="text-[10px] text-slate-400 mt-0.5 leading-snug line-clamp-2">
-                            {item.desc}
-                          </p>
-                        </div>
-                      </a>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 5. Blog */}
-          <a
-            id="nav-link-blog"
-            href="/blog"
-            onClick={(e) => {
-              e.preventDefault();
-              handleNav('/blog');
-            }}
-            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
-              isBlogActive
-                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            Blog
-          </a>
-
-          {/* 6. Contact */}
-          <a
-            id="nav-link-contact"
-            href="/contact"
-            onClick={(e) => {
-              e.preventDefault();
-              handleNav('/contact');
-            }}
-            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
-              isContactActive
-                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            Contact
+            The operator
           </a>
         </nav>
 
@@ -1059,19 +760,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             </button>
           )}
 
-          {/* Primary Book Consultation CTA Button (Tablet & Desktop: >= 640px) */}
+          {/* Primary Growth Audit CTA Button (Tablet & Desktop: >= 640px) */}
           <a
-            id="nav-book-consultation-btn"
+            id="nav-growth-audit-btn"
             href="/business-growth-consultation"
             onClick={(e) => {
               e.preventDefault();
-              analytics.trackConsultationCta('navbar');
+              analytics.trackGrowthAuditCta('navbar');
               handleNav('/business-growth-consultation');
             }}
             className="hidden sm:inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 bg-[#FF6B00] hover:bg-[#FF7A1A] text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-[#FF6B00]/25 active:scale-[0.98] rounded-xl font-interface min-h-[44px] whitespace-nowrap"
           >
-            <Calendar className="w-3.5 h-3.5" />
-            <span>Book Consultation</span>
+            <span>Request growth audit</span>
+            <ArrowRight className="w-3.5 h-3.5" />
           </a>
 
           {/* Mobile & Tablet Hamburger Toggle (< 1024px) */}
