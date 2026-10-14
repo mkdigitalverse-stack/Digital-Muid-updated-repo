@@ -127,6 +127,106 @@ export const SEO_DATA = {
     `
   },
 
+  '/academy': {
+    path: '/academy',
+    canonicalUrl: 'https://digitalmuid.in/academy',
+    title: 'Digital MUID Academy | Digital Marketing & AI Education',
+    description: 'Explore practical digital marketing, advertising, SEO, and AI education for students, freelancers, and growth operators at Digital MUID Academy.',
+    ogTitle: 'Digital MUID Academy | Digital Marketing & AI Education',
+    ogDescription: 'Explore practical digital marketing, advertising, SEO, and AI education for students, freelancers, and growth operators at Digital MUID Academy.',
+    ogType: 'website',
+    schema: {
+      '@context': 'https://schema.org',
+      '@graph': [
+        {
+          '@type': 'EducationalOrganization',
+          '@id': 'https://digitalmuid.in/academy#organization',
+          name: 'Digital MUID Academy',
+          url: 'https://digitalmuid.in/academy',
+          description: 'Explore practical digital marketing, advertising, SEO, and AI education for students, freelancers, and growth operators at Digital MUID Academy.',
+          founder: {
+            '@type': 'Person',
+            name: 'Digital Muid',
+            jobTitle: 'Growth Strategist & Systems Architect'
+          },
+          hasOfferCatalog: {
+            '@type': 'OfferCatalog',
+            name: 'Digital MUID Curriculums',
+            itemListElement: [
+              {
+                '@type': 'Course',
+                name: 'Meta Ads Mastery: Algorithmic Scaling & Creative Strategy',
+                description: 'Build profitable, high-ROAS ad campaigns using algorithmic audience matching and dynamic creative testing.',
+                url: 'https://digitalmuid.in/learn/meta-ads-mastery',
+                offers: {
+                  '@type': 'Offer',
+                  price: '1999',
+                  priceCurrency: 'INR',
+                  availability: 'https://schema.org/InStock'
+                }
+              },
+              {
+                '@type': 'Course',
+                name: 'SEO (Search Engine Optimisation) with AI Integration',
+                description: 'Complete SEO mastery course integrating AI search engines, programmatic workflows, and topical authority.',
+                url: 'https://digitalmuid.in/learn/seo-search-engine-optimisation-with-ai-integration',
+                offers: {
+                  '@type': 'Offer',
+                  price: '2499',
+                  priceCurrency: 'INR',
+                  availability: 'https://schema.org/InStock'
+                }
+              },
+              {
+                '@type': 'Course',
+                name: 'AI & Automation for Modern Business Operations',
+                description: 'Deploy intelligent LLM agents and automated workflows to cut 15+ hours of manual operations every week.',
+                url: 'https://digitalmuid.in/learn/ai-automation-business-operations',
+                offers: {
+                  '@type': 'Offer',
+                  price: '2199',
+                  priceCurrency: 'INR',
+                  availability: 'https://schema.org/InStock'
+                }
+              }
+            ]
+          }
+        },
+        {
+          '@type': 'WebPage',
+          '@id': 'https://digitalmuid.in/academy#webpage',
+          url: 'https://digitalmuid.in/academy',
+          name: 'Digital MUID Academy | Digital Marketing & AI Education',
+          description: 'Explore practical digital marketing, advertising, SEO, and AI education for students, freelancers, and growth operators at Digital MUID Academy.'
+        }
+      ]
+    },
+    semanticHtml: `
+      <article>
+        <header>
+          <h1>Digital MUID Academy: Stop learning platform hacks. Master the mechanics of digital growth.</h1>
+          <p>We teach systems, not just buttons. Practical digital marketing, performance advertising, SEO, and AI workflows for high-ticket growth operators.</p>
+        </header>
+        <section>
+          <h2>Educational Philosophy</h2>
+          <p>We teach systems, not just buttons. Understand customer intent, CAC/LTV unit economics, attribution telemetry, and autonomous AI agents rather than ephemeral platform tricks.</p>
+        </section>
+        <section>
+          <h2>Featured Curriculums</h2>
+          <ul>
+            <li><strong>Meta & Google Ads Mastery (₹1,999):</strong> Algorithmic media buying, creative testing sandboxes, CAPI telemetry.</li>
+            <li><strong>SEO with AI Integration (₹2,499):</strong> Topical authority clusters, schema markup, generative AI search workflows.</li>
+            <li><strong>AI & Automation for Operations (₹2,199):</strong> Autonomous triage agents, webhook synchronization, zero manual friction.</li>
+          </ul>
+        </section>
+        <section>
+          <h2>Free Foundation Courses & Toolkits</h2>
+          <p>The 60-Minute Digital Marketing Blueprint, Intro to Freelancing & Client Acquisition, AI Prompt Pack, Growth Checklist, and Content Strategy OS.</p>
+        </section>
+      </article>
+    `
+  },
+
   '/learn': {
     path: '/learn',
     canonicalUrl: 'https://digitalmuid.in/learn',

@@ -291,13 +291,13 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
               </h4>
               <ul className="space-y-2.5 text-sm">
                 <li>
-                  <a href="/learn" onClick={(e) => { e.preventDefault(); handleNav('/learn'); }} className="text-[#60A5FA] font-medium hover:underline cursor-pointer text-left block">
-                    Courses
+                  <a href="/academy" onClick={(e) => { e.preventDefault(); handleNav('/academy'); }} className="text-[#FF6B00] font-semibold hover:underline cursor-pointer text-left block">
+                    DigitalMUID Academy
                   </a>
                 </li>
                 <li>
-                  <a href="/learn" onClick={(e) => { e.preventDefault(); handleNav('/learn'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
-                    DigitalMUID Academy
+                  <a href="/learn" onClick={(e) => { e.preventDefault(); handleNav('/learn'); }} className="text-[#60A5FA] font-medium hover:underline cursor-pointer text-left block">
+                    Courses &amp; Learning Catalog
                   </a>
                 </li>
               </ul>

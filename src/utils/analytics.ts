@@ -46,10 +46,18 @@ export const analytics = {
     });
   },
 
-  trackAcademyCta: (sourceSection: string = 'hero') => {
+  trackConsultationCta: (sourceSection: string = 'navbar', destination: string = '/business-growth-consultation') => {
+    trackEvent('consultation_cta_click', {
+      cta_name: 'Book Consultation',
+      destination,
+      source_section: sourceSection
+    });
+  },
+
+  trackAcademyCta: (sourceSection: string = 'hero', destination: string = '/academy') => {
     trackEvent('academy_cta_click', {
       cta_name: 'Master the mechanics / Explore the academy',
-      destination: '/learn',
+      destination,
       source_section: sourceSection
     });
   },

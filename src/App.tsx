@@ -15,6 +15,7 @@ import { ArticleDetailPage } from './pages/ArticleDetailPage';
 import { WatchPage } from './pages/WatchPage';
 import { VideoDetailPage } from './pages/VideoDetailPage';
 import { LearnPage } from './pages/LearnPage';
+import { AcademyPage } from './pages/AcademyPage';
 import { CourseDetailPage } from './pages/CourseDetailPage';
 import { FrameworksPage } from './pages/FrameworksPage';
 import { FrameworkDetailPage } from './pages/FrameworkDetailPage';
@@ -110,6 +111,9 @@ const MainApp: React.FC = () => {
     if (path.startsWith('/videos/')) {
       const slug = path.replace('/videos/', '');
       return <VideoDetailPage slug={slug} navigate={navigate} />;
+    }
+    if (path === '/academy') {
+      return <AcademyPage navigate={navigate} />;
     }
     if (path === '/courses') {
       window.history.replaceState({}, '', '/learn');

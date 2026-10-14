@@ -620,11 +620,11 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
             <div className="pt-2">
               <a
                 id="academy-explore-cta"
-                href="/learn"
+                href="/academy"
                 onClick={(e) => {
                   e.preventDefault();
-                  analytics.trackAcademyCta('academy_pipeline');
-                  navigate('/learn');
+                  analytics.trackAcademyCta('academy_pipeline', '/academy');
+                  navigate('/academy');
                 }}
                 className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl bg-[#1877F2] hover:bg-blue-600 text-white font-bold text-sm tracking-wide shadow-lg shadow-[#1877F2]/25 transition-all cursor-pointer font-interface active:scale-[0.98]"
               >
@@ -1052,23 +1052,6 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
                 <span className="text-[10px] font-mono text-emerald-400">Production</span>
               </div>
             </div>
-          </div>
-
-          {/* Link to full proof & teardowns page */}
-          <div className="pt-10 flex justify-center">
-            <a
-              id="homepage-view-all-proof-btn"
-              href="/proof"
-              onClick={(e) => {
-                e.preventDefault();
-                analytics.trackProofInteraction('click_homepage_proof_link', 'Explore all clinical teardowns & data room');
-                navigate('/proof');
-              }}
-              className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 hover:text-white border border-white/10 text-xs font-semibold uppercase tracking-wider transition-all font-interface group"
-            >
-              <span>Explore all clinical teardowns &amp; raw data room</span>
-              <ArrowRight className="w-3.5 h-3.5 text-[#FF6B00] group-hover:translate-x-1 transition-transform" />
-            </a>
           </div>
         </div>
       </section>

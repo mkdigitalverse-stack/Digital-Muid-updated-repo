@@ -883,11 +883,11 @@ export const GrowthAuditPage: React.FC<GrowthAuditPageProps> = ({ navigate }) =>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
               <a
                 id="academy-pathway-cta"
-                href="/learn"
+                href="/academy"
                 onClick={(e) => {
                   e.preventDefault();
                   analytics.trackGrowthAuditAcademyRedirect();
-                  navigate('/learn');
+                  navigate('/academy');
                 }}
                 className="w-full sm:w-auto px-8 py-4 rounded-xl bg-[#1877F2] hover:bg-blue-600 text-white font-bold text-sm tracking-wide shadow-xl shadow-[#1877F2]/25 transition-all cursor-pointer flex items-center justify-center gap-2 font-interface active:scale-95"
               >
