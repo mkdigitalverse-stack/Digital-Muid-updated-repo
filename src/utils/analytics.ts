@@ -96,5 +96,19 @@ export const analytics = {
       action: action,
       video_title: 'How we engineer digital growth in 2026'
     });
+  },
+
+  trackProofInteraction: (action: string, label: string) => {
+    trackEvent('proof_interaction', {
+      action,
+      label
+    });
+  },
+
+  trackTeardownReview: (teardownId: string, teardownTitle: string) => {
+    trackEvent('teardown_review_click', {
+      teardown_id: teardownId,
+      teardown_title: teardownTitle
+    });
   }
 };

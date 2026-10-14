@@ -1053,6 +1053,23 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
               </div>
             </div>
           </div>
+
+          {/* Link to full proof & teardowns page */}
+          <div className="pt-10 flex justify-center">
+            <a
+              id="homepage-view-all-proof-btn"
+              href="/proof"
+              onClick={(e) => {
+                e.preventDefault();
+                analytics.trackProofInteraction('click_homepage_proof_link', 'Explore all clinical teardowns & data room');
+                navigate('/proof');
+              }}
+              className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 hover:text-white border border-white/10 text-xs font-semibold uppercase tracking-wider transition-all font-interface group"
+            >
+              <span>Explore all clinical teardowns &amp; raw data room</span>
+              <ArrowRight className="w-3.5 h-3.5 text-[#FF6B00] group-hover:translate-x-1 transition-transform" />
+            </a>
+          </div>
         </div>
       </section>
 

@@ -332,6 +332,22 @@ export const SEO_DATA = {
     }
   },
 
+  '/services/growth-systems': {
+    path: '/services/growth-systems',
+    canonicalUrl: 'https://digitalmuid.in/services/growth-systems',
+    title: 'Growth Systems & Custom Architecture | DigitalMUID',
+    description: 'Verifiable client acquisition engines, high-velocity React web architecture, and automated qualification funnels engineered for unit economics.',
+    ogTitle: 'Growth Systems & Custom Architecture | DigitalMUID',
+    ogDescription: 'Verifiable client acquisition engines, high-velocity React web architecture, and automated qualification funnels engineered for unit economics.',
+    ogType: 'website',
+    schema: {
+      '@context': 'https://schema.org',
+      '@type': 'Service',
+      name: 'DigitalMUID Growth Systems & Custom Architecture',
+      url: 'https://digitalmuid.in/services/growth-systems'
+    }
+  },
+
   '/about': {
     path: '/about',
     canonicalUrl: 'https://digitalmuid.in/about',

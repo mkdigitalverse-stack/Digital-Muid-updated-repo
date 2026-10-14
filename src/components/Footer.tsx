@@ -217,8 +217,13 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
                 </a>
               </li>
               <li>
+                <a href="/proof" onClick={(e) => { e.preventDefault(); handleNav('/proof'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
+                  Proof &amp; Case Studies
+                </a>
+              </li>
+              <li>
                 <a href="/speaking" onClick={(e) => { e.preventDefault(); handleNav('/speaking'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
-                  Speaking & Keynotes
+                  Speaking &amp; Keynotes
                 </a>
               </li>
             </ul>

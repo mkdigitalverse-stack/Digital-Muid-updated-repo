@@ -275,10 +275,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
         <nav className="hidden lg:flex items-center gap-6 xl:gap-8 font-interface" aria-label="Main Navigation">
           <a
             id="nav-link-growth-systems"
-            href="/services"
+            href="/services/growth-systems"
             onClick={(e) => {
               e.preventDefault();
-              handleNav('/services');
+              handleNav('/services/growth-systems');
             }}
             className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
               currentPath === '/services' || currentPath.startsWith('/services/')
@@ -791,10 +791,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             {/* Primary Four Wireframe Navigation Destinations */}
             <div className="space-y-1 pb-3 border-b border-slate-800">
               <a
-                href="/services"
+                href="/services/growth-systems"
                 onClick={(e) => {
                   e.preventDefault();
-                  handleNav('/services');
+                  handleNav('/services/growth-systems');
                 }}
                 className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
                   currentPath === '/services' || currentPath.startsWith('/services/')

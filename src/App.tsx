@@ -21,6 +21,7 @@ import { FrameworkDetailPage } from './pages/FrameworkDetailPage';
 import { ResourcesPage } from './pages/ResourcesPage';
 import { SpeakingPage } from './pages/SpeakingPage';
 import { ServicesPage } from './pages/ServicesPage';
+import { GrowthSystemsPage } from './pages/GrowthSystemsPage';
 import { WebPage } from './pages/WebPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { ConsultationPage } from './pages/ConsultationPage';
@@ -151,8 +152,11 @@ const MainApp: React.FC = () => {
     if (path === '/speaking') {
       return <SpeakingPage navigate={navigate} />;
     }
+    if (path === '/services/growth-systems') {
+      return <GrowthSystemsPage navigate={navigate} />;
+    }
     if (path === '/services') {
-      return <ServicesPage navigate={navigate} />;
+      return <GrowthSystemsPage navigate={navigate} />;
     }
     if (path.startsWith('/services/')) {
       const serviceSlug = path.replace('/services/', '');
