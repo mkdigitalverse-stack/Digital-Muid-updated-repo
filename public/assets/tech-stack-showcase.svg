@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0A1A2F" />
+      <stop offset="50%" stop-color="#0F233A" />
+      <stop offset="100%" stop-color="#07111F" />
+    </linearGradient>
+    <linearGradient id="cardGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E293B" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#0F172A" stop-opacity="0.9" />
+    </linearGradient>
+    <linearGradient id="accentOrange" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF7A1A" />
+      <stop offset="100%" stop-color="#FF6B00" />
+    </linearGradient>
+    <linearGradient id="accentBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#1877F2" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="15" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="500" rx="24" fill="url(#bgGrad)" />
+
+  <!-- Ambient Glow Circles -->
+  <circle cx="200" cy="150" r="160" fill="#1877F2" opacity="0.12" filter="url(#glow)" />
+  <circle cx="650" cy="350" r="180" fill="#FF6B00" opacity="0.10" filter="url(#glow)" />
+
+  <!-- Grid Pattern Overlay -->
+  <g stroke="#334155" stroke-width="1" stroke-dasharray="4 8" opacity="0.3">
+    <line x1="50" y1="50" x2="750" y2="50" />
+    <line x1="50" y1="150" x2="750" y2="150" />
+    <line x1="50" y1="250" x2="750" y2="250" />
+    <line x1="50" y1="350" x2="750" y2="350" />
+    <line x1="50" y1="450" x2="750" y2="450" />
+    <line x1="100" y1="30" x2="100" y2="470" />
+    <line x1="250" y1="30" x2="250" y2="470" />
+    <line x1="400" y1="30" x2="400" y2="470" />
+    <line x1="550" y1="30" x2="550" y2="470" />
+    <line x1="700" y1="30" x2="700" y2="470" />
+  </g>
+
+  <!-- Header Badge -->
+  <g transform="translate(60, 45)">
+    <rect width="190" height="32" rx="16" fill="#1E293B" stroke="#334155" stroke-width="1" />
+    <circle cx="20" cy="16" r="5" fill="#FF6B00" />
+    <text x="35" y="21" fill="#F8FAFC" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="600" letter-spacing="1">MODERN WEB STACK</text>
+  </g>
+
+  <!-- Title inside graphic -->
+  <text x="60" y="115" fill="#FFFFFF" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="700">DigitalMUID Technology Architecture</text>
+  <text x="60" y="140" fill="#94A3B8" font-family="system-ui, -apple-system, sans-serif" font-size="14">Engineered for sub-second page loads, conversion fidelity, and enterprise stability.</text>
+
+  <!-- Pillar 1: Frontend & UI Systems -->
+  <g transform="translate(60, 170)">
+    <rect width="210" height="260" rx="16" fill="url(#cardGrad1)" stroke="#334155" stroke-width="1" />
+    <rect x="0" y="0" width="210" height="4" rx="2" fill="url(#accentOrange)" />
+    <rect x="20" y="24" width="38" height="38" rx="10" fill="#1E293B" stroke="#FF6B00" stroke-width="1.5" />
+    <path d="M 32 38 L 40 46 L 46 38 M 36 49 L 42 49" stroke="#FF6B00" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+    <text x="20" y="90" fill="#FFFFFF" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700">Frontend &amp; UI</text>
+    <text x="20" y="110" fill="#94A3B8" font-family="system-ui, -apple-system, sans-serif" font-size="12">Interactive, Accessible &amp; Fast</text>
+
+    <g transform="translate(20, 130)">
+      <circle cx="6" cy="6" r="3" fill="#FF6B00" />
+      <text x="18" y="10" fill="#E2E8F0" font-family="system-ui, sans-serif" font-size="12" font-weight="500">React &amp; Modern JS</text>
+      
+      <circle cx="6" cy="34" r="3" fill="#FF6B00" />
+      <text x="18" y="38" fill="#E2E8F0" font-family="system-ui, sans-serif" font-size="12" font-weight="500">Tailwind CSS Design</text>
+      
+      <circle cx="6" cy="62" r="3" fill="#FF6B00" />
+      <text x="18" y="66" fill="#E2E8F0" font-family="system-ui, sans-serif" font-size="12" font-weight="500">Responsive Breakpoints</text>
+
+      <circle cx="6" cy="90" r="3" fill="#FF6B00" />
+      <text x="18" y="94" fill="#E2E8F0" font-family="system-ui, sans-serif" font-size="12" font-weight="500">Semantic Core Web Vitals</text>
+    </g>
+  </g>
+
+  <!-- Pillar 2: Backend & Logic -->
+  <g transform="translate(295, 170)">
+    <rect width="210" height="260" rx="16" fill="url(#cardGrad1)" stroke="#334155" stroke-width="1" />
+    <rect x="0" y="0" width="210" height="4" rx="2" fill="url(#accentBlue)" />
+    <rect x="20" y="24" width="38" height="38" rx="10" fill="#1E293B" stroke="#1877F2" stroke-width="1.5" />
+    <rect x="30" y="36" width="18" height="14" rx="2" stroke="#38BDF8" stroke-width="2" fill="none" />
+    <line x1="34" y1="47" x2="44" y2="47" stroke="#38BDF8" stroke-width="2" stroke-linecap="round" />
+    <text x="20" y="90" fill="#FFFFFF" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700">Backend &amp; Logic</text>
+    <text x="20" y="110" fill="#94A3B8" font-family="system-ui, -apple-system, sans-serif" font-size="12">Structured Data &amp; APIs</text>
+
+    <g transform="translate(20, 130)">
+      <circle cx="6" cy="6" r="3" fill="#38BDF8" />
+      <text x="18" y="10" fill="#E2E8F0" font-family="system-ui, sans-serif" font-size="12" font-weight="500">Node.js &amp; Express Engine</text>
+      
+      <circle cx="6" cy="34" r="3" fill="#38BDF8" />
+      <text x="18" y="38" fill="#E2E8F0" font-family="system-ui, sans-serif" font-size="12" font-weight="500">RESTful Endpoint Design</text>
+      
+      <circle cx="6" cy="62" r="3" fill="#38BDF8" />
+      <text x="18" y="66" fill="#E2E8F0" font-family="system-ui, sans-serif" font-size="12" font-weight="500">Server-Side Injection</text>
+
+      <circle cx="6" cy="90" r="3" fill="#38BDF8" />
+      <text x="18" y="94" fill="#E2E8F0" font-family="system-ui, sans-serif" font-size="12" font-weight="500">PostgreSQL / Supabase</text>
+    </g>
+  </g>
+
+  <!-- Pillar 3: Integrations & Delivery -->
+  <g transform="translate(530, 170)">
+    <rect width="210" height="260" rx="16" fill="url(#cardGrad1)" stroke="#334155" stroke-width="1" />
+    <rect x="0" y="0" width="210" height="4" rx="2" fill="#10B981" />
+    <rect x="20" y="24" width="38" height="38" rx="10" fill="#1E293B" stroke="#10B981" stroke-width="1.5" />
+    <path d="M 33 43 L 39 49 L 47 37" stroke="#10B981" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+    <text x="20" y="90" fill="#FFFFFF" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700">Integrations &amp; Cloud</text>
+    <text x="20" y="110" fill="#94A3B8" font-family="system-ui, -apple-system, sans-serif" font-size="12">Security, Speed &amp; CRM</text>
+
+    <g transform="translate(20, 130)">
+      <circle cx="6" cy="6" r="3" fill="#10B981" />
+      <text x="18" y="10" fill="#E2E8F0" font-family="system-ui, sans-serif" font-size="12" font-weight="500">Razorpay &amp; Stripe Gateways</text>
+      
+      <circle cx="6" cy="34" r="3" fill="#10B981" />
+      <text x="18" y="38" fill="#E2E8F0" font-family="system-ui, sans-serif" font-size="12" font-weight="500">WhatsApp &amp; CRM Sync</text>
+      
+      <circle cx="6" cy="62" r="3" fill="#10B981" />
+      <text x="18" y="66" fill="#E2E8F0" font-family="system-ui, sans-serif" font-size="12" font-weight="500">HTTPS &amp; WAF Protection</text>
+
+      <circle cx="6" cy="90" r="3" fill="#10B981" />
+      <text x="18" y="94" fill="#E2E8F0" font-family="system-ui, sans-serif" font-size="12" font-weight="500">Edge CDN Acceleration</text>
+    </g>
+  </g>
+
+  <!-- Replacement hint badge for administrators -->
+  <g transform="translate(560, 45)">
+    <rect width="180" height="26" rx="6" fill="#0F172A" stroke="#334155" stroke-width="1" />
+    <text x="15" y="17" fill="#64748B" font-family="monospace" font-size="10">Replaceable Static Asset</text>
+  </g>
+</svg>
