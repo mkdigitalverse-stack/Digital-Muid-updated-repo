@@ -38,10 +38,10 @@ export function trackEvent(eventName: string, params: Record<string, any> = {}):
 
 // Named tracking helpers for Homepage key conversion interactions
 export const analytics = {
-  trackGrowthAuditCta: (sourceSection: string = 'hero') => {
+  trackGrowthAuditCta: (sourceSection: string = 'hero', destination: string = '/growth-audit') => {
     trackEvent('growth_audit_cta_click', {
-      cta_name: 'Build my growth engine / Request growth audit',
-      destination: '/business-growth-consultation',
+      cta_name: 'Request growth audit',
+      destination,
       source_section: sourceSection
     });
   },

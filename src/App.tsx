@@ -22,6 +22,8 @@ import { ResourcesPage } from './pages/ResourcesPage';
 import { SpeakingPage } from './pages/SpeakingPage';
 import { ServicesPage } from './pages/ServicesPage';
 import { GrowthSystemsPage } from './pages/GrowthSystemsPage';
+import { AgencyServicesPage } from './pages/AgencyServicesPage';
+import { GrowthAuditPage } from './pages/GrowthAuditPage';
 import { WebPage } from './pages/WebPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { ConsultationPage } from './pages/ConsultationPage';
@@ -155,6 +157,9 @@ const MainApp: React.FC = () => {
     if (path === '/services/growth-systems' || path === '/growth-systems') {
       return <GrowthSystemsPage navigate={navigate} />;
     }
+    if (path === '/agency-services') {
+      return <AgencyServicesPage navigate={navigate} />;
+    }
     if (path === '/services') {
       return <GrowthSystemsPage navigate={navigate} />;
     }
@@ -176,7 +181,10 @@ const MainApp: React.FC = () => {
       const slug = path.replace('/blog/', '');
       return <ArticleDetailPage slug={slug} navigate={navigate} />;
     }
-    if (path === '/consultation' || path === '/growth-audit' || path === '/request-growth-audit') {
+    if (path === '/growth-audit' || path === '/request-growth-audit') {
+      return <GrowthAuditPage navigate={navigate} />;
+    }
+    if (path === '/consultation') {
       window.history.replaceState({}, '', '/business-growth-consultation');
       return (
         <ConsultationPage

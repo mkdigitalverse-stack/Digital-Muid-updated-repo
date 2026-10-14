@@ -39,7 +39,8 @@ import {
   Instagram,
   Facebook,
   Youtube,
-  Globe
+  Globe,
+  Briefcase
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -181,6 +182,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
   ];
 
   const servicesSubmenu = [
+    { label: 'Agency Services', path: '/agency-services', icon: Briefcase, desc: 'Enterprise performance & custom development' },
     { label: 'Growth Strategy', path: '/services/growth-strategy', icon: TrendingUp, desc: 'Acquisition loops & CAC/LTV scaling' },
     { label: 'AI & Automation', path: '/services/ai-automation', icon: Bot, desc: 'Operational LLM & agent workflows' },
     { label: 'Modern Marketing', path: '/services/modern-marketing', icon: Megaphone, desc: 'High-signal distribution & funnels' },
@@ -221,7 +223,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
     (p) => currentPath === p || currentPath.startsWith(p + '/')
   );
 
-  const isServicesActive = currentPath === '/services' || currentPath.startsWith('/services/');
+  const isServicesActive =
+    currentPath === '/services' ||
+    currentPath.startsWith('/services/') ||
+    currentPath === '/growth-systems' ||
+    currentPath === '/agency-services';
   const isLearnActive = currentPath === '/learn' || currentPath.startsWith('/learn/');
   const isBlogActive = currentPath === '/blog' || currentPath.startsWith('/blog/');
   const isContactActive = currentPath === '/contact';
@@ -281,12 +287,28 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               handleNav('/services/growth-systems');
             }}
             className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
-              currentPath === '/services' || currentPath.startsWith('/services/')
+              currentPath === '/services' || currentPath.startsWith('/services/') || currentPath === '/growth-systems'
                 ? 'text-white border-b-2 border-[#FF6B00] font-bold'
                 : 'text-slate-300 hover:text-white'
             }`}
           >
             Growth systems
+          </a>
+
+          <a
+            id="nav-link-agency-services"
+            href="/agency-services"
+            onClick={(e) => {
+              e.preventDefault();
+              handleNav('/agency-services');
+            }}
+            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
+              currentPath === '/agency-services'
+                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            Agency services
           </a>
 
           <a
@@ -797,12 +819,27 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   handleNav('/services/growth-systems');
                 }}
                 className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
-                  currentPath === '/services' || currentPath.startsWith('/services/')
+                  currentPath === '/services' || currentPath.startsWith('/services/') || currentPath === '/growth-systems'
                     ? 'bg-[#FF6B00]/15 text-[#FF6B00] font-bold'
                     : 'text-slate-200 hover:bg-white/5'
                 }`}
               >
                 <span>Growth systems</span>
+                <ArrowRight className="w-4 h-4 text-slate-400" />
+              </a>
+              <a
+                href="/agency-services"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleNav('/agency-services');
+                }}
+                className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
+                  currentPath === '/agency-services'
+                    ? 'bg-[#FF6B00]/15 text-[#FF6B00] font-bold'
+                    : 'text-slate-200 hover:bg-white/5'
+                }`}
+              >
+                <span>Agency services</span>
                 <ArrowRight className="w-4 h-4 text-slate-400" />
               </a>
               <a

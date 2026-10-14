@@ -217,13 +217,8 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
                 </a>
               </li>
               <li>
-                <a href="/proof" onClick={(e) => { e.preventDefault(); handleNav('/proof'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
-                  Proof &amp; Case Studies
-                </a>
-              </li>
-              <li>
                 <a href="/speaking" onClick={(e) => { e.preventDefault(); handleNav('/speaking'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
-                  Speaking &amp; Keynotes
+                  Speaking & Keynotes
                 </a>
               </li>
             </ul>
@@ -235,6 +230,21 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
               Services
             </h4>
             <ul className="space-y-2.5 text-sm">
+              <li>
+                <a href="/services/growth-systems" onClick={(e) => { e.preventDefault(); handleNav('/services/growth-systems'); }} className="hover:text-white text-white font-medium transition-colors cursor-pointer text-left block">
+                  Growth Systems
+                </a>
+              </li>
+              <li>
+                <a href="/agency-services" onClick={(e) => { e.preventDefault(); handleNav('/agency-services'); }} className="hover:text-white text-[#FF6B00] font-semibold transition-colors cursor-pointer text-left block">
+                  Agency Services
+                </a>
+              </li>
+              <li>
+                <a href="/business-growth-consultation" onClick={(e) => { e.preventDefault(); handleNav('/business-growth-consultation'); }} className="hover:text-white text-[#60A5FA] font-medium transition-colors cursor-pointer text-left block">
+                  Business Growth Consultation
+                </a>
+              </li>
               <li>
                 <a href="/services/growth-strategy" onClick={(e) => { e.preventDefault(); handleNav('/services/growth-strategy'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
                   Growth Strategy

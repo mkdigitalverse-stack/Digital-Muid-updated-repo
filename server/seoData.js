@@ -348,6 +348,74 @@ export const SEO_DATA = {
     }
   },
 
+  '/agency-services': {
+    path: '/agency-services',
+    canonicalUrl: 'https://digitalmuid.in/agency-services',
+    title: 'Agency Services | Digital MUID',
+    description: 'Custom web architecture, performance marketing, and AI automation engineered to improve acquisition, lead quality, and operational efficiency.',
+    ogTitle: 'Agency Services | Digital MUID',
+    ogDescription: 'Custom web architecture, performance marketing, and AI automation engineered to improve acquisition, lead quality, and operational efficiency.',
+    ogType: 'website',
+    schema: {
+      '@context': 'https://schema.org',
+      '@graph': [
+        {
+          '@type': 'ProfessionalService',
+          '@id': 'https://digitalmuid.in/agency-services#service',
+          name: 'Digital MUID Enterprise Performance & Custom Development',
+          url: 'https://digitalmuid.in/agency-services',
+          description: 'Custom React.js and Node.js web architecture, Meta & Google Ads performance marketing, and CRM AI automation engineered for unit economics.',
+          areaServed: 'Worldwide',
+          provider: {
+            '@type': 'Person',
+            name: 'Digital Muid',
+            jobTitle: 'Growth Strategist & Systems Operator',
+            url: 'https://digitalmuid.in/about'
+          }
+        },
+        {
+          '@type': 'WebPage',
+          '@id': 'https://digitalmuid.in/agency-services#webpage',
+          url: 'https://digitalmuid.in/agency-services',
+          name: 'Agency Services | Digital MUID',
+          description: 'Custom web architecture, performance marketing, and AI automation engineered to improve acquisition, lead quality, and operational efficiency.'
+        }
+      ]
+    },
+    semanticHtml: `
+      <article>
+        <header>
+          <p>ENTERPRISE PERFORMANCE & CUSTOM DEVELOPMENT</p>
+          <h1>We build client acquisition engines, not brochure websites.</h1>
+          <p>Stop losing qualified leads to slow loading times and broken funnels. We deploy custom React/Node.js architectures integrated with full-funnel performance marketing to drive predictable B2B and D2C revenue.</p>
+        </header>
+        <section>
+          <h2>The True Cost of a Generic Tech Stack</h2>
+          <p>If your landing page takes more than 2.5 seconds to load, your Customer Acquisition Cost (CAC) is artificially high.</p>
+        </section>
+        <section>
+          <h2>Full-Stack Mechanics for Scalable Growth</h2>
+          <ul>
+            <li><strong>Conversion Web Architecture:</strong> Custom web applications using React.js and Node.js engineered for fast load times and reduced conversion friction.</li>
+            <li><strong>Algorithmic Media Buying:</strong> Data-driven campaigns across Meta and Google Ads optimized for pipeline velocity and return on ad spend.</li>
+            <li><strong>AI & Operational Automation:</strong> Connecting front-end traffic to back-end sales via intelligent CRM automations and AI lead validation.</li>
+          </ul>
+        </section>
+        <section>
+          <h2>The Deployment Phases</h2>
+          <ol>
+            <li><strong>The Build (Days 1–30):</strong> Custom frontend and backend architecture, tracking, and analytics integration. One-time investment.</li>
+            <li><strong>The Engine (Ongoing Retainer):</strong> Algorithmic media buying, landing page optimization, and CAC calibration. Monthly partnership.</li>
+          </ol>
+        </section>
+        <section>
+          <h2>Ready to audit your infrastructure?</h2>
+          <p><a href="/growth-audit">Request a Growth Audit</a></p>
+        </section>
+      </article>
+    `
+  },
+
   '/about': {
     path: '/about',
     canonicalUrl: 'https://digitalmuid.in/about',
