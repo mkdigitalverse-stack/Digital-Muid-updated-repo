@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
+import { analytics } from '../utils/analytics';
 import {
   Menu,
   X,
@@ -272,227 +273,71 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
 
         {/* Desktop Navigation Links (>= 1024px) */}
         <nav className="hidden lg:flex items-center gap-6 xl:gap-8 font-interface" aria-label="Main Navigation">
-          {/* 1. ABOUT ▾ Dropdown */}
-          <div
-            className="relative"
-            onMouseEnter={() => handleMouseEnter('about')}
-            onMouseLeave={handleMouseLeave}
-          >
-            <button
-              id="nav-dropdown-about-btn"
-              type="button"
-              onClick={() => toggleDropdown('about')}
-              aria-expanded={activeDropdown === 'about'}
-              className={`text-[11px] font-semibold uppercase tracking-[0.18em] transition-all flex items-center gap-1.5 py-1.5 cursor-pointer ${
-                isAboutActive || activeDropdown === 'about'
-                  ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                  : 'text-white/70 hover:text-white'
-              }`}
-            >
-              <span>ABOUT</span>
-              <ChevronDown
-                className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                  activeDropdown === 'about' ? 'rotate-180 text-[#FF6B00]' : 'text-white/50'
-                }`}
-              />
-            </button>
-
-            {/* Desktop ABOUT Dropdown Menu */}
-            {activeDropdown === 'about' && (
-              <div
-                id="nav-about-dropdown-menu"
-                className="absolute top-full left-0 mt-2 w-80 rounded-2xl bg-[#07111F]/98 backdrop-blur-2xl border border-slate-700/80 shadow-2xl p-4 space-y-3 z-50 animate-in fade-in zoom-in-95 duration-150 before:absolute before:-top-3 before:left-0 before:right-0 before:h-3 before:content-['']"
-              >
-                {/* Descriptor Header */}
-                <div className="pb-2.5 border-b border-slate-800 px-2 flex items-center justify-between">
-                  <div>
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-white">
-                      Explore Digital Muid
-                    </div>
-                    <div className="text-[10px] text-slate-400">
-                      Ideas, frameworks, resources & conversations.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      handleNav('/about');
-                    }}
-                    className="text-[10px] font-bold text-[#FF6B00] hover:underline cursor-pointer"
-                  >
-                    Overview →
-                  </button>
-                </div>
-
-                <div className="space-y-1">
-                  {aboutSubmenu.map((item) => {
-                    const Icon = item.icon;
-                    const isActive = currentPath === item.path || currentPath.startsWith(item.path + '/');
-                    return (
-                      <button
-                        key={item.path}
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          handleNav(item.path);
-                        }}
-                        className={`w-full text-left px-3 py-2 rounded-xl transition-all flex items-center gap-3 cursor-pointer group ${
-                          isActive
-                            ? 'bg-[#1877F2]/20 border border-[#1877F2]/40 text-white'
-                            : 'hover:bg-slate-800/60 text-slate-300 hover:text-white'
-                        }`}
-                      >
-                        <div className="w-7 h-7 rounded-lg bg-slate-800/80 text-slate-300 group-hover:text-white group-hover:bg-[#1877F2]/30 flex items-center justify-center shrink-0 border border-slate-700/50">
-                          <Icon className="w-3.5 h-3.5" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-semibold text-white tracking-wide">{item.label}</div>
-                          <div className="text-[10px] text-slate-400 truncate">{item.desc}</div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 2. SERVICES ▾ Dropdown */}
-          <div
-            className="relative"
-            onMouseEnter={() => handleMouseEnter('services')}
-            onMouseLeave={handleMouseLeave}
-          >
-            <button
-              id="nav-dropdown-services-btn"
-              type="button"
-              onClick={() => toggleDropdown('services')}
-              aria-expanded={activeDropdown === 'services'}
-              className={`text-[11px] font-semibold uppercase tracking-[0.18em] transition-all flex items-center gap-1.5 py-1.5 cursor-pointer ${
-                isServicesActive || activeDropdown === 'services'
-                  ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                  : 'text-white/70 hover:text-white'
-              }`}
-            >
-              <span>SERVICES</span>
-              <ChevronDown
-                className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                  activeDropdown === 'services' ? 'rotate-180 text-[#FF6B00]' : 'text-white/50'
-                }`}
-              />
-            </button>
-
-            {/* Desktop SERVICES Dropdown Menu */}
-            {activeDropdown === 'services' && (
-              <div
-                id="nav-services-dropdown-menu"
-                className="absolute top-full left-0 mt-2 w-84 rounded-2xl bg-[#07111F]/98 backdrop-blur-2xl border border-slate-700/80 shadow-2xl p-4 space-y-3 z-50 animate-in fade-in zoom-in-95 duration-150 before:absolute before:-top-3 before:left-0 before:right-0 before:h-3 before:content-['']"
-              >
-                {/* Descriptor Header */}
-                <div className="pb-2.5 border-b border-slate-800 px-2 flex items-center justify-between">
-                  <div>
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-white">
-                      How I Help
-                    </div>
-                    <div className="text-[10px] text-slate-400">
-                      Strategies and systems for modern growth.
-                    </div>
-                  </div>
-                  <a
-                    href="/services"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      handleNav('/services');
-                    }}
-                    className="text-[10px] font-bold text-[#1877F2] hover:underline cursor-pointer"
-                  >
-                    Our Growth System →
-                  </a>
-                </div>
-
-                <div className="space-y-1">
-                  {servicesSubmenu.map((item) => {
-                    const Icon = item.icon;
-                    const isActive = currentPath === item.path;
-                    return (
-                      <a
-                        key={item.path}
-                        href={item.path}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          handleNav(item.path);
-                        }}
-                        className={`w-full text-left px-3 py-2 rounded-xl transition-all flex items-center gap-3 cursor-pointer group ${
-                          isActive
-                            ? 'bg-[#FF6B00]/20 border border-[#FF6B00]/40 text-white'
-                            : 'hover:bg-slate-800/60 text-slate-300 hover:text-white'
-                        }`}
-                      >
-                        <div className="w-7 h-7 rounded-lg bg-slate-800/80 text-slate-300 group-hover:text-white group-hover:bg-[#FF6B00]/30 flex items-center justify-center shrink-0 border border-slate-700/50">
-                          <Icon className="w-3.5 h-3.5" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-semibold text-white tracking-wide">{item.label}</div>
-                          <div className="text-[10px] text-slate-400 truncate">{item.desc}</div>
-                        </div>
-                      </a>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* 3. LEARN */}
           <a
-            id="nav-link-learn"
+            id="nav-link-growth-systems"
+            href="/services"
+            onClick={(e) => {
+              e.preventDefault();
+              handleNav('/services');
+            }}
+            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
+              currentPath === '/services' || currentPath.startsWith('/services/')
+                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            Growth systems
+          </a>
+
+          <a
+            id="nav-link-academy"
             href="/learn"
             onClick={(e) => {
               e.preventDefault();
+              analytics.trackAcademyCta('navbar');
               handleNav('/learn');
             }}
-            className={`text-[11px] font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer py-1.5 ${
-              isLearnActive
+            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
+              currentPath === '/learn' || currentPath.startsWith('/learn/')
                 ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                : 'text-white/70 hover:text-white'
+                : 'text-slate-300 hover:text-white'
             }`}
           >
-            LEARN
+            Academy
           </a>
 
-          {/* 4. BLOG */}
           <a
-            id="nav-link-blog"
-            href="/blog"
+            id="nav-link-growth-stack"
+            href="/frameworks/digital-growth-stack"
             onClick={(e) => {
               e.preventDefault();
-              handleNav('/blog');
+              analytics.trackFrameworkClick('digital-growth-stack', 'The Digital Growth Stack™');
+              handleNav('/frameworks/digital-growth-stack');
             }}
-            className={`text-[11px] font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer py-1.5 ${
-              isBlogActive
+            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
+              currentPath === '/frameworks/digital-growth-stack'
                 ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                : 'text-white/70 hover:text-white'
+                : 'text-slate-300 hover:text-white'
             }`}
           >
-            BLOG
+            The growth stack™
           </a>
 
-          {/* 5. CONTACT */}
           <a
-            id="nav-link-contact"
-            href="/contact"
+            id="nav-link-operator"
+            href="/about"
             onClick={(e) => {
               e.preventDefault();
-              handleNav('/contact');
+              analytics.trackOperatorProfileClick();
+              handleNav('/about');
             }}
-            className={`text-[11px] font-semibold uppercase tracking-[0.18em] transition-all cursor-pointer py-1.5 ${
-              isContactActive
+            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
+              currentPath === '/about'
                 ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                : 'text-white/70 hover:text-white'
+                : 'text-slate-300 hover:text-white'
             }`}
           >
-            CONTACT
+            The operator
           </a>
         </nav>
 
@@ -877,18 +722,18 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             </button>
           )}
 
-          {/* Primary Consultation CTA Button (Tablet & Desktop: >= 640px) */}
+          {/* Primary Growth Audit CTA Button (Tablet & Desktop: >= 640px) */}
           <a
-            id="nav-book-consultation-btn"
+            id="nav-growth-audit-btn"
             href="/business-growth-consultation"
             onClick={(e) => {
               e.preventDefault();
+              analytics.trackGrowthAuditCta('navbar');
               handleNav('/business-growth-consultation');
             }}
-            className="hidden sm:inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 bg-[#FF6B00] hover:bg-[#e66000] text-white text-xs font-bold uppercase tracking-widest transition-all cursor-pointer shadow-lg shadow-[#FF6B00]/20 active:scale-[0.98] rounded-none font-interface min-h-[44px]"
+            className="hidden sm:inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 bg-[#FF6B00] hover:bg-[#FF7A1A] text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-[#FF6B00]/25 active:scale-[0.98] rounded-xl font-interface min-h-[44px] whitespace-nowrap"
           >
-            <Calendar className="w-3.5 h-3.5 text-white" />
-            <span>BOOK A CONSULTATION</span>
+            <span>Request growth audit</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </a>
 
@@ -941,6 +786,73 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                 <Search className="w-3.5 h-3.5" />
                 <span>Search Knowledge</span>
               </button>
+            </div>
+
+            {/* Primary Four Wireframe Navigation Destinations */}
+            <div className="space-y-1 pb-3 border-b border-slate-800">
+              <a
+                href="/services"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleNav('/services');
+                }}
+                className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
+                  currentPath === '/services' || currentPath.startsWith('/services/')
+                    ? 'bg-[#FF6B00]/15 text-[#FF6B00] font-bold'
+                    : 'text-slate-200 hover:bg-white/5'
+                }`}
+              >
+                <span>Growth systems</span>
+                <ArrowRight className="w-4 h-4 text-slate-400" />
+              </a>
+              <a
+                href="/learn"
+                onClick={(e) => {
+                  e.preventDefault();
+                  analytics.trackAcademyCta('mobile_navbar');
+                  handleNav('/learn');
+                }}
+                className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
+                  currentPath === '/learn' || currentPath.startsWith('/learn/')
+                    ? 'bg-[#FF6B00]/15 text-[#FF6B00] font-bold'
+                    : 'text-slate-200 hover:bg-white/5'
+                }`}
+              >
+                <span>Academy</span>
+                <ArrowRight className="w-4 h-4 text-slate-400" />
+              </a>
+              <a
+                href="/frameworks/digital-growth-stack"
+                onClick={(e) => {
+                  e.preventDefault();
+                  analytics.trackFrameworkClick('digital-growth-stack', 'The Digital Growth Stack™');
+                  handleNav('/frameworks/digital-growth-stack');
+                }}
+                className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
+                  currentPath === '/frameworks/digital-growth-stack'
+                    ? 'bg-[#FF6B00]/15 text-[#FF6B00] font-bold'
+                    : 'text-slate-200 hover:bg-white/5'
+                }`}
+              >
+                <span>The growth stack™</span>
+                <ArrowRight className="w-4 h-4 text-slate-400" />
+              </a>
+              <a
+                href="/about"
+                onClick={(e) => {
+                  e.preventDefault();
+                  analytics.trackOperatorProfileClick();
+                  handleNav('/about');
+                }}
+                className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
+                  currentPath === '/about'
+                    ? 'bg-[#FF6B00]/15 text-[#FF6B00] font-bold'
+                    : 'text-slate-200 hover:bg-white/5'
+                }`}
+              >
+                <span>The operator</span>
+                <ArrowRight className="w-4 h-4 text-slate-400" />
+              </a>
             </div>
 
             {/* Mobile Accordion 1: ABOUT */}
@@ -1304,22 +1216,22 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
 
           {/* Bottom Mobile Action CTAs & Social Links */}
           <div className="pt-4 pb-6 border-t border-slate-800/80 space-y-3 mt-4">
-            {/* Primary Mobile CTA: Book a Consultation */}
+            {/* Primary Mobile CTA: Request growth audit */}
             <a
-              id="mobile-book-consultation-btn"
+              id="mobile-growth-audit-btn"
               href="/business-growth-consultation"
               onClick={(e) => {
                 e.preventDefault();
+                analytics.trackGrowthAuditCta('mobile_navbar');
                 handleNav('/business-growth-consultation');
               }}
-              className="w-full min-h-[48px] py-3.5 px-4 bg-[#FF6B00] hover:bg-[#e66000] text-white font-bold text-xs uppercase tracking-widest text-center flex items-center justify-center gap-2 shadow-lg shadow-[#FF6B00]/30 cursor-pointer active:scale-98 transition-all font-interface"
+              className="w-full min-h-[48px] py-3.5 px-4 bg-[#FF6B00] hover:bg-[#FF7A1A] text-white font-bold text-xs uppercase tracking-wider text-center flex items-center justify-center gap-2 shadow-lg shadow-[#FF6B00]/30 cursor-pointer active:scale-98 transition-all font-interface rounded-xl"
             >
-              <Calendar className="w-4 h-4" />
-              <span>BOOK A CONSULTATION</span>
+              <span>Request growth audit</span>
               <ArrowRight className="w-4 h-4" />
             </a>
             <p className="text-center text-[11px] text-slate-400 font-interface">
-              30-min strategic 1-on-1 session with Digital Muid
+              Strategic client acquisition & infrastructure audit with Digital Muid
             </p>
 
             {/* Mobile Social Links (Strict Sequence: LinkedIn | Instagram | Facebook | YouTube) */}

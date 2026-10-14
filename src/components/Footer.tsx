@@ -268,16 +268,21 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
             </ul>
           </div>
 
-          {/* Group 3: Learn & Connect (2 cols) */}
+          {/* Group 3: Courses & Connect (2 cols) */}
           <div className="lg:col-span-2 space-y-6">
             <div>
               <h4 className="font-display font-bold text-white text-xs uppercase tracking-[0.2em] mb-4">
-                Learn
+                Education
               </h4>
               <ul className="space-y-2.5 text-sm">
                 <li>
                   <a href="/learn" onClick={(e) => { e.preventDefault(); handleNav('/learn'); }} className="text-[#60A5FA] font-medium hover:underline cursor-pointer text-left block">
-                    Learn With Digital Muid
+                    Courses
+                  </a>
+                </li>
+                <li>
+                  <a href="/learn" onClick={(e) => { e.preventDefault(); handleNav('/learn'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
+                    DigitalMUID Academy
                   </a>
                 </li>
               </ul>
@@ -290,12 +295,12 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
               <ul className="space-y-2.5 text-sm">
                 <li>
                   <a href="/blog" onClick={(e) => { e.preventDefault(); handleNav('/blog'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block">
-                    Blog & Articles
+                    Blog
                   </a>
                 </li>
                 <li>
                   <a href="/contact" onClick={(e) => { e.preventDefault(); handleNav('/contact'); }} className="hover:text-white text-[#CBD5E1]/70 transition-colors cursor-pointer text-left block font-medium text-blue-400">
-                    Get in Touch
+                    Contact
                   </a>
                 </li>
                 <li>
@@ -310,11 +315,13 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
 
         {/* Bottom Bar */}
         <div className="flex flex-col sm:flex-row items-center justify-between text-xs text-white/40 gap-4 font-interface">
-          <p>© {new Date().getFullYear()} Digital Muid. All rights reserved. Intellectual property & strategic frameworks.</p>
+          <p>Copyright © 2026 Digital Muid.</p>
           <div className="flex items-center gap-6">
-            <a href="/contact" onClick={(e) => { e.preventDefault(); handleNav('/contact'); }} className="hover:text-white cursor-pointer">Privacy Policy</a>
+            <a href="/about" onClick={(e) => { e.preventDefault(); handleNav('/about'); }} className="hover:text-white cursor-pointer">About</a>
+            <a href="/services" onClick={(e) => { e.preventDefault(); handleNav('/services'); }} className="hover:text-white cursor-pointer">Services</a>
+            <a href="/learn" onClick={(e) => { e.preventDefault(); handleNav('/learn'); }} className="hover:text-white cursor-pointer">Courses</a>
+            <a href="/terms" onClick={(e) => { e.preventDefault(); handleNav('/terms'); }} className="hover:text-white cursor-pointer">Privacy Policy</a>
             <a href="/terms" onClick={(e) => { e.preventDefault(); handleNav('/terms'); }} className="hover:text-white cursor-pointer">Terms & Conditions</a>
-            <a href="/terms" onClick={(e) => { e.preventDefault(); handleNav('/terms'); }} className="hover:text-white cursor-pointer">Consultation Terms</a>
           </div>
         </div>
       </div>

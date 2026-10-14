@@ -1,299 +1,505 @@
 import React, { useState } from 'react';
 import heroPortrait from '../assets/images/regenerated_image_1788770375948.jpg';
 import { useApp } from '../context/AppContext';
-import { INITIAL_FRAMEWORKS } from '../data/initialData';
+import { analytics } from '../utils/analytics';
 import {
   ArrowRight,
-  Sparkles,
-  Calendar,
-  Layers,
   CheckCircle2,
-  TrendingUp,
   Cpu,
-  Brain,
-  Award,
-  Video,
-  BookOpen,
+  Layers,
+  TrendingUp,
   Download,
-  Users,
-  MessageSquare,
-  Globe,
+  Terminal,
+  Code2,
+  Check,
+  AlertCircle,
+  Loader2,
+  BookOpen,
   Compass,
+  Award,
   Zap,
-  Play,
-  Clock,
-  ChevronRight,
   ShieldCheck,
-  Heart
+  BarChart3,
+  Server
 } from 'lucide-react';
 
 interface HomePageProps {
   navigate: (path: string) => void;
-  onOpenResourceModal: (resourceId: string) => void;
+  onOpenResourceModal?: (resourceId: string) => void;
 }
 
-export const HomePage: React.FC<HomePageProps> = ({ navigate, onOpenResourceModal }) => {
-  const {
-    articles,
-    videos,
-    frameworks,
-    resources,
-    courses,
-    testimonials,
-    consultationProduct,
-    speakingEvents,
-    isCourseWishlisted,
-    toggleCourseWishlist,
-    studentEnrollments
-  } = useApp();
+export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
+  const { recordResourceDownload } = useApp();
 
-  const [activePhilosophyStep, setActivePhilosophyStep] = useState(2); // AI default
-  const [activeStackStep, setActiveStackStep] = useState(0);
-  const [activeProofTab, setActiveProofTab] = useState<'Clients' | 'Students' | 'Collaborators'>('Clients');
-  const [activeVideoCategory, setActiveVideoCategory] = useState<string>('All');
+  // Lead Capture State for Section 7
+  const [diagnosticEmail, setDiagnosticEmail] = useState('');
+  const [diagnosticStatus, setDiagnosticStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [diagnosticErrorMsg, setDiagnosticErrorMsg] = useState('');
+  const [isDuplicate, setIsDuplicate] = useState(false);
 
-  const publishedArticles = articles.filter((a) => a.status === 'published');
-  const featuredArticle = publishedArticles.find((a) => Boolean(a.isFeatured ?? a.featured)) || publishedArticles[0];
-  const supportingArticles = featuredArticle ? publishedArticles.filter((a) => a.id !== featuredArticle.id).slice(0, 3) : [];
-  const publishedResources = resources.filter((r) => r.status === 'published' || !r.status);
-  const publishedFrameworks = frameworks.filter((f) => f.status === 'published' || !f.status);
+  // Diagnostic form submission handler
+  const handleDiagnosticSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = diagnosticEmail.trim().toLowerCase();
 
-  const signatureFramework =
-    frameworks.find((f) => f.slug === 'digital-growth-stack') ||
-    frameworks[0] ||
-    INITIAL_FRAMEWORKS[0];
+    // 1. Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      setDiagnosticStatus('error');
+      setDiagnosticErrorMsg('Please provide a valid business email address.');
+      return;
+    }
 
-  const signatureStages =
-    (signatureFramework?.frameworkContent ??
-      signatureFramework?.framework_content ??
-      signatureFramework?.steps ??
-      INITIAL_FRAMEWORKS[0]?.frameworkContent ??
-      []) as any[];
+    // 2. Prevent duplicate submission
+    if (diagnosticStatus === 'success' || isDuplicate) {
+      return;
+    }
 
-  const safeStackIndex = Math.min(activeStackStep, Math.max(0, signatureStages.length - 1));
-  const activeStage = signatureStages[safeStackIndex] || signatureStages[0] || {
-    number: '01',
-    step: 1,
-    title: 'Strategy & Positioning',
-    subtitle: 'Core Vector & Positioning',
-    description: 'Define your defensible market moat, identify high-intent ICP segments, and architect your proprietary value proposition.',
-    impact: 'Eliminates wasted capital and focuses 100% of resources on proven demand vectors.',
-    keyActions: [
-      'Ideal Customer Profile (ICP) validation',
-      'Value proposition stress-testing',
-      'Competitive moat differentiation matrix'
-    ]
+    setDiagnosticStatus('loading');
+    setDiagnosticErrorMsg('');
+
+    try {
+      // res-02 is the existing 32-point checklist in INITIAL_RESOURCES & public/downloads/digital-growth-checklist.pdf
+      const result = await recordResourceDownload(
+        'res-02',
+        cleanEmail,
+        cleanEmail.split('@')[0],
+        undefined,
+        'Growth Diagnostic Lead'
+      );
+
+      if (result.success) {
+        setDiagnosticStatus('success');
+        setIsDuplicate(true);
+
+        // Track in Analytics DataLayer (No PII passed)
+        analytics.trackDiagnosticFormSubmit('The 32-Point Digital Growth & Readiness Checklist');
+        analytics.trackDiagnosticDownload('digital-growth-checklist.pdf');
+
+        // Trigger secure file download
+        const downloadUrl = '/downloads/digital-growth-checklist.pdf';
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = 'digital-growth-readiness-checklist-32-points.pdf';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        setDiagnosticStatus('error');
+        setDiagnosticErrorMsg('Unable to process your request. Please try again.');
+      }
+    } catch (err) {
+      setDiagnosticStatus('error');
+      setDiagnosticErrorMsg('Network or service interruption. Please try again.');
+    }
   };
 
-  const totalCalculated = (consultationProduct.basePrice * (1 + consultationProduct.gstRate)).toFixed(0);
-
-  const philosophySteps = [
-    { title: 'Strategy', desc: 'Market positioning & defensible moats' },
-    { title: 'Technology', desc: 'Modern web architecture & digital infrastructure' },
-    { title: 'AI', desc: 'Autonomous workflows & intelligent synthesis' },
-    { title: 'Content', desc: 'Intellectual property & high-authority distribution' },
-    { title: 'Customer Experience', desc: 'Frictionless conversion & value delivery' },
-    { title: 'Systems', desc: 'Automated CRM, operations & telemetry' },
-    { title: 'Growth', desc: 'Compounding enterprise value & predictable scale' }
-  ];
-
-  const impactAreas = [
-    {
-      title: 'Growth Strategy',
-      desc: 'Turn digital activity into a measurable growth system with predictable unit economics.',
-      icon: TrendingUp,
-      route: '/frameworks/digital-growth-stack',
-      tag: 'Framework'
-    },
-    {
-      title: 'AI & Automation',
-      desc: 'Use intelligent systems to rethink how businesses work, cutting operational friction.',
-      icon: Cpu,
-      route: '/frameworks/ai-transformation-framework',
-      tag: 'AI Operating Model'
-    },
-    {
-      title: 'Modern Marketing',
-      desc: 'Build visibility, demand, and conversion without relying on cheap vanity metrics.',
-      icon: Compass,
-      route: '/learn/digital-marketing-masterclass',
-      tag: 'Performance & Intent'
-    },
-    {
-      title: 'Personal Branding',
-      desc: 'Turn expertise into authority and commercial opportunity through signature frameworks.',
-      icon: Award,
-      route: '/frameworks/personal-authority-framework',
-      tag: 'Intellectual Property'
-    },
-    {
-      title: 'Digital Transformation',
-      desc: 'Connect technology, people, and processes into a unified operating ecosystem.',
-      icon: Globe,
-      route: '/business-growth-consultation',
-      tag: 'Enterprise Advisory'
-    },
-    {
-      title: 'Education',
-      desc: 'Build practical digital skills that can actually be applied to launch and scale real businesses.',
-      icon: BookOpen,
-      route: '/learn',
-      tag: 'Masterclasses'
-    }
-  ];
-
-  const filteredVideos =
-    activeVideoCategory === 'All'
-      ? videos.slice(0, 4)
-      : videos.filter((v) => v.category === activeVideoCategory).slice(0, 4);
-
-  const filteredTestimonials = testimonials.filter((t) => t.category === activeProofTab);
-
   return (
-    <div id="homepage-root" className="space-y-24 sm:space-y-32 pb-24 overflow-hidden">
-      {/* ========================================================================= */}
-      {/* SECTION 01 — HERO */}
-      {/* ========================================================================= */}
+    <div className="min-h-screen bg-[#07111F] text-slate-100 selection:bg-[#FF6B00] selection:text-white overflow-hidden">
+      {/* =========================================================================
+          SECTION ONE — THE SWITCHBOARD (HERO)
+          Center-aligned composition, strong typography, deliberate whitespace
+          ========================================================================= */}
       <section
-        id="hero-section"
-        className="relative min-h-[90vh] lg:min-h-screen flex items-center pt-28 sm:pt-32 pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto hero-gradient"
+        id="hero"
+        className="relative pt-36 pb-20 sm:pt-44 sm:pb-28 lg:pt-48 lg:pb-32 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto text-center"
       >
-        {/* Editorial Watermark */}
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-[0.03] pointer-events-none select-none overflow-hidden">
-          <span className="font-display font-black text-[22vw] leading-none whitespace-nowrap text-white">AUTHORITY</span>
+        {/* Subtle radial glow background */}
+        <div
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[350px] bg-[#1877F2]/10 blur-[120px] rounded-full pointer-events-none -z-10"
+          aria-hidden="true"
+        />
+
+        <div className="space-y-8">
+          {/* Eyebrow Label */}
+          <div className="flex items-center justify-center">
+            <span className="text-[11px] sm:text-xs font-semibold uppercase tracking-[0.24em] text-[#FF6B00] font-interface">
+              STRATEGY • REACT ARCHITECTURE • AI AUTOMATION
+            </span>
+          </div>
+
+          {/* Main Heading H1 */}
+          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-display font-bold tracking-tight text-white leading-[1.12] text-balance max-w-4xl mx-auto">
+            Engineered growth systems for scaling businesses &amp; marketing professionals.
+          </h1>
+
+          {/* Supporting Paragraph */}
+          <p className="text-base sm:text-lg lg:text-xl text-slate-300 font-interface leading-relaxed max-w-2xl mx-auto font-light">
+            We design full-stack client acquisition engines, deploy custom web architecture, and train the next generation of performance marketers. Growth is a system, not a tactic.
+          </p>
+
+          {/* CTA Buttons */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
+            {/* Primary CTA */}
+            <a
+              id="hero-primary-cta"
+              href="/business-growth-consultation"
+              onClick={(e) => {
+                e.preventDefault();
+                analytics.trackGrowthAuditCta('hero');
+                navigate('/business-growth-consultation');
+              }}
+              className="w-full sm:w-auto px-8 py-4 rounded-xl bg-[#FF6B00] hover:bg-[#FF7A1A] text-white font-bold text-sm tracking-wide shadow-xl shadow-[#FF6B00]/25 transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 group active:scale-[0.98] font-interface"
+            >
+              <span>Build my growth engine</span>
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+            </a>
+
+            {/* Secondary CTA */}
+            <a
+              id="hero-secondary-cta"
+              href="/learn"
+              onClick={(e) => {
+                e.preventDefault();
+                analytics.trackAcademyCta('hero');
+                navigate('/learn');
+              }}
+              className="w-full sm:w-auto px-8 py-4 rounded-xl bg-white/5 hover:bg-white/10 text-white font-semibold text-sm border border-white/15 transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 active:scale-[0.98] font-interface"
+            >
+              <span>Master the mechanics</span>
+              <BookOpen className="w-4 h-4 text-slate-400" />
+            </a>
+          </div>
         </div>
+      </section>
 
-        {/* Ambient Gradients */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-[#1877F2]/10 rounded-full blur-3xl pointer-events-none -z-10"></div>
-        <div className="absolute bottom-10 right-1/4 w-[30rem] h-[30rem] bg-[#1E3A8A]/20 rounded-full blur-3xl pointer-events-none -z-10"></div>
+      {/* =========================================================================
+          SECTION TWO — THE AUTHORITY STRIP
+          Technology and platform strip beneath the hero
+          ========================================================================= */}
+      <section
+        id="authority-strip"
+        className="border-y border-white/10 bg-[#0A1322] py-8 sm:py-10 px-4 sm:px-6 lg:px-8"
+      >
+        <div className="max-w-6xl mx-auto">
+          <p className="text-center text-xs sm:text-sm font-semibold text-slate-400 font-interface uppercase tracking-[0.16em] mb-6">
+            Powering digital infrastructure with modern stacks:
+          </p>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-10 items-center w-full relative z-10">
-          {/* Left Column: Copy & CTAs */}
-          <div className="lg:col-span-7 space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700">
-            {/* Editorial Eyebrow */}
-            <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.3em] text-[#FF6B00] font-interface">
-              <span className="w-2 h-2 rounded-full bg-[#FF6B00]"></span>
-              <span>FOUNDER & GROWTH STRATEGIST</span>
+          <div className="flex flex-wrap items-center justify-center gap-6 sm:gap-10 lg:gap-14">
+            {/* React.js */}
+            <div className="flex items-center gap-2 text-slate-400 hover:text-slate-200 transition-colors">
+              <svg className="w-6 h-6 text-[#61DAFB]" viewBox="-11.5 -10.23174 23 20.46348" fill="currentColor">
+                <circle cx="0" cy="0" r="2.05" fill="#61DAFB" />
+                <g stroke="#61DAFB" strokeWidth="1" fill="none">
+                  <ellipse rx="11" ry="4.2" />
+                  <ellipse rx="11" ry="4.2" transform="rotate(60)" />
+                  <ellipse rx="11" ry="4.2" transform="rotate(120)" />
+                </g>
+              </svg>
+              <span className="font-display font-semibold text-sm tracking-tight text-slate-300">React.js</span>
             </div>
 
-            {/* Main Headline */}
-            <h1 className="text-4xl sm:text-6xl xl:text-7xl font-display font-bold text-white tracking-tight leading-[1.05]">
-              Digital Growth.<br />
-              <span className="text-[#1877F2]">AI. Strategy.</span><br />
-              Transformation.
-            </h1>
-
-            {/* Supporting Copy */}
-            <p className="text-lg sm:text-xl text-[#CBD5E1] font-interface font-light leading-relaxed max-w-2xl">
-              I help businesses and professionals navigate digital growth, AI, and modern marketing—and turn knowledge into measurable action.
-            </p>
-
-            {/* Identity line */}
-            <div className="pt-1 flex flex-wrap items-center gap-2.5 sm:gap-3 text-xs sm:text-sm text-[#CBD5E1]/70 font-interface border-l-2 border-[#FF6B00] pl-4">
-              <span className="text-white font-medium">Founder</span>
-              <span>·</span>
-              <span className="text-white font-medium">Growth Strategist</span>
-              <span>·</span>
-              <span className="text-white font-medium">Educator</span>
-              <span>·</span>
-              <span className="text-white font-medium">AI & Digital Transformation</span>
+            {/* Node.js */}
+            <div className="flex items-center gap-2 text-slate-400 hover:text-slate-200 transition-colors">
+              <svg className="w-6 h-6 text-[#5FA04E]" viewBox="0 0 32 32" fill="currentColor">
+                <path d="M16 2.5L2.8 10.1v15.2L16 32.9l13.2-7.6V10.1L16 2.5zm10.7 21.3L16 30l-10.7-6.2V11.3L16 5.1l10.7 6.2v12.5z" />
+              </svg>
+              <span className="font-display font-semibold text-sm tracking-tight text-slate-300">Node.js</span>
             </div>
 
-            {/* Hero CTAs */}
-            <div className="pt-3 flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3.5">
-              {/* Primary CTA: Book a Consultation */}
-              <button
-                id="hero-primary-cta"
-                onClick={() => navigate('/business-growth-consultation')}
-                className="px-7 py-4 bg-[#FF6B00] hover:bg-[#e66000] text-white font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2.5 cursor-pointer shadow-lg shadow-[#FF6B00]/25 active:scale-98"
-              >
-                <Calendar className="w-4 h-4 text-white" />
-                <span>BOOK A CONSULTATION</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-
-              {/* Secondary CTA: Explore Digital Muid */}
-              <button
-                id="hero-secondary-cta"
-                onClick={() => {
-                  const el = document.getElementById('core-philosophy-section') || document.getElementById('impact-areas-section');
-                  if (el) el.scrollIntoView({ behavior: 'smooth' });
-                  else navigate('/about');
-                }}
-                className="px-7 py-4 bg-white/10 hover:bg-white/15 text-white border border-white/20 font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <span>EXPLORE DIGITAL MUID</span>
-                <ArrowRight className="w-4 h-4 text-white/60" />
-              </button>
-
-              {/* Subtle Education CTA */}
-              <button
-                id="hero-education-cta"
-                onClick={() => navigate('/learn')}
-                className="px-4 py-3 text-[#60A5FA] hover:text-white font-bold text-xs uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <span>LEARN WITH DIGITAL MUID</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
+            {/* Meta Ads */}
+            <div className="flex items-center gap-2 text-slate-400 hover:text-slate-200 transition-colors">
+              <svg className="w-6 h-6 text-[#0081FB]" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z" />
+              </svg>
+              <span className="font-display font-semibold text-sm tracking-tight text-slate-300">Meta Ads</span>
             </div>
 
-            {/* Trust Footnote */}
-            <div className="pt-2 flex items-center gap-4 text-xs text-white/50">
-              <span className="text-white font-bold">Expert Advisory</span>
-              <span>·</span>
-              <span>Trusted by 100+ Brands & Founders</span>
+            {/* Google Ads */}
+            <div className="flex items-center gap-2 text-slate-400 hover:text-slate-200 transition-colors">
+              <svg className="w-6 h-6 text-[#FABB05]" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z" />
+              </svg>
+              <span className="font-display font-semibold text-sm tracking-tight text-slate-300">Google Ads</span>
+            </div>
+
+            {/* Google Flow */}
+            <div className="flex items-center gap-2 text-slate-400 hover:text-slate-200 transition-colors">
+              <div className="w-6 h-6 rounded bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-white text-[10px] font-bold">
+                GF
+              </div>
+              <span className="font-display font-semibold text-sm tracking-tight text-slate-300">Google Flow</span>
+            </div>
+
+            {/* Omni Flash */}
+            <div className="flex items-center gap-2 text-slate-400 hover:text-slate-200 transition-colors">
+              <div className="w-6 h-6 rounded bg-gradient-to-tr from-amber-500 to-orange-600 flex items-center justify-center text-white text-[10px] font-bold">
+                <Zap className="w-3.5 h-3.5" />
+              </div>
+              <span className="font-display font-semibold text-sm tracking-tight text-slate-300">Omni Flash</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* =========================================================================
+          SECTION THREE — CORPORATE PIPELINE
+          Two-column section targeting business owners, agencies, and organizations
+          ========================================================================= */}
+      <section
+        id="corporate-pipeline"
+        className="py-20 sm:py-28 lg:py-32 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto"
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 items-center">
+          {/* Left Column — Visual: Dark-Mode Analytics & Acquisition Engine */}
+          <div className="lg:col-span-6 order-2 lg:order-1">
+            <div className="relative rounded-2xl bg-[#0B1526] border border-white/10 shadow-2xl overflow-hidden p-6 sm:p-7 space-y-6">
+              {/* Header bar */}
+              <div className="flex items-center justify-between pb-4 border-b border-white/10">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-3 h-3 rounded-full bg-rose-500/80" />
+                  <div className="w-3 h-3 rounded-full bg-amber-500/80" />
+                  <div className="w-3 h-3 rounded-full bg-emerald-500/80" />
+                  <span className="text-xs font-mono text-slate-400 ml-2">acquisition_pipeline.engine</span>
+                </div>
+                <div className="text-[11px] font-mono text-emerald-400 flex items-center gap-1.5">
+                  <Server className="w-3 h-3" />
+                  <span>200 OK • 18ms latency</span>
+                </div>
+              </div>
+
+              {/* KPI Matrix Strip */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3.5 rounded-xl bg-white/5 border border-white/5">
+                  <div className="text-[11px] text-slate-400 font-interface">Qualified Pipeline</div>
+                  <div className="text-xl sm:text-2xl font-display font-bold text-white tabular-nums mt-0.5">₹48.2L</div>
+                  <div className="text-[10px] text-emerald-400 font-semibold mt-1">↑ +38% MoM</div>
+                </div>
+                <div className="p-3.5 rounded-xl bg-white/5 border border-white/5">
+                  <div className="text-[11px] text-slate-400 font-interface">Conversion Velocity</div>
+                  <div className="text-xl sm:text-2xl font-display font-bold text-white tabular-nums mt-0.5">4.82%</div>
+                  <div className="text-[10px] text-emerald-400 font-semibold mt-1">CRO Calibrated</div>
+                </div>
+                <div className="p-3.5 rounded-xl bg-white/5 border border-white/5">
+                  <div className="text-[11px] text-slate-400 font-interface">CAC Efficiency</div>
+                  <div className="text-xl sm:text-2xl font-display font-bold text-white tabular-nums mt-0.5">3.8x</div>
+                  <div className="text-[10px] text-orange-400 font-semibold mt-1">LTV:CAC ratio</div>
+                </div>
+              </div>
+
+              {/* Client Acquisition Funnel Stages */}
+              <div className="space-y-2.5 pt-2">
+                <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider font-interface">
+                  Full-Funnel Acquisition Stages
+                </div>
+
+                <div className="space-y-2 font-mono text-xs">
+                  <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex items-center justify-between">
+                    <span className="text-slate-300">01. Algorithmic Media (Meta &amp; Google)</span>
+                    <span className="text-slate-400 tabular-nums">24,500 High-Intent Visitors</span>
+                  </div>
+                  <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex items-center justify-between">
+                    <span className="text-slate-300">02. High-Velocity React Landing Layer</span>
+                    <span className="text-emerald-400 tabular-nums">1,180 Diagnostic Opt-ins</span>
+                  </div>
+                  <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex items-center justify-between">
+                    <span className="text-slate-300">03. Automated Qualification &amp; CRM Routing</span>
+                    <span className="text-blue-400 tabular-nums">240 Strategic Audits</span>
+                  </div>
+                  <div className="p-3 rounded-lg bg-[#FF6B00]/10 border border-[#FF6B00]/30 flex items-center justify-between">
+                    <span className="text-white font-semibold">04. Closed Commercial Retainers</span>
+                    <span className="text-[#FF6B00] font-bold tabular-nums">High-Ticket Closes</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Right Column: Editorial Portrait Box with Nodes */}
-          <div className="lg:col-span-5 relative flex justify-center animate-in fade-in zoom-in-95 duration-1000">
-            <div className="relative w-full max-w-md">
-              {/* Editorial Frame */}
-              <div className="relative rounded-2xl bg-[#0A1A2F] border border-white/10 shadow-2xl overflow-hidden group">
-                <div className="relative aspect-[3/4] overflow-hidden bg-slate-950">
-                  <img
-                    src={heroPortrait}
-                    alt="Digital Muid Portrait"
-                    className="w-full h-full object-cover object-top filter grayscale contrast-115 brightness-90 group-hover:grayscale-0 group-hover:scale-102 transition-all duration-700"
-                  />
-                  {/* Dark subtle gradient overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#07111F] via-[#07111F]/20 to-transparent"></div>
+          {/* Right Column — Heading & Capabilities */}
+          <div className="lg:col-span-6 order-1 lg:order-2 space-y-6">
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white leading-tight">
+              Beautiful websites don't close deals. Engineered funnels do.
+            </h2>
 
-                  {/* Floating Node Pills */}
-                  <div className="absolute top-8 left-6 node-pill">
-                    AI Systems
-                  </div>
+            <p className="text-base sm:text-lg text-slate-300 font-interface leading-relaxed font-light">
+              Stop burning ad budget on brochure websites that leak traffic. We build bespoke client acquisition systems from the server up. From high-velocity React and Node.js architectures to full-funnel Meta and Google Ads management, we align your tech infrastructure with your revenue goals.
+            </p>
 
-                  <div className="absolute top-24 right-6 node-pill">
-                    Growth Stack™
-                  </div>
+            {/* Three Capability Items */}
+            <div className="space-y-4 pt-2">
+              {/* Item 1 */}
+              <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-1">
+                <div className="flex items-center gap-2">
+                  <Code2 className="w-4 h-4 text-[#FF6B00]" />
+                  <h3 className="text-base font-display font-semibold text-white">Performance web development</h3>
+                </div>
+                <p className="text-sm text-slate-300 font-interface leading-relaxed pl-6">
+                  Custom React landing pages and web experiences designed for fast loading, accessibility, and conversion.
+                </p>
+              </div>
 
-                  <div className="absolute bottom-20 left-8 node-pill">
-                    Digital Strategy
-                  </div>
+              {/* Item 2 */}
+              <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-1">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-[#FF6B00]" />
+                  <h3 className="text-base font-display font-semibold text-white">Algorithmic acquisition</h3>
+                </div>
+                <p className="text-sm text-slate-300 font-interface leading-relaxed pl-6">
+                  Meta and Google Ads management focused on campaign structure, measurement, experimentation, and acquisition performance.
+                </p>
+              </div>
 
-                  {/* Graphic Lines */}
-                  <div className="absolute top-1/2 left-3 w-px h-20 bg-gradient-to-b from-transparent via-[#FF6B00] to-transparent"></div>
-                  <div className="absolute bottom-6 right-6 flex flex-col items-end gap-1 pointer-events-none">
-                    <div className="h-px w-16 bg-white/20"></div>
-                    <div className="h-px w-10 bg-white/20"></div>
-                    <div className="h-px w-20 bg-white/20"></div>
-                  </div>
+              {/* Item 3 */}
+              <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-1">
+                <div className="flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-[#FF6B00]" />
+                  <h3 className="text-base font-display font-semibold text-white">AI operations</h3>
+                </div>
+                <p className="text-sm text-slate-300 font-interface leading-relaxed pl-6">
+                  AI-assisted workflows, custom AI avatars where genuinely available, and CRM integrations designed to reduce repetitive work and improve operational efficiency.
+                </p>
+              </div>
+            </div>
 
-                  {/* Editorial Name Tag Bottom */}
-                  <div className="absolute bottom-4 left-4 right-4 p-3.5 rounded-xl bg-[#07111F]/90 backdrop-blur-md border border-white/10 shadow-lg">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-[10px] font-bold text-[#FF6B00] tracking-[0.2em] uppercase font-interface">
-                          Strategic Advisor
-                        </div>
-                        <div className="text-base font-bold text-white font-display">
-                          Digital Muid
-                        </div>
-                      </div>
-                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-400"></div>
-                    </div>
+            {/* CTA */}
+            <div className="pt-2">
+              <a
+                id="corporate-audit-cta"
+                href="/business-growth-consultation"
+                onClick={(e) => {
+                  e.preventDefault();
+                  analytics.trackGrowthAuditCta('corporate_pipeline');
+                  navigate('/business-growth-consultation');
+                }}
+                className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl bg-[#FF6B00] hover:bg-[#FF7A1A] text-white font-bold text-sm tracking-wide shadow-lg shadow-[#FF6B00]/25 transition-all cursor-pointer font-interface active:scale-[0.98]"
+              >
+                <span>Request a growth audit</span>
+                <ArrowRight className="w-4 h-4" />
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* =========================================================================
+          SECTION FOUR — ACADEMY PIPELINE
+          Reverse two-column layout to distinguish education from corporate services
+          ========================================================================= */}
+      <section
+        id="academy-pipeline"
+        className="py-20 sm:py-28 lg:py-32 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto border-t border-white/10 bg-[#091424]/60"
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 items-center">
+          {/* Left Column — Heading & Curriculum Checklist */}
+          <div className="lg:col-span-6 space-y-6">
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white leading-tight">
+              Stop learning platform hacks. Master the mechanics of digital growth.
+            </h2>
+
+            <p className="text-base sm:text-lg text-slate-300 font-interface leading-relaxed font-light">
+              The digital landscape doesn't reward copy-paste tactics anymore. Our Academy is built for students, freelancers, and professionals who want to understand the underlying economics of performance marketing, SEO, and AI automation. Learn the exact systems we use to scale real businesses.
+            </p>
+
+            {/* Learning Areas Checklist */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center gap-3 p-3.5 rounded-xl bg-white/5 border border-white/10">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                <span className="text-sm sm:text-base font-semibold text-slate-200 font-interface">
+                  Performance media buying (Meta &amp; Google)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3 p-3.5 rounded-xl bg-white/5 border border-white/10">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                <span className="text-sm sm:text-base font-semibold text-slate-200 font-interface">
+                  Search engine optimization (AI-integrated)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3 p-3.5 rounded-xl bg-white/5 border border-white/10">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                <span className="text-sm sm:text-base font-semibold text-slate-200 font-interface">
+                  Funnel building &amp; conversion strategy
+                </span>
+              </div>
+            </div>
+
+            {/* CTA */}
+            <div className="pt-2">
+              <a
+                id="academy-explore-cta"
+                href="/learn"
+                onClick={(e) => {
+                  e.preventDefault();
+                  analytics.trackAcademyCta('academy_pipeline');
+                  navigate('/learn');
+                }}
+                className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl bg-[#1877F2] hover:bg-blue-600 text-white font-bold text-sm tracking-wide shadow-lg shadow-[#1877F2]/25 transition-all cursor-pointer font-interface active:scale-[0.98]"
+              >
+                <span>Explore the academy</span>
+                <ArrowRight className="w-4 h-4" />
+              </a>
+            </div>
+          </div>
+
+          {/* Right Column — Visual: Educational Video & Curriculum Interface */}
+          <div className="lg:col-span-6">
+            <div className="rounded-2xl bg-[#0B1526] border border-white/10 shadow-2xl p-6 sm:p-7 space-y-5">
+              {/* Educational Player Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                <div className="flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 text-[#FF6B00]" />
+                  <span className="text-xs font-semibold text-white font-interface uppercase tracking-wider">
+                    DigitalMUID Academy Portal
+                  </span>
+                </div>
+                <span className="text-[11px] text-emerald-400 font-mono bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                  Live Masterclass Modules
+                </span>
+              </div>
+
+              {/* Featured Course Card */}
+              <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-3">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <span className="text-[10px] font-bold text-[#FF6B00] uppercase tracking-wider font-interface">
+                      Core Masterclass
+                    </span>
+                    <h3 className="text-base font-display font-bold text-white mt-0.5">
+                      Meta Ads Mastery: Algorithmic Media Buying
+                    </h3>
                   </div>
+                  <span className="text-xs font-mono text-slate-400 bg-white/5 px-2 py-1 rounded">
+                    12 Modules
+                  </span>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+                    <span>Curriculum Progress</span>
+                    <span className="text-white font-semibold">100% Comprehensive</span>
+                  </div>
+                  <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-[#FF6B00] to-emerald-400 rounded-full w-4/5" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Module Syllabus Preview */}
+              <div className="space-y-2">
+                <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-slate-400 font-mono">01</span>
+                    <span className="text-slate-200 font-medium">Underlying Economics of Paid Acquisition</span>
+                  </div>
+                  <span className="text-emerald-400 text-[11px] font-mono">45 mins</span>
+                </div>
+
+                <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-slate-400 font-mono">02</span>
+                    <span className="text-slate-200 font-medium">Algorithmic Ad Account Architecture &amp; CBO</span>
+                  </div>
+                  <span className="text-emerald-400 text-[11px] font-mono">60 mins</span>
+                </div>
+
+                <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-slate-400 font-mono">03</span>
+                    <span className="text-slate-200 font-medium">AI Automation &amp; Intelligent Workflow Systems</span>
+                  </div>
+                  <span className="text-emerald-400 text-[11px] font-mono">55 mins</span>
                 </div>
               </div>
             </div>
@@ -301,1085 +507,278 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate, onOpenResourceModa
         </div>
       </section>
 
-      {/* ========================================================================= */}
-      {/* SECTION 02 — AUTHORITY SNAPSHOT */}
-      {/* ========================================================================= */}
-      <section id="authority-snapshot" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-10 space-y-2">
-          <div className="text-xs font-bold uppercase tracking-[0.3em] text-[#FF6B00] font-interface">
-            Track Record
-          </div>
-          <h2 className="text-2xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-            15+ Years in the Digital World
+      {/* =========================================================================
+          SECTION FIVE — PROPRIETARY IP
+          Centered section communicating DigitalMUID's frameworks
+          ========================================================================= */}
+      <section
+        id="proprietary-ip"
+        className="py-20 sm:py-28 lg:py-32 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto text-center"
+      >
+        <div className="max-w-3xl mx-auto space-y-4 mb-16">
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white">
+            The Digital MUID operating architecture
           </h2>
-          <p className="text-slate-600 text-sm font-interface max-w-xl mx-auto">
-            A battle-tested track record spanning startups, healthcare systems, high-growth brands, and thousands of students.
+          <p className="text-base sm:text-lg text-slate-300 font-interface leading-relaxed font-light">
+            Proprietary models designed to simplify complex market challenges into repeatable, high-leverage execution loops.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="p-6 rounded-xl bg-white border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md transition-all group">
-            <div className="text-4xl sm:text-5xl font-display font-bold text-slate-900 group-hover:text-[#1877F2] transition-colors">
-              15+
-            </div>
-            <div className="text-[11px] uppercase font-bold text-slate-500 mt-3 tracking-[0.2em] font-interface">
-              Years Experience
-            </div>
-            <div className="text-xs text-slate-600 mt-1 font-interface">
-              Continuous implementation across evolving algorithmic cycles.
-            </div>
-          </div>
-
-          <div className="p-6 rounded-xl bg-white border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md transition-all group">
-            <div className="text-4xl sm:text-5xl font-display font-bold text-slate-900 group-hover:text-[#FF6B00] transition-colors">
-              Multi
-            </div>
-            <div className="text-[11px] uppercase font-bold text-slate-500 mt-3 tracking-[0.2em] font-interface">
-              Businesses & Projects
-            </div>
-            <div className="text-xs text-slate-600 mt-1 font-interface">
-              Founded and scaled ventures from zero to national market presence.
-            </div>
-          </div>
-
-          <div className="p-6 rounded-xl bg-white border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md transition-all group">
-            <div className="text-3xl sm:text-4xl font-display font-bold text-slate-900 group-hover:text-emerald-600 transition-colors">
-              AI + TECH
-            </div>
-            <div className="text-[11px] uppercase font-bold text-slate-500 mt-3 tracking-[0.2em] font-interface">
-              Integrated Domains
-            </div>
-            <div className="text-xs text-slate-600 mt-1 font-interface">
-              Connecting disparate disciplines into one unified growth engine.
-            </div>
-          </div>
-
-          <div className="p-6 rounded-xl bg-white border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md transition-all group">
-            <div className="text-3xl sm:text-4xl font-display font-bold text-[#1877F2] group-hover:text-slate-900 transition-colors">
-              ONE MISSION
-            </div>
-            <div className="text-[11px] uppercase font-bold text-slate-500 mt-3 tracking-[0.2em] font-interface">
-              Digital Clarity
-            </div>
-            <div className="text-xs text-slate-600 mt-1 font-interface">
-              Replacing empty corporate jargon with actionable clarity.
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* SECTION 03 — PHILOSOPHY (Visual Ecosystem) */}
-      {/* ========================================================================= */}
-      <section id="philosophy-section" className="bg-white border-y border-slate-200 py-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-          <div className="max-w-3xl space-y-4">
-            <div className="text-xs font-bold uppercase tracking-widest text-[#FF6B00] font-interface">
-              The Digital Muid Philosophy
-            </div>
-            <h2 className="text-3xl sm:text-5xl font-display font-bold text-slate-900 tracking-tight leading-tight">
-              Digital is no longer just marketing.
-            </h2>
-            <p className="text-slate-600 text-base sm:text-lg font-interface leading-relaxed">
-              When a company isolates advertising from its tech architecture, customer experience, and AI capabilities, value leaks everywhere. True leverage occurs when all seven pillars connect seamlessly.
-            </p>
-          </div>
-
-          {/* Interactive Ecosystem Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-            {philosophySteps.map((step, idx) => {
-              const isSelected = activePhilosophyStep === idx;
-              return (
-                <button
-                  key={step.title}
-                  onClick={() => setActivePhilosophyStep(idx)}
-                  className={`p-4 rounded-xl text-left border transition-all relative cursor-pointer ${
-                    isSelected
-                      ? 'bg-blue-50/80 border-[#1877F2] shadow-sm text-slate-900'
-                      : 'bg-slate-50/70 border-slate-200 hover:border-slate-300 hover:bg-white text-slate-700'
-                  }`}
-                >
-                  <div className="text-xs font-mono font-bold text-[#FF6B00] mb-2">0{idx + 1}</div>
-                  <div className="text-base font-bold text-slate-900 font-display mb-1">{step.title}</div>
-                  <div className="text-xs text-slate-500 line-clamp-2">{step.desc}</div>
-                  {idx < 6 && (
-                    <div className="hidden lg:block absolute -right-2 top-1/2 -translate-y-1/2 text-slate-400 z-10 font-bold">
-                      →
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Final Statement Banner */}
-          <div className="p-6 sm:p-8 rounded-2xl bg-gradient-to-r from-slate-900 via-[#0B1E3B] to-slate-900 border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-xl">
-            <p className="text-lg sm:text-xl font-display font-semibold text-white text-center sm:text-left">
-              "The businesses that connect these disciplines will shape what comes next."
-            </p>
-            <button
-              onClick={() => navigate('/frameworks')}
-              className="shrink-0 px-5 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-[#07111F] font-bold text-sm transition-all flex items-center gap-2 cursor-pointer shadow-md"
-            >
-              <span>See the Ecosystem</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* SECTION 04 — AREAS OF IMPACT */}
-      {/* ========================================================================= */}
-      <section id="areas-of-impact" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-          <div className="space-y-3 max-w-2xl">
-            <div className="text-xs font-bold uppercase tracking-widest text-[#1877F2] font-interface">
-              Strategic Capabilities
-            </div>
-            <h2 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-              Where I Create Impact
-            </h2>
-            <p className="text-slate-600 text-sm sm:text-base font-interface">
-              Six focused disciplines where strategic advisory and practical implementation unlock breakthrough velocity.
-            </p>
-          </div>
-          <button
-            onClick={() => navigate('/business-growth-consultation')}
-            className="text-sm font-bold text-[#FF6B00] hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
-          >
-            <span>Solve a challenge with Muid</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {impactAreas.map((area) => {
-            const Icon = area.icon;
-            return (
-              <div
-                key={area.title}
-                onClick={() => navigate(area.route)}
-                className="p-7 rounded-2xl bg-white border border-slate-200 hover:border-[#1877F2]/60 transition-all group cursor-pointer flex flex-col justify-between space-y-6 hover:-translate-y-1 shadow-sm hover:shadow-lg"
-              >
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-[#1877F2] group-hover:scale-110 group-hover:bg-[#1877F2] group-hover:text-white transition-all">
-                      <Icon className="w-6 h-6" />
-                    </div>
-                    <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
-                      {area.tag}
-                    </span>
-                  </div>
-                  <h3 className="text-xl font-display font-bold text-slate-900 group-hover:text-[#1877F2] transition-colors">
-                    {area.title}
-                  </h3>
-                  <p className="text-slate-600 text-sm font-interface leading-relaxed">
-                    {area.desc}
-                  </p>
-                </div>
-
-                <div className="pt-2 flex items-center gap-2 text-xs font-bold text-slate-500 group-hover:text-slate-900 transition-colors">
-                  <span>Explore impact vector</span>
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform text-[#FF6B00]" />
-                </div>
+        {/* Three-Column Card Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 text-left">
+          {/* Card One — The Digital Growth Stack™ */}
+          <div className="p-7 rounded-2xl bg-[#0A1322] border border-white/10 hover:border-[#FF6B00]/40 transition-all duration-200 flex flex-col justify-between group shadow-xl">
+            <div className="space-y-4">
+              <div className="w-10 h-10 rounded-xl bg-[#FF6B00]/10 border border-[#FF6B00]/20 flex items-center justify-center text-[#FF6B00]">
+                <Layers className="w-5 h-5" />
               </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* SECTION 05 — SIGNATURE FRAMEWORK: The Digital Growth Stack™ */}
-      {/* ========================================================================= */}
-      <section id="signature-framework" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="p-8 sm:p-12 rounded-3xl bg-white border border-slate-200/90 shadow-xl relative overflow-hidden space-y-10">
-          <div className="absolute top-0 right-0 w-96 h-96 bg-blue-50 rounded-full blur-3xl pointer-events-none"></div>
-
-          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 relative z-10">
-            <div className="space-y-3 max-w-2xl">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#FF6B00]/10 border border-[#FF6B00]/25 text-[#FF6B00] text-xs font-bold uppercase tracking-wider font-interface">
-                <Layers className="w-3.5 h-3.5" /> Signature Proprietary System
-              </div>
-              <h2 className="text-3xl sm:text-5xl font-display font-bold text-slate-900 tracking-tight">
+              <h3 className="text-xl font-display font-bold text-white group-hover:text-[#FF6B00] transition-colors">
                 The Digital Growth Stack™
-              </h2>
-              <p className="text-slate-600 text-base sm:text-lg font-interface">
-                An interactive 6-stage architecture that transforms disjointed marketing efforts into an unstoppable, compounding growth engine.
-              </p>
-            </div>
-            <button
-              onClick={() => navigate('/frameworks/digital-growth-stack')}
-              className="shrink-0 px-6 py-3 rounded-xl bg-[#1877F2] hover:bg-blue-600 text-white font-bold text-sm shadow-md transition-all flex items-center gap-2 cursor-pointer"
-            >
-              <span>Explore the Full Framework</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Interactive 6-Stage System Selector & Inspector */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start relative z-10">
-            {/* Left: Stack Steps */}
-            <div className="lg:col-span-5 space-y-2.5">
-              {signatureStages.map((st, idx) => {
-                const isActive = safeStackIndex === idx;
-                const stepNumber = st.number ?? st.step ?? (idx + 1);
-                const formattedNumber = typeof stepNumber === 'number' ? String(stepNumber).padStart(2, '0') : String(stepNumber);
-                const stepTitle = st.title || `Stage ${stepNumber}`;
-                const stepSub = st.subtitle || st.shortDescription || '';
-
-                return (
-                  <button
-                    key={st.id || idx}
-                    onClick={() => setActiveStackStep(idx)}
-                    className={`w-full text-left p-4 rounded-xl border transition-all flex items-center justify-between cursor-pointer ${
-                      isActive
-                        ? 'bg-blue-50/90 border-[#1877F2] shadow-sm translate-x-2'
-                        : 'bg-slate-50 border-slate-200 hover:border-slate-300 hover:bg-white'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3.5">
-                      <span
-                        className={`font-mono text-sm font-bold ${
-                          isActive ? 'text-[#FF6B00]' : 'text-slate-400'
-                        }`}
-                      >
-                        {formattedNumber}
-                      </span>
-                      <div>
-                        <div className="font-display font-bold text-slate-900 text-base">{stepTitle}</div>
-                        {stepSub && <div className="text-xs text-slate-500 font-interface">{stepSub}</div>}
-                      </div>
-                    </div>
-                    <ChevronRight
-                      className={`w-4 h-4 transition-transform ${
-                        isActive ? 'text-[#1877F2] translate-x-1' : 'text-slate-400'
-                      }`}
-                    />
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Right: Active Stage Detailed Inspector */}
-            <div className="lg:col-span-7 p-6 sm:p-8 rounded-2xl bg-slate-50 border border-slate-200 space-y-6">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-200">
-                <div className="flex items-center gap-3">
-                  <span className="w-8 h-8 rounded-lg bg-[#FF6B00]/15 text-[#FF6B00] font-mono font-bold flex items-center justify-center text-sm">
-                    {activeStage.number ?? activeStage.step ?? (safeStackIndex + 1)}
-                  </span>
-                  <div>
-                    <h3 className="text-xl sm:text-2xl font-display font-bold text-slate-900">
-                      Stage {activeStage.number ?? activeStage.step ?? (safeStackIndex + 1)}: {activeStage.title}
-                    </h3>
-                    {(activeStage.subtitle || activeStage.shortDescription) && (
-                      <p className="text-xs text-slate-500">
-                        {activeStage.subtitle || activeStage.shortDescription}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                <span className="text-xs font-bold px-2.5 py-1 rounded bg-[#1877F2]/10 text-[#1877F2] border border-[#1877F2]/25 uppercase tracking-wider">
-                  Active Vector
-                </span>
-              </div>
-
-              {(activeStage.description || activeStage.content) && (
-                <p className="text-slate-700 text-sm sm:text-base leading-relaxed">
-                  {activeStage.description || activeStage.content}
-                </p>
-              )}
-
-              {(activeStage.impact || activeStage.outcome) && (
-                <div className="p-4 rounded-xl bg-white border border-slate-200 space-y-2">
-                  <div className="text-xs font-bold text-[#FF6B00] uppercase tracking-wider">
-                    Commercial Business Impact
-                  </div>
-                  <p className="text-sm text-slate-800 font-medium">
-                    {activeStage.impact || activeStage.outcome}
-                  </p>
-                </div>
-              )}
-
-              {activeStage.keyActions && activeStage.keyActions.length > 0 && (
-                <div className="space-y-2">
-                  <div className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                    Key Strategic Actions
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {activeStage.keyActions.map((action: string, i: number) => (
-                      <div key={i} className="flex items-center gap-2 text-xs text-slate-700">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                        <span>{action}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* SECTION 06 — INSIGHTS (Ideas Worth Thinking About) */}
-      {/* ========================================================================= */}
-      <section id="insights-section" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-          <div className="space-y-3 max-w-2xl">
-            <div className="text-xs font-bold uppercase tracking-widest text-[#1877F2] font-interface">
-              Strategic Essays & Thought Leadership
-            </div>
-            <h2 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-              Ideas Worth Thinking About
-            </h2>
-            <p className="text-slate-600 text-sm sm:text-base font-interface">
-              Original essays on AI transformation, founder authority, modern marketing architecture, and digital economics.
-            </p>
-          </div>
-          <button
-            onClick={() => navigate('/insights')}
-            className="text-sm font-bold text-[#1877F2] hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
-          >
-            <span>Explore All Insights</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
-          {/* Large Featured Article */}
-          {featuredArticle && (
-            <div
-              onClick={() => navigate(`/insights/${featuredArticle.slug}`)}
-              className="lg:col-span-7 p-6 sm:p-8 rounded-2xl bg-white border border-slate-200 hover:border-slate-300 transition-all group cursor-pointer flex flex-col justify-between space-y-6 shadow-sm hover:shadow-lg"
-            >
-              <div className="space-y-4">
-                <div className="aspect-[16/9] w-full rounded-xl overflow-hidden bg-slate-100 relative">
-                  <img
-                    src={featuredArticle.featuredImage}
-                    alt={featuredArticle.title}
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
-                  <div className="absolute top-3 left-3 px-3 py-1 rounded-md bg-white/95 backdrop-blur-md text-[#1877F2] text-xs font-bold uppercase tracking-wider border border-slate-200 shadow-sm">
-                    {featuredArticle.category}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 text-xs text-slate-500">
-                  <span>{featuredArticle.publishedAt}</span>
-                  <span>·</span>
-                  <span>{featuredArticle.readTime || `${featuredArticle.readingTimeMinutes || 5} min read`}</span>
-                </div>
-                <h3 className="text-2xl sm:text-3xl font-display font-bold text-slate-900 group-hover:text-[#1877F2] transition-colors leading-tight">
-                  {featuredArticle.title}
-                </h3>
-                <p className="text-slate-600 text-sm sm:text-base font-interface leading-relaxed">
-                  {featuredArticle.excerpt}
-                </p>
-              </div>
-
-              <div className="pt-2 flex items-center justify-between text-sm font-bold text-slate-900 border-t border-slate-100">
-                <span className="flex items-center gap-1 text-[#FF6B00]">
-                  Read Strategic Essay <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </span>
-                <span className="text-xs text-slate-500 font-normal">
-                  By {typeof featuredArticle.author === 'string' ? featuredArticle.author : featuredArticle.author?.name || 'Digital Muid'}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* 3 Supporting Article Cards */}
-          <div className="lg:col-span-5 space-y-4 flex flex-col justify-between">
-            {supportingArticles.map((art) => (
-              <div
-                key={art.id}
-                onClick={() => navigate(`/insights/${art.slug}`)}
-                className="p-5 rounded-xl bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50/80 transition-all group cursor-pointer space-y-2.5 shadow-sm"
-              >
-                <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span className="font-bold text-[#1877F2] bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                    {art.category}
-                  </span>
-                  <span>{art.readTime || `${art.readingTimeMinutes || 5} min read`}</span>
-                </div>
-                <h4 className="text-base font-display font-bold text-slate-900 group-hover:text-[#1877F2] transition-colors line-clamp-2">
-                  {art.title}
-                </h4>
-                <p className="text-xs text-slate-600 font-interface line-clamp-2">
-                  {art.excerpt}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* SECTION 07 — WATCH (Watch Muid) */}
-      {/* ========================================================================= */}
-      <section id="watch-section" className="bg-white border-y border-slate-200 py-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6">
-            <div className="space-y-3 max-w-2xl">
-              <div className="text-xs font-bold uppercase tracking-widest text-purple-600 font-interface flex items-center gap-1.5">
-                <Video className="w-4 h-4" /> Video Knowledge & Masterclasses
-              </div>
-              <h2 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-                Watch Muid
-              </h2>
-              <p className="text-slate-600 text-sm sm:text-base font-interface">
-                Tactical breakdowns, framework explanations, and real-time teardowns of modern digital growth engines.
+              </h3>
+              <p className="text-sm text-slate-300 font-interface leading-relaxed font-light">
+                6-stage integrated architecture for modern growth.
               </p>
             </div>
 
-            {/* Video Category Filter Buttons */}
-            <div className="flex flex-wrap items-center gap-2">
-              {['All', 'Latest', 'AI', 'Marketing', 'Personal Branding'].map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setActiveVideoCategory(cat)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-                    activeVideoCategory === cat
-                      ? 'bg-purple-600 text-white font-bold shadow-sm'
-                      : 'bg-slate-100 text-slate-700 hover:text-slate-900 hover:bg-slate-200'
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {filteredVideos.map((vid) => (
-              <div
-                key={vid.id}
-                onClick={() => navigate(`/watch/${vid.slug}`)}
-                className="rounded-2xl bg-white border border-slate-200 hover:border-purple-300 transition-all group cursor-pointer overflow-hidden flex flex-col justify-between space-y-4 p-4 shadow-sm hover:shadow-md"
+            <div className="pt-6 border-t border-white/5 mt-6">
+              <a
+                href="/frameworks/digital-growth-stack"
+                onClick={(e) => {
+                  e.preventDefault();
+                  analytics.trackFrameworkClick('digital-growth-stack', 'The Digital Growth Stack™');
+                  navigate('/frameworks/digital-growth-stack');
+                }}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-[#FF6B00] hover:text-[#FF8533] uppercase tracking-wider font-interface cursor-pointer"
               >
-                <div className="space-y-3">
-                  <div className="aspect-[16/9] w-full rounded-xl bg-slate-100 relative overflow-hidden">
-                    <img
-                      src={vid.thumbnail}
-                      alt={vid.title}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                    <div className="absolute inset-0 bg-black/20 flex items-center justify-center group-hover:bg-black/5 transition-colors">
-                      <div className="w-10 h-10 rounded-full bg-white text-[#07111F] flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-                        <Play className="w-4 h-4 fill-current ml-0.5 text-purple-600" />
-                      </div>
-                    </div>
-                    <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/80 text-white text-[10px] font-mono font-bold">
-                      {vid.duration}
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] text-slate-500">
-                    <span className="text-purple-600 font-bold">{vid.category}</span>
-                    <span>{vid.viewsCount} views</span>
-                  </div>
-                  <h4 className="font-display font-bold text-slate-900 text-sm group-hover:text-purple-600 transition-colors line-clamp-2">
-                    {vid.title}
-                  </h4>
-                </div>
-
-                <div className="text-xs font-bold text-slate-500 group-hover:text-slate-900 flex items-center gap-1 pt-1 border-t border-slate-100">
-                  <span>Watch breakdown</span>
-                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform text-purple-600" />
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="text-center pt-4">
-            <button
-              onClick={() => navigate('/watch')}
-              className="px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold inline-flex items-center gap-2 transition-all cursor-pointer shadow-md"
-            >
-              <span>Watch More Video Breakdowns</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* SECTION 08 — EDUCATION (Learn Digital. Build What's Next.) */}
-      {/* ========================================================================= */}
-      <section id="education-section" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6">
-          <div className="space-y-3 max-w-2xl">
-            <div className="text-xs font-bold uppercase tracking-widest text-emerald-600 font-interface">
-              Practical Masterclasses & Cohorts
-            </div>
-            <h2 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-              Learn Digital. Build What's Next.
-            </h2>
-            <p className="text-slate-600 text-sm sm:text-base font-interface">
-              Practical, AI-integrated learning for students, professionals, marketers, and entrepreneurs.
-            </p>
-          </div>
-          <button
-            onClick={() => navigate('/learn')}
-            className="text-sm font-bold text-emerald-600 hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
-          >
-            <span>Explore All Learning</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {courses.map((course) => {
-            const isEnrolled = studentEnrollments.some((e) => e.courseId === course.id);
-            const isWishlisted = isCourseWishlisted(course.id);
-
-            return (
-              <div
-                key={course.id}
-                onClick={() => navigate(`/learn/${course.slug}`)}
-                className="p-6 sm:p-8 rounded-2xl bg-white border border-slate-200 hover:border-emerald-500/60 transition-all group cursor-pointer flex flex-col justify-between space-y-6 shadow-sm hover:shadow-lg"
-              >
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-bold px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        {course.level}
-                      </span>
-                      {course.aiIntegrated && (
-                        <span className="text-xs font-bold px-2.5 py-1 rounded bg-blue-50 text-[#1877F2] border border-blue-200 flex items-center gap-1">
-                          <Sparkles className="w-3.5 h-3.5" /> AI-Integrated
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="shrink-0">
-                      {isEnrolled ? (
-                        <span className="px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold uppercase tracking-wider shadow-2xs">
-                          Enrolled
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleCourseWishlist(course.id);
-                          }}
-                          className={`p-2 rounded-xl backdrop-blur-md transition-all shadow-2xs cursor-pointer border ${
-                            isWishlisted
-                              ? 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100'
-                              : 'bg-white/90 border-slate-200 text-slate-400 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50/50'
-                          }`}
-                          title={isWishlisted ? 'Remove from Wishlist' : 'Save to Wishlist'}
-                          aria-label={isWishlisted ? 'Remove from Wishlist' : 'Save to Wishlist'}
-                        >
-                          <Heart
-                            className={`w-4 h-4 transition-transform ${
-                              isWishlisted ? 'fill-rose-500 text-rose-500 scale-110' : ''
-                            }`}
-                          />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <h3 className="text-2xl font-display font-bold text-slate-900 group-hover:text-emerald-600 transition-colors">
-                    {course.title}
-                  </h3>
-                  <p className="text-slate-600 text-sm font-interface leading-relaxed">
-                    {course.shortOutcome}
-                  </p>
-
-                  <div className="flex items-center gap-4 text-xs text-slate-500 pt-2 border-t border-slate-100">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5" /> {course.duration}
-                    </span>
-                    <span>·</span>
-                    <span className="flex items-center gap-1">
-                      <Users className="w-3.5 h-3.5" /> {course.enrolledCount}+ Students
-                    </span>
-                  </div>
-                </div>
-
-                <div className="pt-2 flex items-center justify-between border-t border-slate-100">
-                  <div>
-                    <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Tuition Investment</div>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-lg font-bold text-slate-900 font-mono">₹{course.offerPrice || course.price}</span>
-                      {course.offerPrice && (
-                        <span className="text-xs text-slate-400 line-through font-mono">₹{course.price}</span>
-                      )}
-                    </div>
-                  </div>
-                  <span className="px-4 py-2 rounded-lg bg-slate-900 group-hover:bg-emerald-600 text-white font-bold text-xs transition-all flex items-center gap-1.5 shadow-sm">
-                    <span>Explore Course</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* SECTION 09 — LEARNING PHILOSOPHY */}
-      {/* ========================================================================= */}
-      <section id="learning-philosophy" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="p-8 sm:p-12 rounded-3xl bg-white border border-slate-200 text-center space-y-8 shadow-sm">
-          <div className="space-y-2 max-w-2xl mx-auto">
-            <h3 className="text-2xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-              Don't Just Learn. Build.
-            </h3>
-            <p className="text-slate-600 text-sm sm:text-base font-interface">
-              Education should not end when the class ends.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 font-display font-bold text-sm sm:text-lg">
-            {['Learn', 'Build', 'Launch', 'Measure', 'Improve'].map((step, idx) => (
-              <React.Fragment key={step}>
-                <div className="px-5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 shadow-sm">
-                  {step}
-                </div>
-                {idx < 4 && <div className="text-[#FF6B00] text-xl font-bold">→</div>}
-              </React.Fragment>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* SECTION 10 — FRAMEWORK LIBRARY */}
-      {/* ========================================================================= */}
-      <section id="framework-library" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-          <div className="space-y-3 max-w-2xl">
-            <div className="text-xs font-bold uppercase tracking-widest text-[#FF6B00] font-interface">
-              Intellectual Property
-            </div>
-            <h2 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-              Ideas Become More Powerful When They Become Frameworks.
-            </h2>
-            <p className="text-slate-600 text-sm sm:text-base font-interface">
-              Proprietary models designed to simplify complex market challenges into repeatable, high-leverage execution loops.
-            </p>
-          </div>
-          <button
-            onClick={() => navigate('/frameworks')}
-            className="text-sm font-bold text-[#FF6B00] hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
-          >
-            <span>Explore All Frameworks</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {(publishedFrameworks.length > 0 ? publishedFrameworks : INITIAL_FRAMEWORKS).map((fw) => (
-            <div
-              key={fw.id}
-              onClick={() => navigate(`/frameworks/${fw.slug}`)}
-              className="p-7 rounded-2xl bg-white border border-slate-200 hover:border-[#FF6B00]/60 transition-all group cursor-pointer flex flex-col justify-between space-y-6 shadow-sm hover:shadow-lg"
-            >
-              <div className="space-y-4">
-                <div className="w-10 h-10 rounded-lg bg-orange-50 border border-orange-100 text-[#FF6B00] flex items-center justify-center font-bold">
-                  <Layers className="w-5 h-5" />
-                </div>
-                <h3 className="text-xl font-display font-bold text-slate-900 group-hover:text-[#FF6B00] transition-colors">
-                  {fw.title || fw.name}
-                </h3>
-                {fw.subtitle && <p className="text-xs font-bold text-slate-700">{fw.subtitle}</p>}
-                <p className="text-xs text-slate-600 font-interface leading-relaxed line-clamp-3">
-                  {fw.description || fw.introduction}
-                </p>
-              </div>
-
-              <div className="pt-2 flex items-center gap-1.5 text-xs font-bold text-[#FF6B00] border-t border-slate-100">
-                <span>Examine Framework</span>
+                <span>Explore framework</span>
                 <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-              </div>
+              </a>
             </div>
-          ))}
-        </div>
-      </section>
+          </div>
 
-      {/* ========================================================================= */}
-      {/* SECTION 11 — RESOURCE LIBRARY */}
-      {/* ========================================================================= */}
-      <section id="resource-library" className="bg-white border-y border-slate-200 py-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-            <div className="space-y-3 max-w-2xl">
-              <div className="text-xs font-bold uppercase tracking-widest text-amber-600 font-interface">
-                Free Downloads & Toolkits
+          {/* Card Two — AI Transformation Framework™ */}
+          <div className="p-7 rounded-2xl bg-[#0A1322] border border-white/10 hover:border-blue-500/40 transition-all duration-200 flex flex-col justify-between group shadow-xl">
+            <div className="space-y-4">
+              <div className="w-10 h-10 rounded-xl bg-[#1877F2]/10 border border-[#1877F2]/20 flex items-center justify-center text-[#1877F2]">
+                <Cpu className="w-5 h-5" />
               </div>
-              <h2 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-                Useful Things. Free.
-              </h2>
-              <p className="text-slate-600 text-sm sm:text-base font-interface">
-                Battle-tested prompt packs, growth checklists, operating templates, and conversion blueprints.
+              <h3 className="text-xl font-display font-bold text-white group-hover:text-[#1877F2] transition-colors">
+                AI Transformation Framework™
+              </h3>
+              <p className="text-sm text-slate-300 font-interface leading-relaxed font-light">
+                From generic prompts to autonomous enterprise leverage.
               </p>
             </div>
-            <button
-              onClick={() => navigate('/resources')}
-              className="text-sm font-bold text-amber-600 hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
-            >
-              <span>View All Free Resources</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+
+            <div className="pt-6 border-t border-white/5 mt-6">
+              <a
+                href="/frameworks/ai-transformation-framework"
+                onClick={(e) => {
+                  e.preventDefault();
+                  analytics.trackFrameworkClick('ai-transformation-framework', 'AI Transformation Framework™');
+                  navigate('/frameworks/ai-transformation-framework');
+                }}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1877F2] hover:text-blue-400 uppercase tracking-wider font-interface cursor-pointer"
+              >
+                <span>Explore framework</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              </a>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {publishedResources.map((res) => (
-              <div
-                key={res.id}
-                onClick={() => onOpenResourceModal(res.id)}
-                className="p-6 rounded-2xl bg-slate-50 border border-slate-200 hover:border-amber-400 transition-all group cursor-pointer flex flex-col justify-between space-y-4 shadow-sm hover:shadow-md"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-100 px-2 py-0.5 rounded">
-                      {res.type}
-                    </span>
-                    <span className="text-[11px] text-slate-500 font-medium">{res.downloadCount}+ downloads</span>
-                  </div>
-                  <h4 className="font-display font-bold text-slate-900 text-base group-hover:text-amber-600 transition-colors line-clamp-2">
-                    {res.name}
-                  </h4>
-                  <p className="text-xs text-slate-600 font-interface line-clamp-3">
-                    {res.description}
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-amber-500 hover:text-slate-950 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download Free Asset</span>
-                </button>
+          {/* Card Three — Personal Authority Framework™ */}
+          <div className="p-7 rounded-2xl bg-[#0A1322] border border-white/10 hover:border-emerald-500/40 transition-all duration-200 flex flex-col justify-between group shadow-xl">
+            <div className="space-y-4">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                <Award className="w-5 h-5" />
               </div>
-            ))}
+              <h3 className="text-xl font-display font-bold text-white group-hover:text-emerald-400 transition-colors">
+                Personal Authority Framework™
+              </h3>
+              <p className="text-sm text-slate-300 font-interface leading-relaxed font-light">
+                Turning private expertise into market pull.
+              </p>
+            </div>
+
+            <div className="pt-6 border-t border-white/5 mt-6">
+              <a
+                href="/frameworks/personal-authority-framework"
+                onClick={(e) => {
+                  e.preventDefault();
+                  analytics.trackFrameworkClick('personal-authority-framework', 'Personal Authority Framework™');
+                  navigate('/frameworks/personal-authority-framework');
+                }}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400 hover:text-emerald-300 uppercase tracking-wider font-interface cursor-pointer"
+              >
+                <span>Explore framework</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              </a>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* ========================================================================= */}
-      {/* SECTION 12 — FOUNDER STORY */}
-      {/* ========================================================================= */}
-      <section id="founder-story" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="p-8 sm:p-12 rounded-3xl bg-white border border-slate-200 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center shadow-md">
-          <div className="lg:col-span-7 space-y-6">
-            <div className="text-xs font-bold uppercase tracking-widest text-[#1877F2] font-interface">
-              Behind Digital Muid
+      {/* =========================================================================
+          SECTION SIX — THE OPERATOR
+          Two-column profile section
+          ========================================================================= */}
+      <section
+        id="the-operator"
+        className="py-20 sm:py-28 lg:py-32 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto border-t border-white/10 bg-[#091424]/40"
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-16 items-center">
+          {/* Left Column — Portrait */}
+          <div className="lg:col-span-5 flex justify-center">
+            <div className="relative w-full max-w-md aspect-square sm:aspect-[4/5] rounded-3xl overflow-hidden border border-white/15 shadow-2xl bg-slate-900 group">
+              <img
+                src={heroPortrait}
+                alt="Digital Muid — Founder & Growth Systems Operator"
+                className="w-full h-full object-cover object-center filter grayscale group-hover:grayscale-0 transition-all duration-500"
+                loading="lazy"
+                width={400}
+                height={500}
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#07111F] via-transparent to-transparent opacity-80" />
+              <div className="absolute bottom-5 left-5 right-5">
+                <div className="text-lg font-display font-bold text-white">Digital Muid</div>
+                <div className="text-xs text-[#FF6B00] font-interface font-medium">Founder &amp; Systems Operator</div>
+              </div>
             </div>
-            <h2 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-              15+ years of experimenting, building, teaching, and learning in the digital world.
-            </h2>
-            <p className="text-slate-700 text-sm sm:text-base font-interface leading-relaxed">
-              I started in digital when algorithms were simple and social media was nascent. Over the past 15+ years, I have navigated every shift—from early SEO and performance media to high-velocity LLM workflows and AI operations.
-            </p>
-            <p className="text-slate-600 text-sm font-interface leading-relaxed">
-              My core commitment is simple: eliminate snake-oil buzzwords and provide founders, executives, and students with practical, durable frameworks that create authentic enterprise value.
-            </p>
+          </div>
 
-            {/* Visual Timeline Sequence */}
-            <div className="pt-4 flex flex-wrap items-center gap-2 text-xs font-medium text-slate-700">
-              <span className="px-2.5 py-1 rounded bg-slate-100 border border-slate-200 font-semibold">Digital Marketing</span>
-              <span className="text-slate-400">↓</span>
-              <span className="px-2.5 py-1 rounded bg-slate-100 border border-slate-200 font-semibold">Growth Strategy</span>
-              <span className="text-slate-400">↓</span>
-              <span className="px-2.5 py-1 rounded bg-slate-100 border border-slate-200 font-semibold">AI & Automation</span>
-              <span className="text-slate-400">↓</span>
-              <span className="px-2.5 py-1 rounded bg-slate-100 border border-slate-200 font-semibold">Education</span>
-              <span className="text-slate-400">↓</span>
-              <span className="px-2.5 py-1 rounded bg-blue-50 text-[#1877F2] border border-blue-200 font-bold">
-                Transformation
-              </span>
-            </div>
+          {/* Right Column — Heading & Biography */}
+          <div className="lg:col-span-7 space-y-6">
+            <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FF6B00] font-interface">
+              THE OPERATOR
+            </span>
+
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white leading-tight">
+              The operator behind the systems
+            </h2>
+
+            <p className="text-base sm:text-lg text-slate-300 font-interface leading-relaxed font-light">
+              I operate at the intersection of custom web architecture, AI, and performance marketing. Operating a full-service digital agency out of Lucknow for a borderless economy, my focus is strictly on mechanics over motivation. Whether deploying a custom Node.js application or training the next cohort of marketers, the mission is simple: replace empty corporate jargon with actionable, measurable clarity.
+            </p>
 
             <div className="pt-2">
-              <button
-                onClick={() => navigate('/about')}
-                className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-sm font-bold inline-flex items-center gap-2 transition-all cursor-pointer shadow-sm"
+              <a
+                id="operator-story-cta"
+                href="/about"
+                onClick={(e) => {
+                  e.preventDefault();
+                  analytics.trackOperatorProfileClick();
+                  navigate('/about');
+                }}
+                className="inline-flex items-center gap-2 px-7 py-3.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-bold text-sm tracking-wide border border-white/15 transition-all cursor-pointer font-interface active:scale-[0.98]"
               >
-                <span>Read My Full Story</span>
+                <span>Read the full story</span>
                 <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          <div className="lg:col-span-5 flex justify-center">
-            <div className="w-full max-w-sm rounded-2xl overflow-hidden border border-slate-200 shadow-xl relative aspect-[4/5] bg-slate-100">
-              <img
-                src="https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=800&q=80"
-                alt="Digital Muid in Studio"
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover object-center"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#07111F]/80 via-transparent to-transparent"></div>
-              <div className="absolute bottom-4 left-4 right-4 p-3 rounded-xl bg-slate-900/90 backdrop-blur-md border border-slate-700 text-xs text-slate-200 text-center font-interface">
-                "Real growth is an operating discipline, not an overnight tactic."
-              </div>
+              </a>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ========================================================================= */}
-      {/* SECTION 13 — SOCIAL PROOF */}
-      {/* ========================================================================= */}
-      <section id="social-proof" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-        <div className="text-center space-y-3 max-w-2xl mx-auto">
-          <div className="text-xs font-bold uppercase tracking-widest text-emerald-600 font-interface">
-            Verified Track Record
-          </div>
-          <h2 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-            People I've Had the Opportunity to Work With
-          </h2>
-          <p className="text-slate-600 text-sm font-interface">
-            Authentic perspectives from founders, corporate leaders, students, and institutional collaborators.
-          </p>
+      {/* =========================================================================
+          SECTION SEVEN — LEAD CAPTURE & CLOSING CONVERSION
+          Full-width closing conversion section with high-contrast treatment
+          ========================================================================= */}
+      <section
+        id="lead-capture"
+        className="py-20 sm:py-28 lg:py-32 px-4 sm:px-6 lg:px-8 border-t border-white/10 bg-[#050B14] relative overflow-hidden"
+      >
+        <div
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[350px] bg-[#FF6B00]/10 blur-[130px] rounded-full pointer-events-none -z-10"
+          aria-hidden="true"
+        />
 
-          {/* Social Proof Category Tabs */}
-          <div className="flex items-center justify-center gap-2 pt-4">
-            {(['Clients', 'Students', 'Collaborators'] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveProofTab(tab)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  activeProofTab === tab
-                    ? 'bg-[#1877F2] text-white shadow-md shadow-[#1877F2]/20'
-                    : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
+        <div className="max-w-3xl mx-auto text-center space-y-8">
+          <div className="space-y-4">
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white leading-tight text-balance">
+              Before you spend another Rupee on ads, check your infrastructure.
+            </h2>
+            <p className="text-base sm:text-lg text-slate-300 font-interface leading-relaxed max-w-2xl mx-auto font-light">
+              Download the exact 32-point digital growth &amp; readiness checklist we use to audit high-ticket client funnels and uncover conversion bottlenecks.
+            </p>
           </div>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {filteredTestimonials.map((t) => (
-            <div
-              key={t.id}
-              className="p-6 sm:p-8 rounded-2xl bg-white border border-slate-200 space-y-6 flex flex-col justify-between shadow-sm hover:shadow-md transition-shadow"
-            >
-              <div className="space-y-4">
-                {t.metric && (
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold font-mono">
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    {t.metric}
-                  </div>
-                )}
-                <p className="text-slate-800 text-sm sm:text-base font-interface leading-relaxed italic">
-                  "{t.quote}"
+          {/* Inline Lead Capture Form */}
+          <div className="max-w-xl mx-auto">
+            {diagnosticStatus === 'success' ? (
+              <div className="p-6 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 text-left space-y-3">
+                <div className="flex items-center gap-3">
+                  <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
+                  <h3 className="text-base font-bold text-white font-display">
+                    Diagnostic checklist unlocked &amp; ready!
+                  </h3>
+                </div>
+                <p className="text-xs sm:text-sm text-slate-300 font-interface leading-relaxed">
+                  Your download has started. If the download did not begin automatically, you can access the checklist directly below:
                 </p>
-              </div>
-
-              <div className="flex items-center gap-3 pt-4 border-t border-slate-100">
-                <img
-                  src={t.photo}
-                  alt={t.name}
-                  referrerPolicy="no-referrer"
-                  className="w-11 h-11 rounded-full object-cover border border-slate-200"
-                />
-                <div>
-                  <div className="font-display font-bold text-slate-900 text-sm">{t.name}</div>
-                  <div className="text-xs text-slate-500 font-interface">
-                    {t.role} · <span className="text-slate-700 font-semibold">{t.company}</span>
-                  </div>
+                <div className="pt-2">
+                  <a
+                    href="/downloads/digital-growth-checklist.pdf"
+                    download="digital-growth-readiness-checklist-32-points.pdf"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs uppercase tracking-wider font-interface transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download PDF Again</span>
+                  </a>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* SECTION 14 — SPEAKING */}
-      {/* ========================================================================= */}
-      <section id="speaking-section" className="bg-white border-y border-slate-200 py-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-            <div className="space-y-3 max-w-2xl">
-              <div className="text-xs font-bold uppercase tracking-widest text-[#FF6B00] font-interface">
-                Keynotes & Panels
-              </div>
-              <h2 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-                Ideas Worth Sharing
-              </h2>
-              <p className="text-slate-600 text-sm sm:text-base font-interface">
-                High-impact keynotes and executive masterclasses for conferences, corporate retreats, and industry summits.
-              </p>
-            </div>
-            <button
-              onClick={() => navigate('/speaking')}
-              className="shrink-0 px-5 py-2.5 rounded-xl bg-[#FF6B00] hover:bg-[#e66000] text-white text-xs font-bold uppercase tracking-widest transition-all flex items-center gap-2 cursor-pointer shadow-md"
-            >
-              <span>Invite Muid to Speak</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {speakingEvents.map((evt) => (
-              <div
-                key={evt.id}
-                className="p-6 rounded-2xl bg-slate-50 border border-slate-200 space-y-4 flex flex-col justify-between shadow-sm"
-              >
-                <div className="space-y-3">
-                  <div className="aspect-[16/9] w-full rounded-xl bg-slate-200 overflow-hidden">
-                    <img
-                      src={evt.photo}
-                      alt={evt.eventName}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
+            ) : (
+              <form onSubmit={handleDiagnosticSubmit} className="space-y-4 text-left">
+                <div className="flex flex-col sm:flex-row items-stretch gap-3">
+                  <div className="flex-1">
+                    <label htmlFor="diagnostic-email-input" className="sr-only">
+                      Business Email Address
+                    </label>
+                    <input
+                      id="diagnostic-email-input"
+                      type="email"
+                      required
+                      placeholder="Enter your business email"
+                      value={diagnosticEmail}
+                      onChange={(e) => {
+                        setDiagnosticEmail(e.target.value);
+                        if (diagnosticStatus === 'error') setDiagnosticStatus('idle');
+                      }}
+                      className="w-full px-5 py-4 rounded-xl bg-white/5 border border-white/15 text-white placeholder-slate-400 text-sm focus:outline-none focus:border-[#FF6B00] focus:ring-1 focus:ring-[#FF6B00] transition-colors font-interface"
                     />
                   </div>
-                  <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span className="px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-900 font-bold">{evt.type}</span>
-                    <span>{evt.date}</span>
+
+                  <button
+                    id="diagnostic-submit-btn"
+                    type="submit"
+                    disabled={diagnosticStatus === 'loading'}
+                    className="px-7 py-4 rounded-xl bg-[#FF6B00] hover:bg-[#FF7A1A] disabled:opacity-50 text-white font-bold text-sm tracking-wide shadow-lg shadow-[#FF6B00]/25 transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0 font-interface active:scale-[0.98]"
+                  >
+                    {diagnosticStatus === 'loading' ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Verifying...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-4 h-4" />
+                        <span>Download diagnostic</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {diagnosticStatus === 'error' && (
+                  <div className="flex items-center gap-2 text-rose-400 text-xs font-interface">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{diagnosticErrorMsg}</span>
                   </div>
-                  <h4 className="font-display font-bold text-slate-900 text-base">{evt.title}</h4>
-                  <p className="text-xs text-[#1877F2] font-bold">{evt.eventName} · {evt.location}</p>
-                  <p className="text-xs text-slate-600 font-interface">{evt.topic}</p>
-                </div>
+                )}
 
-                <div className="text-xs font-mono text-slate-500 pt-2 border-t border-slate-200 font-semibold">
-                  Audience: {evt.attendees}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* SECTION 15 — CONSULTATION CTA */}
-      {/* ========================================================================= */}
-      <section id="consultation-cta" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="p-8 sm:p-14 rounded-3xl bg-gradient-to-r from-slate-900 via-[#10233D] to-slate-900 border border-slate-800 shadow-2xl relative overflow-hidden text-center space-y-8">
-          <div className="space-y-3 max-w-3xl mx-auto">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#FF6B00]/15 border border-[#FF6B00]/30 text-[#FF6B00] text-xs font-bold uppercase tracking-wider font-interface">
-              <Calendar className="w-3.5 h-3.5" /> High-Intensity 1-on-1 Strategic Session
-            </div>
-            <h2 className="text-3xl sm:text-5xl font-display font-bold text-white tracking-tight leading-tight">
-              Have a Digital Growth Challenge?
-            </h2>
-            <p className="text-slate-300 text-base sm:text-lg font-interface leading-relaxed font-light">
-              Sometimes the fastest way forward is simply having the right conversation. Bring one critical business bottleneck and walk away with absolute strategic clarity.
-            </p>
-          </div>
-
-          {/* Pricing breakdown pill */}
-          <div className="inline-flex items-center gap-3 px-5 py-2.5 rounded-xl bg-slate-950/80 border border-slate-700 text-sm">
-            <span className="text-slate-400">Fixed Rate:</span>
-            <span className="font-mono font-bold text-white">₹{consultationProduct.basePrice} + {(consultationProduct.gstRate * 100).toFixed(0)}% GST</span>
-            <span className="text-slate-500">|</span>
-            <span className="text-[#FF6B00] font-bold font-mono">Total ₹{totalCalculated}</span>
-            <span className="text-xs text-slate-400">({consultationProduct.durationMinutes} mins on Google Meet)</span>
-          </div>
-
-          <div className="pt-2">
-            <button
-              id="cta-book-consultation-btn"
-              onClick={() => navigate('/business-growth-consultation')}
-              className="px-8 py-4 bg-[#FF6B00] hover:bg-[#e66000] text-white font-bold text-xs uppercase tracking-widest shadow-xl shadow-[#FF6B00]/25 transition-all inline-flex items-center gap-2.5 cursor-pointer active:scale-98"
-            >
-              <Calendar className="w-4 h-4" />
-              <span>Book a Consultation Now</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* SECTION 17 — FINAL CTA (Four Pathways) */}
-      {/* ========================================================================= */}
-      <section id="final-cta" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-        <div className="text-center space-y-4 max-w-3xl mx-auto">
-          <h2 className="text-3xl sm:text-5xl font-display font-bold text-slate-900 tracking-tight leading-tight">
-            The Digital World Is Changing.{' '}
-            <span className="text-[#1877F2]">Let's Understand What's Next.</span>
-          </h2>
-          <p className="text-slate-600 text-base font-interface">
-            Choose your preferred pathway to engage with the Digital Muid ecosystem.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div
-            onClick={() => navigate('/insights')}
-            className="p-6 rounded-2xl bg-white border border-slate-200 hover:border-[#1877F2] transition-all group cursor-pointer space-y-4 shadow-sm hover:shadow-md"
-          >
-            <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#1877F2] border border-blue-100 flex items-center justify-center font-bold">
-              01
-            </div>
-            <h3 className="text-xl font-display font-bold text-slate-900 group-hover:text-[#1877F2] transition-colors">
-              Read
-            </h3>
-            <p className="text-xs text-slate-600 font-interface">
-              Dive into original strategic essays and growth architecture breakdowns.
-            </p>
-            <div className="pt-2 flex items-center gap-1 text-xs font-bold text-slate-700 group-hover:text-[#1877F2]">
-              <span>Read Insights</span> <ArrowRight className="w-3.5 h-3.5" />
-            </div>
-          </div>
-
-          <div
-            onClick={() => navigate('/watch')}
-            className="p-6 rounded-2xl bg-white border border-slate-200 hover:border-purple-400 transition-all group cursor-pointer space-y-4 shadow-sm hover:shadow-md"
-          >
-            <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 border border-purple-100 flex items-center justify-center font-bold">
-              02
-            </div>
-            <h3 className="text-xl font-display font-bold text-slate-900 group-hover:text-purple-600 transition-colors">
-              Watch
-            </h3>
-            <p className="text-xs text-slate-600 font-interface">
-              Watch in-depth video tutorials, teardowns, and framework walkthroughs.
-            </p>
-            <div className="pt-2 flex items-center gap-1 text-xs font-bold text-slate-700 group-hover:text-purple-600">
-              <span>Watch Videos</span> <ArrowRight className="w-3.5 h-3.5" />
-            </div>
-          </div>
-
-          <div
-            onClick={() => navigate('/learn')}
-            className="p-6 rounded-2xl bg-white border border-slate-200 hover:border-emerald-500 transition-all group cursor-pointer space-y-4 shadow-sm hover:shadow-md"
-          >
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center font-bold">
-              03
-            </div>
-            <h3 className="text-xl font-display font-bold text-slate-900 group-hover:text-emerald-600 transition-colors">
-              Learn
-            </h3>
-            <p className="text-xs text-slate-600 font-interface">
-              Enroll in practical, AI-integrated masterclasses and skill cohorts.
-            </p>
-            <div className="pt-2 flex items-center gap-1 text-xs font-bold text-slate-700 group-hover:text-emerald-600">
-              <span>Explore Courses</span> <ArrowRight className="w-3.5 h-3.5" />
-            </div>
-          </div>
-
-          <div
-            onClick={() => navigate('/business-growth-consultation')}
-            className="p-6 rounded-2xl bg-white border border-slate-200 hover:border-[#FF6B00] transition-all group cursor-pointer space-y-4 shadow-sm hover:shadow-md"
-          >
-            <div className="w-10 h-10 rounded-xl bg-orange-50 text-[#FF6B00] border border-orange-100 flex items-center justify-center font-bold">
-              04
-            </div>
-            <h3 className="text-xl font-display font-bold text-slate-900 group-hover:text-[#FF6B00] transition-colors">
-              Work With Muid
-            </h3>
-            <p className="text-xs text-slate-600 font-interface">
-              Book a paid 1-on-1 strategic consultation or engage for enterprise advisory.
-            </p>
-            <div className="pt-2 flex items-center gap-1 text-xs font-bold text-[#FF6B00]">
-              <span>Book Session</span> <ArrowRight className="w-3.5 h-3.5" />
-            </div>
+                <p className="text-[11px] text-slate-400 text-center font-interface">
+                  Strictly confidential. No spam, ever. Verified 32-vector framework in PDF format.
+                </p>
+              </form>
+            )}
           </div>
         </div>
       </section>
