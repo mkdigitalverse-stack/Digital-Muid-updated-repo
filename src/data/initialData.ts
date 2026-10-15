@@ -794,6 +794,381 @@ export const INITIAL_FRAMEWORKS: Framework[] = [
     ],
     relatedCourses: ['ai-automation-business-operations'],
     ctaText: 'Transform Your Business with AI'
+  },
+  {
+    id: 'fw-04',
+    title: 'Modern Marketing Architecture™',
+    name: 'Modern Marketing Architecture™',
+    slug: 'modern-marketing',
+    subtitle: 'High-Signal Editorial Distribution & Precision Funnel Mechanics',
+    description: 'A systematic framework to break through algorithmic noise using narrative positioning, first-party customer telemetry, and full-funnel media orchestration.',
+    introduction: 'A systematic framework to break through algorithmic noise using narrative positioning, first-party customer telemetry, and full-funnel media orchestration.',
+    category: 'Modern Marketing',
+    author: 'Digital Muid',
+    coverImage: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1200&q=80',
+    cover_image: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1200&q=80',
+    problemStatement: 'Commoditized AI content and algorithmic ad inflation have rendered standard marketing funnels ineffective, leaving brands with soaring CAC and plummeting conversions.',
+    problem: 'Commoditized AI content and algorithmic ad inflation have rendered standard marketing funnels ineffective, leaving brands with soaring CAC and plummeting conversions.',
+    solutionStatement: 'Deploy high-signal narrative positioning, first-party data capture pipelines, and algorithmic media engines that turn cold attention into high-intent inbound demand.',
+    frameworkContent: [
+      {
+        step: 1,
+        title: 'Narrative Positioning',
+        shortDescription: 'Market Moat & Core Thesis',
+        content: 'Isolate high-resonance angles, define your commercial thesis, and build messaging that cannot be synthesized by competitors.',
+        keyActions: ['Point-of-view codification', 'Competitor message audit', 'ICP value articulation'],
+        outcome: 'Commands immediate attention and establishes clear market differentiation.',
+        number: '01',
+        subtitle: 'Market Moat & Core Thesis',
+        description: 'Isolate high-resonance angles, define your commercial thesis, and build messaging that cannot be synthesized by competitors.',
+        impact: 'Commands immediate attention and establishes clear market differentiation.'
+      },
+      {
+        step: 2,
+        title: 'Editorial Signal Syndication',
+        shortDescription: 'Multi-Channel Distribution',
+        content: 'Distribute structured thought leadership, video breakdowns, and technical articles across owned and algorithmic networks.',
+        keyActions: ['Pillar content production', 'Cross-platform syndication', 'Search and semantic capture'],
+        outcome: 'Generates consistent top-of-funnel inbound interest from high-intent buyers.',
+        number: '02',
+        subtitle: 'Multi-Channel Distribution',
+        description: 'Distribute structured thought leadership, video breakdowns, and technical articles across owned and algorithmic networks.',
+        impact: 'Generates consistent top-of-funnel inbound interest from high-intent buyers.'
+      },
+      {
+        step: 3,
+        title: 'Algorithmic Media Orchestration',
+        shortDescription: 'Performance Ad Infrastructure',
+        content: 'Deploy Meta Advantage+ and Google Demand Gen campaigns engineered around creative architecture and clean first-party telemetry.',
+        keyActions: ['Creative asset matrix', 'CAPI server telemetry integration', 'Bidding optimization'],
+        outcome: 'Scales paid acquisition profitably with sub-linear CAC increases.',
+        number: '03',
+        subtitle: 'Performance Ad Infrastructure',
+        description: 'Deploy Meta Advantage+ and Google Demand Gen campaigns engineered around creative architecture and clean first-party telemetry.',
+        impact: 'Scales paid acquisition profitably with sub-linear CAC increases.'
+      },
+      {
+        step: 4,
+        title: 'Compounding Conversion Loops',
+        shortDescription: 'Frictionless Conversion',
+        content: 'Convert inbound intent into paid consultations, course enrollments, and enterprise retainers through optimized conversion paths.',
+        keyActions: ['Diagnostic funnel deployment', 'Frictionless checkout paths', 'Automated nurture sequences'],
+        outcome: 'Maximizes lead-to-revenue velocity and customer lifetime value.',
+        number: '04',
+        subtitle: 'Frictionless Conversion',
+        description: 'Convert inbound intent into paid consultations, course enrollments, and enterprise retainers through optimized conversion paths.',
+        impact: 'Maximizes lead-to-revenue velocity and customer lifetime value.'
+      }
+    ],
+    whoIsItFor: 'CMOs, marketing leads, and growth founders tired of low-signal marketing tactics.',
+    whenToUse: 'Deploy when paid ad costs spike, organic reach declines, or brand messaging feels indistinguishable.',
+    relatedArticles: ['meta-ads-2026-algorithmic-shift', 'high-conversion-growth-system-anatomy'],
+    relatedVideos: [],
+    relatedResources: ['res-01', 'res-02'],
+    tags: ['Marketing', 'Performance Ads', 'Conversion Architecture', 'Branding'],
+    status: 'published',
+    isFeatured: true,
+    featured: true,
+    publishedAt: '2026-08-01',
+    steps: [
+      {
+        number: '01',
+        title: 'Narrative Positioning',
+        subtitle: 'Market Moat & Core Thesis',
+        description: 'Isolate high-resonance angles, define your commercial thesis, and build messaging that cannot be synthesized by competitors.',
+        impact: 'Commands immediate attention and establishes clear market differentiation.',
+        keyActions: ['Point-of-view codification', 'Competitor message audit', 'ICP value articulation'],
+        step: 1
+      },
+      {
+        number: '02',
+        title: 'Editorial Signal Syndication',
+        subtitle: 'Multi-Channel Distribution',
+        description: 'Distribute structured thought leadership, video breakdowns, and technical articles across owned and algorithmic networks.',
+        impact: 'Generates consistent top-of-funnel inbound interest from high-intent buyers.',
+        keyActions: ['Pillar content production', 'Cross-platform syndication', 'Search and semantic capture'],
+        step: 2
+      },
+      {
+        number: '03',
+        title: 'Algorithmic Media Orchestration',
+        subtitle: 'Performance Ad Infrastructure',
+        description: 'Deploy Meta Advantage+ and Google Demand Gen campaigns engineered around creative architecture and clean first-party telemetry.',
+        impact: 'Scales paid acquisition profitably with sub-linear CAC increases.',
+        keyActions: ['Creative asset matrix', 'CAPI server telemetry integration', 'Bidding optimization'],
+        step: 3
+      },
+      {
+        number: '04',
+        title: 'Compounding Conversion Loops',
+        subtitle: 'Frictionless Conversion',
+        description: 'Convert inbound intent into paid consultations, course enrollments, and enterprise retainers through optimized conversion paths.',
+        impact: 'Maximizes lead-to-revenue velocity and customer lifetime value.',
+        keyActions: ['Diagnostic funnel deployment', 'Frictionless checkout paths', 'Automated nurture sequences'],
+        step: 4
+      }
+    ],
+    principles: [
+      'High signal beats high volume every single time.',
+      'Creative is your new targeting variable.',
+      'Conversion funnels should educate and respect buyer intelligence.'
+    ],
+    diagramType: 'flow',
+    examples: [
+      'Scaled an edtech startup from ₹5L to ₹45L monthly revenue using high-signal creative architecture.'
+    ],
+    relatedCourses: ['crs-02', '14c77e7b-c9c4-41e2-896d-b74935941ae5'],
+    ctaText: 'Deploy Modern Marketing Architecture'
+  },
+  {
+    id: 'fw-05',
+    title: 'Enterprise Digital Transformation Framework™',
+    name: 'Enterprise Digital Transformation Framework™',
+    slug: 'digital-transformation',
+    subtitle: 'Modernizing Legacy Operations into Autonomous Growth Systems',
+    description: 'A structured methodology for established businesses to systematically replace fragmented legacy software with modern React interfaces, real-time telemetry, and automated workflows.',
+    introduction: 'A structured methodology for established businesses to systematically replace fragmented legacy software with modern React interfaces, real-time telemetry, and automated workflows.',
+    category: 'Business Transformation',
+    author: 'Digital Muid',
+    coverImage: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1200&q=80',
+    cover_image: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1200&q=80',
+    problemStatement: 'Established businesses are strangled by disjointed spreadsheets, slow legacy software, and manual data re-entry that cap scale and increase operational overhead.',
+    problem: 'Established businesses are strangled by disjointed spreadsheets, slow legacy software, and manual data re-entry that cap scale and increase operational overhead.',
+    solutionStatement: 'Conduct rigorous operational decomposition, deploy modern cloud and web architecture, and implement autonomous data pipelines that unlock 10x team leverage.',
+    frameworkContent: [
+      {
+        step: 1,
+        title: 'Legacy System Audit',
+        shortDescription: 'Friction & Dependency Mapping',
+        content: 'Identify operational bottlenecks, fragmented tools, and manual processes that hinder execution speed and inflate overhead.',
+        keyActions: ['Tool stack inventory', 'Data flow mapping', 'Friction point scoring'],
+        outcome: 'Delivers a clear roadmap for modernization with prioritized ROI vectors.',
+        number: '01',
+        subtitle: 'Friction & Dependency Mapping',
+        description: 'Identify operational bottlenecks, fragmented tools, and manual processes that hinder execution speed and inflate overhead.',
+        impact: 'Delivers a clear roadmap for modernization with prioritized ROI vectors.'
+      },
+      {
+        step: 2,
+        title: 'Modern Architecture Deployment',
+        shortDescription: 'React & Cloud Infrastructure',
+        content: 'Replace cumbersome legacy portals with sub-second responsive React interfaces, secure API endpoints, and scalable cloud infrastructure.',
+        keyActions: ['Component architecture design', 'API gateway setup', 'Security and access control hardening'],
+        outcome: 'Provides a clean, lightning-fast foundation for company-wide operations.',
+        number: '02',
+        subtitle: 'React & Cloud Infrastructure',
+        description: 'Replace cumbersome legacy portals with sub-second responsive React interfaces, secure API endpoints, and scalable cloud infrastructure.',
+        impact: 'Provides a clean, lightning-fast foundation for company-wide operations.'
+      },
+      {
+        step: 3,
+        title: 'Autonomous Data & CRM Pipeline',
+        shortDescription: 'Real-Time Telemetry',
+        content: 'Unify lead capture, payment tracking, customer onboarding, and CRM synchronization into automated, self-healing pipelines.',
+        keyActions: ['Webhook orchestration', 'CRM bidirectional syncing', 'Automated calendar and notification flows'],
+        outcome: 'Eliminates 90% of manual data entry and prevents lost leads.',
+        number: '03',
+        subtitle: 'Real-Time Telemetry',
+        description: 'Unify lead capture, payment tracking, customer onboarding, and CRM synchronization into automated, self-healing pipelines.',
+        impact: 'Eliminates 90% of manual data entry and prevents lost leads.'
+      },
+      {
+        step: 4,
+        title: 'Compounding Scalability',
+        shortDescription: 'Continuous Operational Efficiency',
+        content: 'Install telemetry dashboards and continuous feedback loops to scale transactions without proportional headcount additions.',
+        keyActions: ['Executive KPI telemetry', 'Automated performance monitoring', 'Capacity scaling'],
+        outcome: 'Transforms operations into a high-margin, valuation-boosting enterprise asset.',
+        number: '04',
+        subtitle: 'Continuous Operational Efficiency',
+        description: 'Install telemetry dashboards and continuous feedback loops to scale transactions without proportional headcount additions.',
+        impact: 'Transforms operations into a high-margin, valuation-boosting enterprise asset.'
+      }
+    ],
+    whoIsItFor: 'CEOs, COOs, and business leaders operating legacy processes who need to modernize without operational downtime.',
+    whenToUse: 'Deploy when software stack complexity slows client delivery or when team size grows faster than profits.',
+    relatedArticles: ['practical-ai-transformation-framework'],
+    relatedVideos: [],
+    relatedResources: ['res-02'],
+    tags: ['Digital Transformation', 'Enterprise Systems', 'Operations', 'Cloud Architecture'],
+    status: 'published',
+    isFeatured: true,
+    featured: true,
+    publishedAt: '2026-08-01',
+    steps: [
+      {
+        number: '01',
+        title: 'Legacy System Audit',
+        subtitle: 'Friction & Dependency Mapping',
+        description: 'Identify operational bottlenecks, fragmented tools, and manual processes that hinder execution speed and inflate overhead.',
+        impact: 'Delivers a clear roadmap for modernization with prioritized ROI vectors.',
+        keyActions: ['Tool stack inventory', 'Data flow mapping', 'Friction point scoring'],
+        step: 1
+      },
+      {
+        number: '02',
+        title: 'Modern Architecture Deployment',
+        subtitle: 'React & Cloud Infrastructure',
+        description: 'Replace cumbersome legacy portals with sub-second responsive React interfaces, secure API endpoints, and scalable cloud infrastructure.',
+        impact: 'Provides a clean, lightning-fast foundation for company-wide operations.',
+        keyActions: ['Component architecture design', 'API gateway setup', 'Security and access control hardening'],
+        step: 2
+      },
+      {
+        number: '03',
+        title: 'Autonomous Data & CRM Pipeline',
+        subtitle: 'Real-Time Telemetry',
+        description: 'Unify lead capture, payment tracking, customer onboarding, and CRM synchronization into automated, self-healing pipelines.',
+        impact: 'Eliminates 90% of manual data entry and prevents lost leads.',
+        keyActions: ['Webhook orchestration', 'CRM bidirectional syncing', 'Automated calendar and notification flows'],
+        step: 3
+      },
+      {
+        number: '04',
+        title: 'Compounding Scalability',
+        subtitle: 'Continuous Operational Efficiency',
+        description: 'Install telemetry dashboards and continuous feedback loops to scale transactions without proportional headcount additions.',
+        impact: 'Transforms operations into a high-margin, valuation-boosting enterprise asset.',
+        keyActions: ['Executive KPI telemetry', 'Automated performance monitoring', 'Capacity scaling'],
+        step: 4
+      }
+    ],
+    principles: [
+      'Never automate broken processes; simplify first, then automate.',
+      'Sub-second user interfaces directly increase operational throughput.',
+      'First-party data infrastructure is an enterprise balance sheet asset.'
+    ],
+    diagramType: 'stack',
+    examples: [
+      'Helped a 20-year-old logistics and retail firm migrate to automated cloud systems, reducing quote turnaround from 48 hours to 15 minutes.'
+    ],
+    relatedCourses: ['crs-03'],
+    ctaText: 'Modernize Your Digital Operations'
+  },
+  {
+    id: 'fw-06',
+    title: 'Growth Operator Education Framework™',
+    name: 'Growth Operator Education Framework™',
+    slug: 'education',
+    subtitle: 'From Surface Hacks to Battle-Tested Growth Mechanics',
+    description: 'The pedagogical framework powering Digital MUID Academy: teaching operators to architect scalable acquisition funnels, deploy AI automation, and master full-stack marketing.',
+    introduction: 'The pedagogical framework powering Digital MUID Academy: teaching operators to architect scalable acquisition funnels, deploy AI automation, and master full-stack marketing.',
+    category: 'Digital Growth',
+    author: 'Digital Muid',
+    coverImage: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80',
+    cover_image: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80',
+    problemStatement: 'Most marketing courses teach transient button-clicking tactics that become obsolete every time an ad platform updates its interface.',
+    problem: 'Most marketing courses teach transient button-clicking tactics that become obsolete every time an ad platform updates its interface.',
+    solutionStatement: 'Teach durable first-principles mechanics: unit economics, algorithmic media psychology, AI workflow orchestration, and scalable conversion architectures.',
+    frameworkContent: [
+      {
+        step: 1,
+        title: 'Core Mechanics & Economics',
+        shortDescription: 'First-Principles Foundation',
+        content: 'Master the fundamental mathematics of digital growth: CAC, LTV, ROAS, payback period, and contribution margin.',
+        keyActions: ['Unit economics modeling', 'Traffic channel mechanics', 'Customer psychology profiling'],
+        outcome: 'Builds deep strategic comprehension rather than superficial tool memorization.',
+        number: '01',
+        subtitle: 'First-Principles Foundation',
+        description: 'Master the fundamental mathematics of digital growth: CAC, LTV, ROAS, payback period, and contribution margin.',
+        impact: 'Builds deep strategic comprehension rather than superficial tool memorization.'
+      },
+      {
+        step: 2,
+        title: 'Real-World Campaign Teardowns',
+        shortDescription: 'Live Case Deconstruction',
+        content: 'Analyze actual ad accounts, landing page architectures, and revenue pipelines with real spend data and unvarnished outcomes.',
+        keyActions: ['Ad creative deconstruction', 'Conversion bottleneck identification', 'Split-test analysis'],
+        outcome: 'Develops surgical intuition for diagnosing underperforming campaigns.',
+        number: '02',
+        subtitle: 'Live Case Deconstruction',
+        description: 'Analyze actual ad accounts, landing page architectures, and revenue pipelines with real spend data and unvarnished outcomes.',
+        impact: 'Develops surgical intuition for diagnosing underperforming campaigns.'
+      },
+      {
+        step: 3,
+        title: 'Hands-On Execution & Systems Build',
+        shortDescription: 'Live Implementation',
+        content: 'Build and deploy actual live campaigns, AI workflows, and diagnostic landing pages during guided masterclasses.',
+        keyActions: ['Campaign launching', 'AI prompt engineering & agent setup', 'Analytics & telemetry verification'],
+        outcome: 'Transforms theoretical knowledge into verifiable, portfolio-grade operational mastery.',
+        number: '03',
+        subtitle: 'Live Implementation',
+        description: 'Build and deploy actual live campaigns, AI workflows, and diagnostic landing pages during guided masterclasses.',
+        impact: 'Transforms theoretical knowledge into verifiable, portfolio-grade operational mastery.'
+      },
+      {
+        step: 4,
+        title: 'Autonomous Growth Leadership',
+        shortDescription: 'Operator Mastery',
+        content: 'Scale from execution specialist to strategic growth operator capable of leading agency engagements and enterprise transformation.',
+        keyActions: ['High-ticket client acquisition', 'Consultation structuring', 'Team delegation & automation'],
+        outcome: 'Commands top-tier market compensation and high-margin consulting retainers.',
+        number: '04',
+        subtitle: 'Operator Mastery',
+        description: 'Scale from execution specialist to strategic growth operator capable of leading agency engagements and enterprise transformation.',
+        impact: 'Commands top-tier market compensation and high-margin consulting retainers.'
+      }
+    ],
+    whoIsItFor: 'Students, digital marketing professionals, agency employees, and growth operators aiming for elite capability.',
+    whenToUse: 'Deploy when transitioning from execution-level tasks to strategic leadership and high-ticket consulting.',
+    relatedArticles: ['digital-no-longer-just-marketing', 'building-founder-authority-age-of-ai'],
+    relatedVideos: [],
+    relatedResources: ['res-01', 'res-02'],
+    tags: ['Education', 'Growth Operations', 'Skill Development', 'Academy'],
+    status: 'published',
+    isFeatured: true,
+    featured: true,
+    publishedAt: '2026-08-01',
+    steps: [
+      {
+        number: '01',
+        title: 'Core Mechanics & Economics',
+        subtitle: 'First-Principles Foundation',
+        description: 'Master the fundamental mathematics of digital growth: CAC, LTV, ROAS, payback period, and contribution margin.',
+        impact: 'Builds deep strategic comprehension rather than superficial tool memorization.',
+        keyActions: ['Unit economics modeling', 'Traffic channel mechanics', 'Customer psychology profiling'],
+        step: 1
+      },
+      {
+        number: '02',
+        title: 'Real-World Campaign Teardowns',
+        subtitle: 'Live Case Deconstruction',
+        description: 'Analyze actual ad accounts, landing page architectures, and revenue pipelines with real spend data and unvarnished outcomes.',
+        impact: 'Develops surgical intuition for diagnosing underperforming campaigns.',
+        keyActions: ['Ad creative deconstruction', 'Conversion bottleneck identification', 'Split-test analysis'],
+        step: 2
+      },
+      {
+        number: '03',
+        title: 'Hands-On Execution & Systems Build',
+        subtitle: 'Live Implementation',
+        description: 'Build and deploy actual live campaigns, AI workflows, and diagnostic landing pages during guided masterclasses.',
+        impact: 'Transforms theoretical knowledge into verifiable, portfolio-grade operational mastery.',
+        keyActions: ['Campaign launching', 'AI prompt engineering & agent setup', 'Analytics & telemetry verification'],
+        step: 3
+      },
+      {
+        number: '04',
+        title: 'Autonomous Growth Leadership',
+        subtitle: 'Operator Mastery',
+        description: 'Scale from execution specialist to strategic growth operator capable of leading agency engagements and enterprise transformation.',
+        impact: 'Commands top-tier market compensation and high-margin consulting retainers.',
+        keyActions: ['High-ticket client acquisition', 'Consultation structuring', 'Team delegation & automation'],
+        step: 4
+      }
+    ],
+    principles: [
+      'Master the underlying mechanics, not just platform buttons.',
+      'Execution under live conditions is the only true proof of knowledge.',
+      'The best growth operators think like business owners, not ad managers.'
+    ],
+    diagramType: 'stack',
+    examples: [
+      'Graduates have successfully secured senior growth roles at top brands and launched profitable digital consultancies.'
+    ],
+    relatedCourses: ['crs-01', 'crs-02', '14c77e7b-c9c4-41e2-896d-b74935941ae5', 'crs-03'],
+    ctaText: 'Explore Digital MUID Academy'
   }
 ];
 

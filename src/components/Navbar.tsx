@@ -69,11 +69,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Dropdown states for Desktop
-  const [activeDropdown, setActiveDropdown] = useState<'about' | 'services' | 'user' | 'notifications' | null>(null);
+  type NavDropdown = 'services' | 'learn' | 'frameworks' | 'user' | 'notifications' | null;
+  type MobileAccordion = 'services' | 'learn' | 'frameworks' | 'student' | null;
+
+  const [activeDropdown, setActiveDropdown] = useState<NavDropdown>(null);
   const dropdownTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Accordion state for Mobile Menu
-  const [mobileExpandedSection, setMobileExpandedSection] = useState<'about' | 'services' | 'student' | null>(null);
+  const [mobileExpandedSection, setMobileExpandedSection] = useState<MobileAccordion>(null);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -152,7 +155,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleMouseEnter = (menu: 'about' | 'services' | 'user' | 'notifications') => {
+  const handleMouseEnter = (menu: NavDropdown) => {
     if (dropdownTimeoutRef.current) {
       clearTimeout(dropdownTimeoutRef.current);
     }
@@ -162,34 +165,95 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
   const handleMouseLeave = () => {
     dropdownTimeoutRef.current = setTimeout(() => {
       setActiveDropdown(null);
-    }, 150);
+    }, 180);
   };
 
-  const toggleDropdown = (menu: 'about' | 'services' | 'user' | 'notifications') => {
+  const toggleDropdown = (menu: NavDropdown) => {
+    if (dropdownTimeoutRef.current) {
+      clearTimeout(dropdownTimeoutRef.current);
+    }
     setActiveDropdown((prev) => (prev === menu ? null : menu));
   };
 
-  const toggleMobileAccordion = (menu: 'about' | 'services' | 'student') => {
+  const toggleMobileAccordion = (menu: MobileAccordion) => {
     setMobileExpandedSection((prev) => (prev === menu ? null : menu));
   };
 
-  const aboutSubmenu = [
-    { label: 'Insights', path: '/insights', icon: Lightbulb, desc: 'Essays on AI, strategy & economics' },
-    { label: 'Watch', path: '/watch', icon: Video, desc: 'Keynotes, breakdowns & talks' },
-    { label: 'Frameworks', path: '/frameworks', icon: Layers, desc: 'Proprietary models & mental architecture' },
-    { label: 'Resources', path: '/resources', icon: FileText, desc: 'Guides, toolkits & operational SOPs' },
-    { label: 'Speaking', path: '/speaking', icon: Mic, desc: 'Keynotes, panels & fireside sessions' }
+  const servicesSubmenu = [
+    {
+      label: 'Agency',
+      path: '/agency-services',
+      icon: Briefcase,
+      desc: 'Enterprise performance, custom web & growth engineering'
+    },
+    {
+      label: 'Growth Systems',
+      path: '/services/growth-systems',
+      icon: TrendingUp,
+      desc: 'Full-funnel demand generation & operating architectures'
+    },
+    {
+      label: 'Consultation Business Growth',
+      path: '/business-growth-consultation',
+      icon: Calendar,
+      desc: 'Paid 1-on-1 strategic growth advisory with Digital Muid'
+    }
   ];
 
-  const servicesSubmenu = [
-    { label: 'Agency Services', path: '/agency-services', icon: Briefcase, desc: 'Enterprise performance & custom development' },
-    { label: 'Growth Strategy', path: '/services/growth-strategy', icon: TrendingUp, desc: 'Acquisition loops & CAC/LTV scaling' },
-    { label: 'AI & Automation', path: '/services/ai-automation', icon: Bot, desc: 'Operational LLM & agent workflows' },
-    { label: 'Modern Marketing', path: '/services/modern-marketing', icon: Megaphone, desc: 'High-signal distribution & funnels' },
-    { label: 'Personal Branding', path: '/services/personal-branding', icon: Award, desc: 'Founder authority & IP codification' },
-    { label: 'Digital Transformation', path: '/services/digital-transformation', icon: Cpu, desc: 'Modernizing legacy digital stacks' },
-    { label: 'Education', path: '/services/education', icon: GraduationCap, desc: 'Workshops, masterclasses & cohorts' },
-    { label: 'Web', path: '/web', icon: Globe, desc: 'Website design & custom web development' }
+  const learnSubmenu = [
+    {
+      label: 'Academy',
+      path: '/academy',
+      icon: GraduationCap,
+      desc: 'Brand introduction, educational philosophy & curricula',
+      badge: 'Hub'
+    },
+    {
+      label: 'Course Catalog',
+      path: '/learn',
+      icon: BookOpen,
+      desc: 'Complete course catalog, masterclasses & certifications',
+      badge: 'Catalog'
+    }
+  ];
+
+  const frameworksSubmenu = [
+    {
+      label: 'Growth Strategies',
+      path: '/frameworks/growth-strategies',
+      icon: TrendingUp,
+      desc: 'Scalable acquisition, retention & expansion frameworks'
+    },
+    {
+      label: 'AI Automation',
+      path: '/frameworks/ai-automation',
+      icon: Bot,
+      desc: 'Architectures for implementing AI & autonomous workflows'
+    },
+    {
+      label: 'Modern Marketing',
+      path: '/frameworks/modern-marketing',
+      icon: Megaphone,
+      desc: 'Next-generation demand generation, attribution & funnels'
+    },
+    {
+      label: 'Personal Branding',
+      path: '/frameworks/personal-branding',
+      icon: Award,
+      desc: 'Codifying expertise, executive presence & market authority'
+    },
+    {
+      label: 'Digital Transformation',
+      path: '/frameworks/digital-transformation',
+      icon: Cpu,
+      desc: 'Enterprise reinvention, digital pivot & modernization models'
+    },
+    {
+      label: 'Education',
+      path: '/frameworks/education',
+      icon: GraduationCap,
+      desc: 'Systematic skill mastery, learning models & frameworks'
+    }
   ];
 
   const socialLinks = [
@@ -219,17 +283,26 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
     }
   ];
 
-  const isAboutActive = ['/about', '/insights', '/watch', '/frameworks', '/resources', '/speaking'].some(
-    (p) => currentPath === p || currentPath.startsWith(p + '/')
-  );
-
+  const isAboutActive = currentPath === '/about';
   const isServicesActive =
+    currentPath === '/agency-services' ||
+    currentPath === '/services/growth-systems' ||
     currentPath === '/services' ||
     currentPath.startsWith('/services/') ||
     currentPath === '/growth-systems' ||
-    currentPath === '/agency-services';
-  const isLearnActive = currentPath === '/learn' || currentPath.startsWith('/learn/');
-  const isBlogActive = currentPath === '/blog' || currentPath.startsWith('/blog/');
+    currentPath === '/business-growth-consultation';
+  const isLearnActive =
+    currentPath === '/academy' ||
+    currentPath === '/learn' ||
+    currentPath.startsWith('/learn/') ||
+    currentPath.startsWith('/courses/');
+  const isFrameworksActive =
+    currentPath === '/frameworks' ||
+    currentPath.startsWith('/frameworks/');
+  const isBlogActive =
+    currentPath === '/blog' ||
+    currentPath.startsWith('/blog/') ||
+    currentPath === '/insights';
   const isContactActive = currentPath === '/contact';
 
   return (
@@ -278,104 +351,321 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
         </div>
 
         {/* Desktop Navigation Links (>= 1024px) */}
-        <nav className="hidden lg:flex items-center gap-6 xl:gap-8 font-interface" aria-label="Main Navigation">
+        <nav className="hidden lg:flex items-center gap-5 xl:gap-7 font-interface" aria-label="Main Navigation">
+          {/* 1. About */}
           <a
-            id="nav-link-growth-systems"
-            href="/services/growth-systems"
-            onClick={(e) => {
-              e.preventDefault();
-              handleNav('/services/growth-systems');
-            }}
-            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
-              currentPath === '/services' || currentPath.startsWith('/services/') || currentPath === '/growth-systems'
-                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            Growth systems
-          </a>
-
-          <a
-            id="nav-link-agency-services"
-            href="/agency-services"
-            onClick={(e) => {
-              e.preventDefault();
-              handleNav('/agency-services');
-            }}
-            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
-              currentPath === '/agency-services'
-                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            Agency services
-          </a>
-
-          <a
-            id="nav-link-academy"
-            href="/academy"
-            onClick={(e) => {
-              e.preventDefault();
-              analytics.trackAcademyCta('navbar', '/academy');
-              handleNav('/academy');
-            }}
-            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
-              currentPath === '/academy'
-                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            Academy
-          </a>
-
-          <a
-            id="nav-link-learn"
-            href="/learn"
-            onClick={(e) => {
-              e.preventDefault();
-              handleNav('/learn');
-            }}
-            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
-              currentPath === '/learn' || currentPath.startsWith('/learn/')
-                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            Learn
-          </a>
-
-          <a
-            id="nav-link-growth-stack"
-            href="/frameworks/digital-growth-stack"
-            onClick={(e) => {
-              e.preventDefault();
-              analytics.trackFrameworkClick('digital-growth-stack', 'The Digital Growth Stack™');
-              handleNav('/frameworks/digital-growth-stack');
-            }}
-            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
-              currentPath === '/frameworks/digital-growth-stack'
-                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            The growth stack™
-          </a>
-
-          <a
-            id="nav-link-operator"
+            id="nav-link-about"
             href="/about"
             onClick={(e) => {
               e.preventDefault();
-              analytics.trackOperatorProfileClick();
               handleNav('/about');
             }}
-            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer ${
-              currentPath === '/about'
+            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer rounded-md px-1.5 ${
+              isAboutActive
                 ? 'text-white border-b-2 border-[#FF6B00] font-bold'
                 : 'text-slate-300 hover:text-white'
             }`}
           >
-            The operator
+            About
+          </a>
+
+          {/* 2. Services Dropdown */}
+          <div
+            className="relative"
+            onMouseEnter={() => handleMouseEnter('services')}
+            onMouseLeave={handleMouseLeave}
+          >
+            <button
+              id="nav-services-btn"
+              type="button"
+              onClick={() => toggleDropdown('services')}
+              aria-expanded={activeDropdown === 'services'}
+              aria-haspopup="true"
+              aria-controls="nav-services-dropdown"
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#FF6B00] rounded-md px-1.5 ${
+                isServicesActive
+                  ? 'text-white border-b-2 border-[#FF6B00] font-bold'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <span>Services</span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                  activeDropdown === 'services' ? 'rotate-180 text-[#FF6B00]' : 'text-slate-400'
+                }`}
+              />
+            </button>
+
+            {activeDropdown === 'services' && (
+              <div
+                id="nav-services-dropdown"
+                role="menu"
+                aria-labelledby="nav-services-btn"
+                className="absolute left-0 top-full mt-2 w-80 rounded-2xl bg-[#0F172A] border border-slate-700/80 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+              >
+                <div className="px-3 py-1.5 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-interface">
+                  Services
+                </div>
+                <div className="py-1 space-y-1">
+                  {servicesSubmenu.map((item) => {
+                    const ItemIcon = item.icon;
+                    const isActive = currentPath === item.path;
+                    return (
+                      <a
+                        key={item.path}
+                        href={item.path}
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          handleNav(item.path);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 rounded-xl text-xs transition-colors flex items-start gap-3 cursor-pointer group ${
+                          isActive
+                            ? 'bg-[#FF6B00]/15 text-white border border-[#FF6B00]/30'
+                            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                        }`}
+                      >
+                        <div
+                          className={`p-2 rounded-lg mt-0.5 shrink-0 ${
+                            isActive ? 'bg-[#FF6B00] text-white' : 'bg-slate-800 text-[#FF6B00] group-hover:bg-[#FF6B00]/20'
+                          }`}
+                        >
+                          <ItemIcon className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-white flex items-center justify-between">
+                            <span>{item.label}</span>
+                            <ArrowRight className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                          </div>
+                          <p className="text-[11px] text-slate-400 leading-snug mt-0.5">
+                            {item.desc}
+                          </p>
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 3. Learn Dropdown */}
+          <div
+            className="relative"
+            onMouseEnter={() => handleMouseEnter('learn')}
+            onMouseLeave={handleMouseLeave}
+          >
+            <button
+              id="nav-learn-btn"
+              type="button"
+              onClick={() => toggleDropdown('learn')}
+              aria-expanded={activeDropdown === 'learn'}
+              aria-haspopup="true"
+              aria-controls="nav-learn-dropdown"
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#FF6B00] rounded-md px-1.5 ${
+                isLearnActive
+                  ? 'text-white border-b-2 border-[#FF6B00] font-bold'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <span>Learn</span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                  activeDropdown === 'learn' ? 'rotate-180 text-[#FF6B00]' : 'text-slate-400'
+                }`}
+              />
+            </button>
+
+            {activeDropdown === 'learn' && (
+              <div
+                id="nav-learn-dropdown"
+                role="menu"
+                aria-labelledby="nav-learn-btn"
+                className="absolute left-0 top-full mt-2 w-80 rounded-2xl bg-[#0F172A] border border-slate-700/80 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+              >
+                <div className="px-3 py-1.5 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-interface">
+                  Education & Learning
+                </div>
+                <div className="py-1 space-y-1">
+                  {learnSubmenu.map((item) => {
+                    const ItemIcon = item.icon;
+                    const isActive = currentPath === item.path || (item.path === '/learn' && currentPath.startsWith('/learn/'));
+                    return (
+                      <a
+                        key={item.path}
+                        href={item.path}
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (item.path === '/academy') {
+                            analytics.trackAcademyCta('navbar', '/academy');
+                          }
+                          handleNav(item.path);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 rounded-xl text-xs transition-colors flex items-start gap-3 cursor-pointer group ${
+                          isActive
+                            ? 'bg-[#FF6B00]/15 text-white border border-[#FF6B00]/30'
+                            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                        }`}
+                      >
+                        <div
+                          className={`p-2 rounded-lg mt-0.5 shrink-0 ${
+                            isActive ? 'bg-[#FF6B00] text-white' : 'bg-slate-800 text-[#FF6B00] group-hover:bg-[#FF6B00]/20'
+                          }`}
+                        >
+                          <ItemIcon className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-white flex items-center justify-between">
+                            <span>{item.label}</span>
+                            <ArrowRight className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                          </div>
+                          <p className="text-[11px] text-slate-400 leading-snug mt-0.5">
+                            {item.desc}
+                          </p>
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 4. Frameworks Dropdown */}
+          <div
+            className="relative"
+            onMouseEnter={() => handleMouseEnter('frameworks')}
+            onMouseLeave={handleMouseLeave}
+          >
+            <button
+              id="nav-frameworks-btn"
+              type="button"
+              onClick={() => toggleDropdown('frameworks')}
+              aria-expanded={activeDropdown === 'frameworks'}
+              aria-haspopup="true"
+              aria-controls="nav-frameworks-dropdown"
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#FF6B00] rounded-md px-1.5 ${
+                isFrameworksActive
+                  ? 'text-white border-b-2 border-[#FF6B00] font-bold'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <span>Frameworks</span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                  activeDropdown === 'frameworks' ? 'rotate-180 text-[#FF6B00]' : 'text-slate-400'
+                }`}
+              />
+            </button>
+
+            {activeDropdown === 'frameworks' && (
+              <div
+                id="nav-frameworks-dropdown"
+                role="menu"
+                aria-labelledby="nav-frameworks-btn"
+                className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-[540px] rounded-2xl bg-[#0F172A] border border-slate-700/80 shadow-2xl p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+              >
+                <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400 font-interface">
+                  <span>Proprietary Frameworks</span>
+                  <a
+                    href="/frameworks"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleNav('/frameworks');
+                    }}
+                    className="text-[#FF6B00] hover:underline cursor-pointer lowercase first-letter:uppercase"
+                  >
+                    All frameworks →
+                  </a>
+                </div>
+                <div className="py-2 grid grid-cols-2 gap-1.5">
+                  {frameworksSubmenu.map((item) => {
+                    const ItemIcon = item.icon;
+                    const isActive = currentPath === item.path;
+                    return (
+                      <a
+                        key={item.path}
+                        href={item.path}
+                        role="menuitem"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          analytics.trackFrameworkClick(item.path.replace('/frameworks/', ''), item.label);
+                          handleNav(item.path);
+                        }}
+                        className={`text-left p-2.5 rounded-xl text-xs transition-colors flex items-start gap-2.5 cursor-pointer group ${
+                          isActive
+                            ? 'bg-[#FF6B00]/15 text-white border border-[#FF6B00]/30'
+                            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                        }`}
+                      >
+                        <div
+                          className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${
+                            isActive ? 'bg-[#FF6B00] text-white' : 'bg-slate-800 text-[#FF6B00] group-hover:bg-[#FF6B00]/20'
+                          }`}
+                        >
+                          <ItemIcon className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-white text-[12px] group-hover:text-[#FF6B00] transition-colors leading-tight">
+                            {item.label}
+                          </div>
+                          <p className="text-[10px] text-slate-400 leading-snug mt-0.5 line-clamp-1">
+                            {item.desc}
+                          </p>
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
+                <div className="p-2 border-t border-slate-800 bg-slate-900/40 text-center rounded-b-xl">
+                  <a
+                    href="/frameworks"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleNav('/frameworks');
+                    }}
+                    className="text-[11px] font-semibold text-slate-300 hover:text-[#FF6B00] transition-colors cursor-pointer"
+                  >
+                    Explore all proprietary models and architectures →
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 5. Blog */}
+          <a
+            id="nav-link-blog"
+            href="/blog"
+            onClick={(e) => {
+              e.preventDefault();
+              handleNav('/blog');
+            }}
+            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer rounded-md px-1.5 ${
+              isBlogActive
+                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            Blog
+          </a>
+
+          {/* 6. Contact */}
+          <a
+            id="nav-link-contact"
+            href="/contact"
+            onClick={(e) => {
+              e.preventDefault();
+              handleNav('/contact');
+            }}
+            className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer rounded-md px-1.5 ${
+              isContactActive
+                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
+                : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            Contact
           </a>
         </nav>
 
@@ -760,9 +1050,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             </button>
           )}
 
-          {/* Primary Growth Audit CTA Button (Tablet & Desktop: >= 640px) */}
+          {/* Primary Book Consultation CTA Button (Tablet & Desktop: >= 640px) */}
           <a
-            id="nav-growth-audit-btn"
+            id="nav-book-consultation-btn"
             href="/business-growth-consultation"
             onClick={(e) => {
               e.preventDefault();
@@ -771,7 +1061,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             }}
             className="hidden sm:inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 bg-[#FF6B00] hover:bg-[#FF7A1A] text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-[#FF6B00]/25 active:scale-[0.98] rounded-xl font-interface min-h-[44px] whitespace-nowrap"
           >
-            <span>Request growth audit</span>
+            <span>Book Consultation</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </a>
 
@@ -826,259 +1116,226 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               </button>
             </div>
 
-            {/* Primary Four Wireframe Navigation Destinations */}
-            <div className="space-y-1 pb-3 border-b border-slate-800">
+            {/* Mobile Navigation List */}
+            <div className="space-y-2 pb-3">
+              {/* 1. About */}
               <a
-                href="/services/growth-systems"
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleNav('/services/growth-systems');
-                }}
-                className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
-                  currentPath === '/services' || currentPath.startsWith('/services/') || currentPath === '/growth-systems'
-                    ? 'bg-[#FF6B00]/15 text-[#FF6B00] font-bold'
-                    : 'text-slate-200 hover:bg-white/5'
-                }`}
-              >
-                <span>Growth systems</span>
-                <ArrowRight className="w-4 h-4 text-slate-400" />
-              </a>
-              <a
-                href="/agency-services"
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleNav('/agency-services');
-                }}
-                className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
-                  currentPath === '/agency-services'
-                    ? 'bg-[#FF6B00]/15 text-[#FF6B00] font-bold'
-                    : 'text-slate-200 hover:bg-white/5'
-                }`}
-              >
-                <span>Agency services</span>
-                <ArrowRight className="w-4 h-4 text-slate-400" />
-              </a>
-              <a
-                href="/academy"
-                onClick={(e) => {
-                  e.preventDefault();
-                  analytics.trackAcademyCta('mobile_navbar', '/academy');
-                  handleNav('/academy');
-                }}
-                className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
-                  currentPath === '/academy'
-                    ? 'bg-[#FF6B00]/15 text-[#FF6B00] font-bold'
-                    : 'text-slate-200 hover:bg-white/5'
-                }`}
-              >
-                <span>Academy</span>
-                <ArrowRight className="w-4 h-4 text-slate-400" />
-              </a>
-              <a
-                href="/learn"
-                onClick={(e) => {
-                  e.preventDefault();
-                  handleNav('/learn');
-                }}
-                className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
-                  currentPath === '/learn' || currentPath.startsWith('/learn/')
-                    ? 'bg-[#FF6B00]/15 text-[#FF6B00] font-bold'
-                    : 'text-slate-200 hover:bg-white/5'
-                }`}
-              >
-                <span>Learn</span>
-                <ArrowRight className="w-4 h-4 text-slate-400" />
-              </a>
-              <a
-                href="/frameworks/digital-growth-stack"
-                onClick={(e) => {
-                  e.preventDefault();
-                  analytics.trackFrameworkClick('digital-growth-stack', 'The Digital Growth Stack™');
-                  handleNav('/frameworks/digital-growth-stack');
-                }}
-                className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
-                  currentPath === '/frameworks/digital-growth-stack'
-                    ? 'bg-[#FF6B00]/15 text-[#FF6B00] font-bold'
-                    : 'text-slate-200 hover:bg-white/5'
-                }`}
-              >
-                <span>The growth stack™</span>
-                <ArrowRight className="w-4 h-4 text-slate-400" />
-              </a>
-              <a
+                id="mobile-nav-link-about"
                 href="/about"
                 onClick={(e) => {
                   e.preventDefault();
-                  analytics.trackOperatorProfileClick();
                   handleNav('/about');
                 }}
-                className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center justify-between cursor-pointer ${
-                  currentPath === '/about'
-                    ? 'bg-[#FF6B00]/15 text-[#FF6B00] font-bold'
-                    : 'text-slate-200 hover:bg-white/5'
+                className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all flex items-center justify-between cursor-pointer font-interface ${
+                  isAboutActive
+                    ? 'text-white bg-[#FF6B00]/20 border border-[#FF6B00]/40 font-bold'
+                    : 'text-slate-200 hover:bg-slate-800/60 bg-slate-900/40 border border-slate-800/80'
                 }`}
               >
-                <span>The operator</span>
+                <span>About</span>
+                <ArrowRight className="w-4 h-4 text-slate-400" />
+              </a>
+
+              {/* 2. Services Accordion */}
+              <div className="rounded-xl border border-slate-800/80 overflow-hidden bg-slate-900/40">
+                <button
+                  type="button"
+                  onClick={() => toggleMobileAccordion('services')}
+                  aria-expanded={mobileExpandedSection === 'services'}
+                  className="w-full min-h-[44px] px-4 py-3.5 text-left text-sm font-bold uppercase tracking-wider text-slate-200 hover:text-white flex items-center justify-between cursor-pointer focus:outline-none focus:bg-slate-800/80 font-interface"
+                >
+                  <span className="flex items-center gap-2">
+                    <span>SERVICES</span>
+                    {isServicesActive && <span className="w-1.5 h-1.5 rounded-full bg-[#FF6B00]"></span>}
+                  </span>
+                  <ChevronDown
+                    className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
+                      mobileExpandedSection === 'services' ? 'rotate-180 text-[#FF6B00]' : ''
+                    }`}
+                  />
+                </button>
+                {mobileExpandedSection === 'services' && (
+                  <div className="px-3 pb-3 space-y-1 bg-slate-950/50 border-t border-slate-800/60 pt-2 animate-in fade-in duration-150">
+                    {servicesSubmenu.map((sub) => {
+                      const SubIcon = sub.icon;
+                      const isActive = currentPath === sub.path;
+                      return (
+                        <a
+                          key={sub.path}
+                          href={sub.path}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleNav(sub.path);
+                          }}
+                          className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
+                            isActive
+                              ? 'bg-[#FF6B00]/20 text-white font-semibold border border-[#FF6B00]/30'
+                              : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2.5">
+                            <SubIcon className="w-3.5 h-3.5 text-[#FF6B00]" />
+                            <span>{sub.label}</span>
+                          </span>
+                          <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 3. Learn Accordion */}
+              <div className="rounded-xl border border-slate-800/80 overflow-hidden bg-slate-900/40">
+                <button
+                  type="button"
+                  onClick={() => toggleMobileAccordion('learn')}
+                  aria-expanded={mobileExpandedSection === 'learn'}
+                  className="w-full min-h-[44px] px-4 py-3.5 text-left text-sm font-bold uppercase tracking-wider text-slate-200 hover:text-white flex items-center justify-between cursor-pointer focus:outline-none focus:bg-slate-800/80 font-interface"
+                >
+                  <span className="flex items-center gap-2">
+                    <span>LEARN</span>
+                    {isLearnActive && <span className="w-1.5 h-1.5 rounded-full bg-[#FF6B00]"></span>}
+                  </span>
+                  <ChevronDown
+                    className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
+                      mobileExpandedSection === 'learn' ? 'rotate-180 text-[#FF6B00]' : ''
+                    }`}
+                  />
+                </button>
+                {mobileExpandedSection === 'learn' && (
+                  <div className="px-3 pb-3 space-y-1 bg-slate-950/50 border-t border-slate-800/60 pt-2 animate-in fade-in duration-150">
+                    {learnSubmenu.map((sub) => {
+                      const SubIcon = sub.icon;
+                      const isActive = currentPath === sub.path || (sub.path === '/learn' && currentPath.startsWith('/learn/'));
+                      return (
+                        <a
+                          key={sub.path}
+                          href={sub.path}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            if (sub.path === '/academy') {
+                              analytics.trackAcademyCta('mobile_navbar', '/academy');
+                            }
+                            handleNav(sub.path);
+                          }}
+                          className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
+                            isActive
+                              ? 'bg-[#FF6B00]/20 text-white font-semibold border border-[#FF6B00]/30'
+                              : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2.5">
+                            <SubIcon className="w-3.5 h-3.5 text-[#FF6B00]" />
+                            <span>{sub.label}</span>
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white/10 text-slate-300">
+                            {sub.badge}
+                          </span>
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 4. Frameworks Accordion */}
+              <div className="rounded-xl border border-slate-800/80 overflow-hidden bg-slate-900/40">
+                <button
+                  type="button"
+                  onClick={() => toggleMobileAccordion('frameworks')}
+                  aria-expanded={mobileExpandedSection === 'frameworks'}
+                  className="w-full min-h-[44px] px-4 py-3.5 text-left text-sm font-bold uppercase tracking-wider text-slate-200 hover:text-white flex items-center justify-between cursor-pointer focus:outline-none focus:bg-slate-800/80 font-interface"
+                >
+                  <span className="flex items-center gap-2">
+                    <span>FRAMEWORKS</span>
+                    {isFrameworksActive && <span className="w-1.5 h-1.5 rounded-full bg-[#FF6B00]"></span>}
+                  </span>
+                  <ChevronDown
+                    className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
+                      mobileExpandedSection === 'frameworks' ? 'rotate-180 text-[#FF6B00]' : ''
+                    }`}
+                  />
+                </button>
+                {mobileExpandedSection === 'frameworks' && (
+                  <div className="px-3 pb-3 space-y-1 bg-slate-950/50 border-t border-slate-800/60 pt-2 animate-in fade-in duration-150">
+                    {frameworksSubmenu.map((sub) => {
+                      const SubIcon = sub.icon;
+                      const isActive = currentPath === sub.path;
+                      return (
+                        <a
+                          key={sub.path}
+                          href={sub.path}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            analytics.trackFrameworkClick(sub.path.replace('/frameworks/', ''), sub.label);
+                            handleNav(sub.path);
+                          }}
+                          className={`w-full min-h-[44px] text-left px-3 py-2 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
+                            isActive
+                              ? 'bg-[#FF6B00]/20 text-white font-semibold border border-[#FF6B00]/30'
+                              : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2.5">
+                            <SubIcon className="w-3.5 h-3.5 text-[#FF6B00]" />
+                            <span>{sub.label}</span>
+                          </span>
+                          <ArrowRight className="w-3 h-3 text-slate-500" />
+                        </a>
+                      );
+                    })}
+                    <a
+                      href="/frameworks"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleNav('/frameworks');
+                      }}
+                      className="w-full min-h-[40px] text-center px-3 py-2 rounded-lg text-xs font-semibold text-[#FF6B00] hover:bg-white/5 flex items-center justify-center gap-1.5 cursor-pointer pt-2 border-t border-slate-800/60"
+                    >
+                      <span>Explore all proprietary frameworks</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* 5. Blog */}
+              <a
+                id="mobile-nav-link-blog"
+                href="/blog"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleNav('/blog');
+                }}
+                className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all flex items-center justify-between cursor-pointer font-interface ${
+                  isBlogActive
+                    ? 'text-white bg-[#FF6B00]/20 border border-[#FF6B00]/40 font-bold'
+                    : 'text-slate-200 hover:bg-slate-800/60 bg-slate-900/40 border border-slate-800/80'
+                }`}
+              >
+                <span>Blog</span>
+                <ArrowRight className="w-4 h-4 text-slate-400" />
+              </a>
+
+              {/* 6. Contact */}
+              <a
+                id="mobile-nav-link-contact"
+                href="/contact"
+                onClick={(e) => {
+                  e.preventDefault();
+                  handleNav('/contact');
+                }}
+                className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all flex items-center justify-between cursor-pointer font-interface ${
+                  isContactActive
+                    ? 'text-white bg-[#FF6B00]/20 border border-[#FF6B00]/40 font-bold'
+                    : 'text-slate-200 hover:bg-slate-800/60 bg-slate-900/40 border border-slate-800/80'
+                }`}
+              >
+                <span>Contact</span>
                 <ArrowRight className="w-4 h-4 text-slate-400" />
               </a>
             </div>
-
-            {/* Mobile Accordion 1: ABOUT */}
-            <div className="rounded-xl border border-slate-800/80 overflow-hidden bg-slate-900/40">
-              <button
-                type="button"
-                onClick={() => toggleMobileAccordion('about')}
-                aria-expanded={mobileExpandedSection === 'about'}
-                className="w-full min-h-[44px] px-4 py-3.5 text-left text-sm font-bold uppercase tracking-wider text-slate-200 hover:text-white flex items-center justify-between cursor-pointer focus:outline-none focus:bg-slate-800/80"
-              >
-                <span className="flex items-center gap-2 font-interface">
-                  <span>ABOUT</span>
-                  {isAboutActive && <span className="w-1.5 h-1.5 rounded-full bg-[#FF6B00]"></span>}
-                </span>
-                <ChevronDown
-                  className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
-                    mobileExpandedSection === 'about' ? 'rotate-180 text-[#FF6B00]' : ''
-                  }`}
-                />
-              </button>
-              {mobileExpandedSection === 'about' && (
-                <div className="px-3 pb-3 space-y-1 bg-slate-950/50 border-t border-slate-800/60 pt-2 animate-in fade-in duration-150">
-                  <button
-                    type="button"
-                    onClick={() => handleNav('/about')}
-                    className="w-full min-h-[44px] text-left px-3 py-2.5 rounded-lg text-xs font-bold text-[#FF6B00] hover:bg-slate-800/40 flex items-center justify-between cursor-pointer"
-                  >
-                    <span>About Overview</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                  {aboutSubmenu.map((sub) => {
-                    const SubIcon = sub.icon;
-                    const isActive = currentPath === sub.path || currentPath.startsWith(sub.path + '/');
-                    return (
-                      <button
-                        key={sub.path}
-                        type="button"
-                        onClick={() => handleNav(sub.path)}
-                        className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
-                          isActive
-                            ? 'bg-[#1877F2]/20 text-white font-semibold border border-[#1877F2]/30'
-                            : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                        }`}
-                      >
-                        <span className="flex items-center gap-2.5">
-                          <SubIcon className="w-3.5 h-3.5 text-slate-400" />
-                          <span>{sub.label}</span>
-                        </span>
-                        <span className="text-[10px] text-slate-500">{sub.desc.split(' ')[0]}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Mobile Accordion 2: OUR GROWTH SYSTEM */}
-            <div className="rounded-xl border border-slate-800/80 overflow-hidden bg-slate-900/40">
-              <button
-                type="button"
-                onClick={() => toggleMobileAccordion('services')}
-                aria-expanded={mobileExpandedSection === 'services'}
-                className="w-full min-h-[44px] px-4 py-3.5 text-left text-sm font-bold uppercase tracking-wider text-slate-200 hover:text-white flex items-center justify-between cursor-pointer focus:outline-none focus:bg-slate-800/80"
-              >
-                <span className="flex items-center gap-2 font-interface">
-                  <span>SERVICES</span>
-                  {isServicesActive && <span className="w-1.5 h-1.5 rounded-full bg-[#1877F2]"></span>}
-                </span>
-                <ChevronDown
-                  className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
-                    mobileExpandedSection === 'services' ? 'rotate-180 text-[#1877F2]' : ''
-                  }`}
-                />
-              </button>
-              {mobileExpandedSection === 'services' && (
-                <div className="px-3 pb-3 space-y-1 bg-slate-950/50 border-t border-slate-800/60 pt-2 animate-in fade-in duration-150">
-                  <button
-                    type="button"
-                    onClick={() => handleNav('/services')}
-                    className="w-full min-h-[44px] text-left px-3 py-2.5 rounded-lg text-xs font-bold text-[#1877F2] hover:bg-slate-800/40 flex items-center justify-between cursor-pointer"
-                  >
-                    <span>Our Growth System Overview</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                  {servicesSubmenu.map((sub) => {
-                    const SubIcon = sub.icon;
-                    const isActive = currentPath === sub.path;
-                    return (
-                      <button
-                        key={sub.path}
-                        type="button"
-                        onClick={() => handleNav(sub.path)}
-                        className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
-                          isActive
-                            ? 'bg-[#FF6B00]/20 text-white font-semibold border border-[#FF6B00]/30'
-                            : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
-                        }`}
-                      >
-                        <span className="flex items-center gap-2.5">
-                          <SubIcon className="w-3.5 h-3.5 text-slate-400" />
-                          <span>{sub.label}</span>
-                        </span>
-                        <span className="text-[10px] text-slate-500">{sub.desc.split(' ')[0]}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Mobile Direct Links */}
-            <a
-              href="/learn"
-              onClick={(e) => {
-                e.preventDefault();
-                handleNav('/learn');
-              }}
-              className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all flex items-center justify-between cursor-pointer font-interface ${
-                isLearnActive
-                  ? 'text-white bg-[#1877F2]/20 border border-[#1877F2]/40'
-                  : 'text-slate-200 hover:bg-slate-800/60'
-              }`}
-            >
-              <span>LEARN WITH DIGITAL MUID</span>
-              <ArrowRight className="w-4 h-4 text-slate-400" />
-            </a>
-
-            <a
-              href="/blog"
-              onClick={(e) => {
-                e.preventDefault();
-                handleNav('/blog');
-              }}
-              className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all flex items-center justify-between cursor-pointer font-interface ${
-                isBlogActive
-                  ? 'text-white bg-[#1877F2]/20 border border-[#1877F2]/40'
-                  : 'text-slate-200 hover:bg-slate-800/60'
-              }`}
-            >
-              <span>BLOG</span>
-              <ArrowRight className="w-4 h-4 text-slate-400" />
-            </a>
-
-            <a
-              href="/contact"
-              onClick={(e) => {
-                e.preventDefault();
-                handleNav('/contact');
-              }}
-              className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all flex items-center justify-between cursor-pointer font-interface ${
-                isContactActive
-                  ? 'text-white bg-[#1877F2]/20 border border-[#1877F2]/40'
-                  : 'text-slate-200 hover:bg-slate-800/60'
-              }`}
-            >
-              <span>GET IN TOUCH</span>
-              <ArrowRight className="w-4 h-4 text-slate-400" />
-            </a>
 
             {/* Member / Student Navigation Section */}
             {currentUser && !isAdminAuthenticated ? (
@@ -1284,9 +1541,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
 
           {/* Bottom Mobile Action CTAs & Social Links */}
           <div className="pt-4 pb-6 border-t border-slate-800/80 space-y-3 mt-4">
-            {/* Primary Mobile CTA: Request growth audit */}
+            {/* Primary Mobile CTA: Book Consultation */}
             <a
-              id="mobile-growth-audit-btn"
+              id="mobile-book-consultation-btn"
               href="/business-growth-consultation"
               onClick={(e) => {
                 e.preventDefault();
@@ -1295,11 +1552,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               }}
               className="w-full min-h-[48px] py-3.5 px-4 bg-[#FF6B00] hover:bg-[#FF7A1A] text-white font-bold text-xs uppercase tracking-wider text-center flex items-center justify-center gap-2 shadow-lg shadow-[#FF6B00]/30 cursor-pointer active:scale-98 transition-all font-interface rounded-xl"
             >
-              <span>Request growth audit</span>
+              <span>Book Consultation</span>
               <ArrowRight className="w-4 h-4" />
             </a>
             <p className="text-center text-[11px] text-slate-400 font-interface">
-              Strategic client acquisition & infrastructure audit with Digital Muid
+              Strategic 1-on-1 business growth consultation with Digital Muid
             </p>
 
             {/* Mobile Social Links (Strict Sequence: LinkedIn | Instagram | Facebook | YouTube) */}

@@ -35,9 +35,19 @@ export const FrameworkDetailPage: React.FC<FrameworkDetailPageProps> = ({ slug, 
     toggleBookmark
   } = useApp();
   
+  // Resolve proposed navigation aliases to matching frameworks
+  const resolvedSlug =
+    slug === 'growth-strategies' || slug === 'growth-strategy'
+      ? 'digital-growth-stack'
+      : slug === 'ai-automation' || slug === 'ai-and-automation'
+      ? 'ai-transformation-framework'
+      : slug === 'personal-branding' || slug === 'personal-authority'
+      ? 'personal-authority-framework'
+      : slug;
+
   // Strict publication check: Public users can only see published frameworks
   const framework = frameworks.find(
-    (f) => f.slug === slug && (isAdminAuthenticated || f.status === 'published')
+    (f) => (f.slug === resolvedSlug || f.slug === slug) && (isAdminAuthenticated || f.status === 'published')
   );
 
   const [activeStepIndex, setActiveStepIndex] = useState(0);

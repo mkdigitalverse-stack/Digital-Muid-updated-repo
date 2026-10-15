@@ -141,6 +141,24 @@ const MainApp: React.FC = () => {
     if (path === '/frameworks') {
       return <FrameworksPage navigate={navigate} />;
     }
+    if (path === '/frameworks/growth-strategies') {
+      return <FrameworksPage navigate={navigate} initialCategory="Digital Growth" />;
+    }
+    if (path === '/frameworks/ai-automation') {
+      return <FrameworksPage navigate={navigate} initialCategory="AI & Automation" />;
+    }
+    if (path === '/frameworks/modern-marketing') {
+      return <FrameworksPage navigate={navigate} initialCategory="Modern Marketing" />;
+    }
+    if (path === '/frameworks/personal-branding') {
+      return <FrameworksPage navigate={navigate} initialCategory="Personal Branding" />;
+    }
+    if (path === '/frameworks/digital-transformation') {
+      return <FrameworksPage navigate={navigate} initialCategory="Business Transformation" />;
+    }
+    if (path === '/frameworks/education') {
+      return <FrameworksPage navigate={navigate} initialCategory="all" />;
+    }
     if (path.startsWith('/frameworks/')) {
       const slug = path.replace('/frameworks/', '');
       return <FrameworkDetailPage slug={slug} navigate={navigate} />;

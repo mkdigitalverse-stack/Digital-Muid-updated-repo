@@ -4,9 +4,10 @@ import { Layers, ArrowRight, Sparkles, CheckCircle2, Star, Tag, Bookmark } from 
 
 interface FrameworksPageProps {
   navigate: (path: string) => void;
+  initialCategory?: string;
 }
 
-export const FrameworksPage: React.FC<FrameworksPageProps> = ({ navigate }) => {
+export const FrameworksPage: React.FC<FrameworksPageProps> = ({ navigate, initialCategory }) => {
   const {
     frameworks,
     frameworkCategories,
@@ -16,7 +17,7 @@ export const FrameworksPage: React.FC<FrameworksPageProps> = ({ navigate }) => {
     currentUser,
     notify
   } = useApp();
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedCategory, setSelectedCategory] = useState<string>(initialCategory || 'all');
 
   const handleToggleFrameworkBookmark = async (e: React.MouseEvent, frameworkId: string) => {
     e.stopPropagation();
