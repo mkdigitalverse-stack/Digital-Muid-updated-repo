@@ -406,3 +406,189 @@ export async function fulfillConsultationPayment({
   }
 }
 
+/**
+ * Fulfills a verified resource purchase:
+ * 1. Checks if a payment record with this razorpay_payment_id already exists in public.payments (idempotency check).
+ * 2. Checks if a purchase with this razorpay_payment_id already exists in public.resource_purchases.
+ * 3. If already fulfilled, returns the existing purchase and payment records without duplicating.
+ * 4. Inserts a verified purchase record in public.resource_purchases.
+ * 5. Inserts a payment ledger record in public.payments with item_type='resource'.
+ * 6. Inserts a corresponding CRM Lead in public.leads.
+ *
+ * @param {object} params
+ * @param {string|null} params.userId - UUID of authenticated student if signed in
+ * @param {string} params.resourceId - Resource ID/UUID
+ * @param {number} params.amount - Authoritative price in Rupees
+ * @param {string} params.currency - Authoritative currency
+ * @param {string} params.orderId - Razorpay order ID (e.g. 'order_...')
+ * @param {string} params.paymentId - Razorpay payment ID (e.g. 'pay_...')
+ * @param {string} [params.customerName] - Customer full name
+ * @param {string} [params.customerEmail] - Customer email address
+ * @param {string} [params.customerPhone] - Customer phone / WhatsApp
+ * @param {string} [params.resourceTitle] - Resource title snapshot
+ * @returns {Promise<{ success: boolean, fulfilled?: boolean, already_fulfilled?: boolean, purchase?: object, payment?: object, error?: string }>}
+ */
+export async function fulfillResourcePurchase({
+  userId,
+  resourceId,
+  amount,
+  currency,
+  orderId,
+  paymentId,
+  customerName,
+  customerEmail,
+  customerPhone,
+  resourceTitle
+}) {
+  try {
+    const supabaseServer = getSupabaseServerClient();
+    const cleanPaymentId = String(paymentId || "").trim();
+    const cleanOrderId = String(orderId || "").trim();
+    const cleanResourceId = String(resourceId || "").trim();
+    const numericAmount = Number(amount) || 0;
+    const finalCurrency = (currency || "INR").toUpperCase();
+
+    // 1. Idempotency Check: Look for existing record with this razorpay_payment_id
+    if (supabaseServer) {
+      const { data: existingPurchase } = await supabaseServer
+        .from("resource_purchases")
+        .select("*")
+        .eq("razorpay_payment_id", cleanPaymentId)
+        .maybeSingle();
+
+      const { data: existingPayment } = await supabaseServer
+        .from("payments")
+        .select("*")
+        .eq("razorpay_payment_id", cleanPaymentId)
+        .maybeSingle();
+
+      if (existingPurchase || existingPayment) {
+        console.log(`[Resource Fulfillment] Payment ${cleanPaymentId} already processed. Returning existing record.`);
+        return {
+          success: true,
+          fulfilled: true,
+          already_fulfilled: true,
+          purchase: existingPurchase || null,
+          payment: existingPayment || null
+        };
+      }
+    }
+
+    // 2. Resolve user_id: If authenticated student, use userId; else check profiles by email
+    let resolvedUserId = isValidUUID(userId) ? userId : null;
+    if (!resolvedUserId && customerEmail && supabaseServer) {
+      try {
+        const { data: profile } = await supabaseServer
+          .from("profiles")
+          .select("id")
+          .eq("email", customerEmail.trim().toLowerCase())
+          .maybeSingle();
+        if (profile?.id && isValidUUID(profile.id)) {
+          resolvedUserId = profile.id;
+        }
+      } catch {}
+    }
+
+    // 3. Insert purchase in public.resource_purchases
+    let purchaseRecord = null;
+    if (supabaseServer && resolvedUserId && isValidUUID(cleanResourceId)) {
+      const purchasePayload = {
+        user_id: resolvedUserId,
+        resource_id: cleanResourceId,
+        razorpay_order_id: cleanOrderId,
+        razorpay_payment_id: cleanPaymentId,
+        amount: numericAmount,
+        currency: finalCurrency,
+        status: "active",
+        purchased_at: new Date().toISOString()
+      };
+
+      const { data: newPurchase, error: purchaseError } = await supabaseServer
+        .from("resource_purchases")
+        .upsert(purchasePayload, { onConflict: "user_id,resource_id" })
+        .select()
+        .maybeSingle();
+
+      if (purchaseError) {
+        console.warn("[Resource Fulfillment] Notice saving resource_purchases row:", purchaseError.message);
+      } else {
+        purchaseRecord = newPurchase;
+      }
+    }
+
+    // 4. Create payment ledger record in public.payments
+    let paymentRecord = null;
+    if (supabaseServer && resolvedUserId) {
+      const paymentPayload = {
+        user_id: resolvedUserId,
+        item_type: "resource",
+        item_id: cleanResourceId,
+        item_title: resourceTitle || "Digital Resource Toolkit",
+        amount: numericAmount,
+        currency: finalCurrency,
+        razorpay_order_id: cleanOrderId,
+        razorpay_payment_id: cleanPaymentId,
+        status: "captured",
+        created_at: new Date().toISOString()
+      };
+
+      const { data: newPayment, error: paymentError } = await supabaseServer
+        .from("payments")
+        .insert(paymentPayload)
+        .select()
+        .maybeSingle();
+
+      if (paymentError) {
+        console.warn("[Resource Fulfillment] Notice inserting payment ledger:", paymentError.message);
+      } else {
+        paymentRecord = newPayment;
+      }
+    }
+
+    // 5. Record CRM Lead in public.leads in background
+    if (supabaseServer && (customerEmail || customerName)) {
+      try {
+        await supabaseServer.from("leads").insert({
+          name: customerName || "Resource Buyer",
+          email: customerEmail || "",
+          phone: customerPhone || "",
+          source: "Resource Purchase (Paid)",
+          interest: resourceTitle ? `Purchased: ${resourceTitle}` : `Resource ID: ${cleanResourceId}`,
+          notes: `Paid ₹${numericAmount}. Order: ${cleanOrderId}, Payment: ${cleanPaymentId}`,
+          status: "New",
+          amount: numericAmount,
+          created_at: new Date().toISOString()
+        });
+      } catch (leadErr) {
+        console.warn("[Resource Fulfillment] CRM lead record notice:", leadErr?.message);
+      }
+    }
+
+    return {
+      success: true,
+      fulfilled: true,
+      already_fulfilled: false,
+      purchase: purchaseRecord || {
+        id: `res_pur_${Date.now()}`,
+        userId: resolvedUserId || "guest",
+        resourceId: cleanResourceId,
+        razorpayOrderId: cleanOrderId,
+        razorpayPaymentId: cleanPaymentId,
+        amount: numericAmount,
+        currency: finalCurrency,
+        status: "active",
+        purchasedAt: new Date().toISOString()
+      },
+      payment: paymentRecord
+    };
+  } catch (err) {
+    console.error("[Resource Fulfillment] Unexpected error:", err);
+    return {
+      success: false,
+      fulfilled: false,
+      error: err?.message || "An unexpected error occurred during resource fulfillment."
+    };
+  }
+}
+
+

@@ -56,6 +56,7 @@ import {
   StudentBookmark,
   Certificate,
   PaymentRecord,
+  ResourcePurchase,
   WebEnquiry,
   WebEnquiryStatus
 } from '../types';
@@ -133,6 +134,9 @@ interface AppContextType {
     mobile?: string,
     profession?: string
   ) => Promise<{ success: boolean; error?: any }>;
+  resourcePurchases: ResourcePurchase[];
+  hasPurchasedResource: (resourceId: string) => boolean;
+  purchaseResource: (resource: Resource, paymentId?: string, orderId?: string) => Promise<{ success: boolean; error?: string }>;
 
   courses: Course[];
   coursesLoading: boolean;
@@ -287,6 +291,7 @@ interface AppContextType {
   isPaymentsLoading: boolean;
   paymentsError: string | null;
   fetchStudentPayments: (overrideUserId?: string) => Promise<PaymentRecord[]>;
+  fetchStudentResourcePurchases: () => Promise<ResourcePurchase[]>;
 
   // Admin / CRM Payment Ledger
   adminPayments: PaymentRecord[];
@@ -399,6 +404,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [resources, setResources] = useState<Resource[]>(() => {
     const stored = getStoredItem<Resource[]>('resources', INITIAL_RESOURCES);
     return Array.isArray(stored) && stored.length > 0 ? stored : INITIAL_RESOURCES;
+  });
+  const [resourcePurchases, setResourcePurchases] = useState<ResourcePurchase[]>(() => {
+    const stored = getStoredItem<ResourcePurchase[]>('resource_purchases', []);
+    return Array.isArray(stored) ? stored : [];
   });
   const [courses, setCourses] = useState<Course[]>(() => getStoredItem('courses', INITIAL_COURSES));
   const [coursesLoading, setCoursesLoading] = useState<boolean>(false);
@@ -831,6 +840,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
+  const fetchStudentResourcePurchases = useCallback(async (): Promise<ResourcePurchase[]> => {
+    try {
+      const res = await resourceService.fetchMyPurchases();
+      if (!res.error && res.data && res.data.length > 0) {
+        setResourcePurchases((prev) => {
+          const map = new Map<string, ResourcePurchase>();
+          prev.forEach((p) => {
+            const key = `${p.userId || p.user_id}_${p.resourceId || p.resource_id}`;
+            map.set(key, p);
+          });
+          res.data.forEach((p) => {
+            const key = `${p.userId || p.user_id}_${p.resourceId || p.resource_id}`;
+            map.set(key, p);
+          });
+          return Array.from(map.values());
+        });
+        return res.data;
+      }
+      return [];
+    } catch (err: any) {
+      console.warn('[AppContext] Notice fetching student resource purchases:', err);
+      return [];
+    }
+  }, []);
+
   const [adminPayments, setAdminPayments] = useState<PaymentRecord[]>([]);
   const [isAdminPaymentsLoading, setIsAdminPaymentsLoading] = useState<boolean>(false);
   const [adminPaymentsError, setAdminPaymentsError] = useState<string | null>(null);
@@ -1029,7 +1063,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }).catch(() => {});
     }
 
-    // Refresh student enrollments, bookings, notifications, bookmarks, wishlist, certificates, and billing for all authenticated sessions
+    // Refresh student enrollments, bookings, notifications, bookmarks, wishlist, certificates, billing, and resource purchases
     await Promise.all([
       refreshStudentEnrollments(),
       refreshStudentBookings(),
@@ -1037,9 +1071,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       fetchStudentBookmarks(session.user.id),
       refreshCourseWishlist(session.user.id),
       fetchStudentCertificates(session.user.id),
-      fetchStudentPayments(session.user.id)
+      fetchStudentPayments(session.user.id),
+      fetchStudentResourcePurchases()
     ]);
-  }, [refreshStudentEnrollments, refreshStudentBookings, fetchStudentNotifications, fetchStudentBookmarks, refreshCourseWishlist, fetchStudentCertificates, fetchStudentPayments]);
+  }, [refreshStudentEnrollments, refreshStudentBookings, fetchStudentNotifications, fetchStudentBookmarks, refreshCourseWishlist, fetchStudentCertificates, fetchStudentPayments, fetchStudentResourcePurchases]);
 
   // Supabase Auth Session Initialization and Real-time State Listener
   useEffect(() => {
@@ -1088,6 +1123,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { setStoredItem('frameworks', frameworks); }, [frameworks]);
   useEffect(() => { setStoredItem('framework_categories', frameworkCategories); }, [frameworkCategories]);
   useEffect(() => { setStoredItem('resources', resources); }, [resources]);
+  useEffect(() => { setStoredItem('resource_purchases', resourcePurchases); }, [resourcePurchases]);
   useEffect(() => { setStoredItem('courses', courses); }, [courses]);
   useEffect(() => { setStoredItem('testimonials', testimonials); }, [testimonials]);
   useEffect(() => { setStoredItem('speaking', speakingEvents); }, [speakingEvents]);
@@ -2938,6 +2974,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         leadCaptureRequired: true,
         seoTitle: resource.seoTitle,
         seoDescription: resource.seoDescription,
+        accessType: (resource.accessType || resource.access_type || 'free') === 'paid' ? 'paid' : 'free',
+        access_type: (resource.accessType || resource.access_type || 'free') === 'paid' ? 'paid' : 'free',
+        price: (resource.accessType || resource.access_type) === 'paid'
+          ? (typeof resource.price === 'number' ? Math.max(0, resource.price) : 0)
+          : 0,
+        currency: resource.currency || 'INR',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -2983,6 +3025,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const title = (updated.title || updated.name || r.title || r.name).trim();
           const fileUrl = updated.fileUrl || updated.downloadUrl || r.fileUrl || r.downloadUrl;
           const thumb = updated.thumbnailUrl || updated.coverImage || r.thumbnailUrl || r.coverImage;
+          const accessType = updated.accessType !== undefined
+            ? updated.accessType
+            : (updated.access_type !== undefined ? updated.access_type : (r.accessType || r.access_type || 'free'));
+          const price = accessType === 'paid'
+            ? (typeof updated.price === 'number' ? Math.max(0, updated.price) : (typeof r.price === 'number' ? r.price : 0))
+            : 0;
 
           const resObj: Resource = {
             ...r,
@@ -2995,6 +3043,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             coverImage: thumb,
             isFeatured,
             featured: isFeatured,
+            accessType,
+            access_type: accessType,
+            price,
+            currency: updated.currency || r.currency || 'INR',
             updatedAt: new Date().toISOString()
           };
           updatedRes = resObj;
@@ -3108,6 +3160,103 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.error('[AppContext] Error in recordResourceDownload:', err);
       notify('Unable to register download. Please try again.', 'error');
       return { success: false, error: err };
+    }
+  };
+
+  const hasPurchasedResource = useCallback((resourceId: string): boolean => {
+    if (isAdminAuthenticated) return true;
+    const target = resources.find(r => r.id === resourceId || r.slug === resourceId);
+    if (!target) return false;
+    // Free resources do not require payment
+    if (target.accessType !== 'paid' && target.access_type !== 'paid') {
+      return true;
+    }
+
+    // Check if the current user or guest has an active purchase record
+    const hasPurchaseRecord = resourcePurchases.some(
+      p => (p.resourceId === resourceId || p.resource_id === resourceId) &&
+           p.status === 'active' &&
+           (!currentUser || p.userId === currentUser.id || p.user_id === currentUser.id || p.userId === 'guest')
+    );
+    if (hasPurchaseRecord) return true;
+
+    // Check student payments ledger
+    const hasPayment = studentPayments.some(
+      p => (p.itemType === 'resource' || (p as any).itemType === 'resource') &&
+           p.itemId === resourceId &&
+           p.status === 'captured'
+    );
+    return hasPayment;
+  }, [isAdminAuthenticated, resources, resourcePurchases, currentUser, studentPayments]);
+
+  const purchaseResource = async (
+    resource: Resource,
+    paymentId?: string,
+    orderId?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const isPaid = (resource.accessType === 'paid' || resource.access_type === 'paid') && (resource.price || 0) > 0;
+      if (isPaid && (!paymentId || !orderId)) {
+        console.warn('[AppContext] Cannot purchase paid resource without verified server payment credentials');
+        return { success: false, error: 'Verified payment credentials are required to acquire this resource.' };
+      }
+      const amount = isPaid ? (resource.price || 0) : 0;
+      const finalPaymentId = paymentId || `free_res_${Date.now()}`;
+      const finalOrderId = orderId || `free_order_${Date.now()}`;
+
+      const newPurchase: ResourcePurchase = {
+        id: generateUUID(),
+        userId: currentUser?.id || 'guest',
+        user_id: currentUser?.id || 'guest',
+        resourceId: resource.id,
+        resource_id: resource.id,
+        razorpayOrderId: finalOrderId,
+        razorpay_order_id: finalOrderId,
+        razorpayPaymentId: finalPaymentId,
+        razorpay_payment_id: finalPaymentId,
+        amount,
+        currency: resource.currency || 'INR',
+        status: 'active',
+        purchasedAt: new Date().toISOString()
+      };
+
+      setResourcePurchases(prev => [newPurchase, ...prev]);
+
+      // Record in student payments ledger if student is logged in
+      if (isPaid && currentUser) {
+        const newPaymentRecord: PaymentRecord = {
+          id: generateUUID(),
+          userId: currentUser.id,
+          itemType: 'resource' as any,
+          itemId: resource.id,
+          itemTitle: resource.title || resource.name || 'Digital Resource',
+          amount,
+          currency: resource.currency || 'INR',
+          razorpayOrderId: finalOrderId,
+          razorpayPaymentId: finalPaymentId,
+          status: 'captured',
+          invoiceUrl: null,
+          createdAt: new Date().toISOString()
+        };
+        setStudentPayments(prev => [newPaymentRecord, ...prev]);
+      }
+
+      // Increment resource download count
+      setResources(prev =>
+        prev.map(r => r.id === resource.id ? { ...r, downloadCount: (r.downloadCount || 0) + 1 } : r)
+      );
+
+      // If Supabase is configured, record lead/purchase notice
+      resourceService.incrementDownloadCount(resource.id).catch(err => {
+        console.warn('[Supabase Resources] Download count increment notice:', err);
+      });
+
+      notify(isPaid ? `Access unlocked for ${resource.title || resource.name}!` : 'Resource ready for download.', 'success');
+      return { success: true };
+    } catch (err: any) {
+      console.error('[AppContext] Error recording resource purchase:', err);
+      notify('Failed to finalize resource purchase. Please try again.', 'error');
+      return { success: false, error: err?.message || 'Failed to complete resource acquisition.' };
     }
   };
 
@@ -3614,6 +3763,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         publishResource,
         unpublishResource,
         recordResourceDownload,
+        resourcePurchases,
+        hasPurchasedResource,
+        purchaseResource,
         courses,
         coursesLoading,
         refreshCourses,
@@ -3708,6 +3860,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isPaymentsLoading,
         paymentsError,
         fetchStudentPayments,
+        fetchStudentResourcePurchases,
         adminPayments,
         isAdminPaymentsLoading,
         adminPaymentsError,

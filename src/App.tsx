@@ -317,7 +317,7 @@ const MainApp: React.FC = () => {
   const isPlayerView = (normalizedCurrentPath.startsWith('/learn/') || normalizedCurrentPath.startsWith('/courses/')) && normalizedCurrentPath.endsWith('/player');
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] selection:bg-[#FF6B00] selection:text-white relative flex flex-col justify-between">
+    <div className="min-h-screen bg-[#F7F9FC] text-[#172033] selection:bg-[#2457D6] selection:text-white relative flex flex-col justify-between">
       <SEOHead path={normalizedCurrentPath} />
       {!isAdminView && !isPlayerView && (
         <Navbar

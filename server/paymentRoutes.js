@@ -16,7 +16,8 @@ import { handleRazorpayWebhook } from "./paymentWebhook.js";
 import {
   calculateAuthoritativeCoursePrice,
   fulfillCourseEnrollment,
-  fulfillConsultationPayment
+  fulfillConsultationPayment,
+  fulfillResourcePurchase
 } from "./paymentFulfillment.js";
 
 const router = express.Router();
@@ -623,6 +624,240 @@ router.post("/verify-consultation-payment", async (req, res) => {
       success: false,
       verified: false,
       error: "An unexpected error occurred during consultation payment verification."
+    });
+  }
+});
+
+/**
+ * POST /api/payments/create-resource-order
+ *
+ * Creates a server-side Razorpay order for a paid digital resource.
+ * Authoritative price and access_type are read strictly from database or authoritative state.
+ * Client-supplied amounts are never trusted.
+ */
+router.post("/create-resource-order", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    let authenticatedUser = null;
+    if (authHeader) {
+      const { user } = await verifySupabaseToken(authHeader);
+      authenticatedUser = user;
+    }
+
+    const { resourceId, customerDetails } = req.body || {};
+    if (!resourceId || typeof resourceId !== "string") {
+      return res.status(400).json({
+        success: false,
+        error: "A valid resourceId is required."
+      });
+    }
+
+    const cleanResourceId = resourceId.trim();
+
+    // 1. Obtain database client
+    const dbClient = getSupabaseDbClient(authHeader) || getSupabaseServerClient();
+    let resourceRecord = null;
+
+    if (dbClient) {
+      const isUUID = isValidUUID(cleanResourceId);
+      const query = dbClient.from("resources").select("*");
+      const { data, error } = isUUID
+        ? await query.eq("id", cleanResourceId).maybeSingle()
+        : await query.eq("slug", cleanResourceId).maybeSingle();
+
+      if (!error && data) {
+        resourceRecord = data;
+      }
+    }
+
+    // 2. Validate access type & price
+    const accessType = (resourceRecord?.access_type || resourceRecord?.accessType || "free").toLowerCase();
+    const authoritativePrice = Number(resourceRecord?.price) || 0;
+
+    if (accessType !== "paid" || authoritativePrice <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: "This resource is free and does not require payment processing."
+      });
+    }
+
+    const amountInPaise = Math.round(authoritativePrice * 100);
+    const currency = (resourceRecord?.currency || "INR").toUpperCase();
+
+    // 3. Retrieve server Razorpay client
+    const razorpay = getRazorpayClient();
+    if (!razorpay) {
+      return res.status(503).json({
+        success: false,
+        error: "Payment gateway is not currently configured on the server."
+      });
+    }
+
+    // 4. Generate unique server receipt (under 40 chars)
+    const receipt = `res_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+    const orderOptions = {
+      amount: amountInPaise,
+      currency,
+      receipt,
+      notes: {
+        itemType: "resource",
+        resourceId: resourceRecord?.id || cleanResourceId,
+        resourceTitle: (resourceRecord?.title || resourceRecord?.name || "Digital Resource").slice(0, 100),
+        customerName: (customerDetails?.name || "").slice(0, 50),
+        customerEmail: (customerDetails?.email || "").slice(0, 50),
+        userId: authenticatedUser?.id || ""
+      }
+    };
+
+    let order;
+    try {
+      order = await razorpay.orders.create(orderOptions);
+    } catch (rzpErr) {
+      console.error("[Create Resource Order] Razorpay orders.create failed:", rzpErr?.message || rzpErr);
+      return res.status(502).json({
+        success: false,
+        error: "Payment gateway failed to initialize order. Please try again."
+      });
+    }
+
+    return res.json({
+      success: true,
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      keyId: getRazorpayKeyId(),
+      resourceId: resourceRecord?.id || cleanResourceId,
+      resourceTitle: resourceRecord?.title || resourceRecord?.name || "Digital Resource Toolkit"
+    });
+  } catch (err) {
+    console.error("[Create Resource Order] Unexpected error:", err);
+    return res.status(500).json({
+      success: false,
+      error: "An unexpected error occurred while initializing resource order."
+    });
+  }
+});
+
+/**
+ * POST /api/payments/verify-resource-payment
+ *
+ * Verifies Razorpay payment signature for a paid resource purchase.
+ * Only after cryptographic HMAC SHA256 signature verification does it create the confirmed purchase
+ * in public.resource_purchases and the transaction record in public.payments.
+ */
+router.post("/verify-resource-payment", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    let authenticatedUser = null;
+    if (authHeader) {
+      const { user } = await verifySupabaseToken(authHeader);
+      authenticatedUser = user;
+    }
+
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      resourceId,
+      customerDetails
+    } = req.body || {};
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: "Missing required Razorpay payment credentials for verification."
+      });
+    }
+
+    if (!resourceId || typeof resourceId !== "string") {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: "Missing or invalid resourceId."
+      });
+    }
+
+    if (!isRazorpayConfigured()) {
+      return res.status(503).json({
+        success: false,
+        verified: false,
+        error: "Payment gateway credentials are not configured on the server."
+      });
+    }
+
+    // 1. Cryptographic HMAC SHA256 signature verification
+    const isSignatureValid = verifyPaymentSignature(
+      razorpay_order_id.trim(),
+      razorpay_payment_id.trim(),
+      razorpay_signature.trim()
+    );
+
+    if (!isSignatureValid) {
+      console.warn(`[Resource Verification] Invalid signature rejected for order ${razorpay_order_id}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: "Payment verification failed: Invalid cryptographic signature."
+      });
+    }
+
+    // 2. Fetch authoritative resource price from database
+    const dbClient = getSupabaseDbClient(authHeader) || getSupabaseServerClient();
+    let resourceRecord = null;
+    if (dbClient) {
+      const isUUID = isValidUUID(resourceId.trim());
+      const query = dbClient.from("resources").select("*");
+      const { data } = isUUID
+        ? await query.eq("id", resourceId.trim()).maybeSingle()
+        : await query.eq("slug", resourceId.trim()).maybeSingle();
+      resourceRecord = data;
+    }
+
+    const amount = Number(resourceRecord?.price) || 0;
+    const currency = (resourceRecord?.currency || "INR").toUpperCase();
+
+    // 3. Atomic fulfillment into public.resource_purchases and public.payments
+    const fulfillment = await fulfillResourcePurchase({
+      userId: authenticatedUser?.id || null,
+      resourceId: resourceRecord?.id || resourceId.trim(),
+      amount,
+      currency,
+      orderId: razorpay_order_id.trim(),
+      paymentId: razorpay_payment_id.trim(),
+      customerName: customerDetails?.name || "",
+      customerEmail: customerDetails?.email || authenticatedUser?.email || "",
+      customerPhone: customerDetails?.phone || "",
+      resourceTitle: resourceRecord?.title || resourceRecord?.name || "Digital Resource"
+    });
+
+    if (!fulfillment.success) {
+      return res.status(500).json({
+        success: false,
+        verified: true,
+        fulfilled: false,
+        error: fulfillment.error || "Failed to finalize resource purchase record."
+      });
+    }
+
+    return res.json({
+      success: true,
+      verified: true,
+      fulfilled: true,
+      already_fulfilled: Boolean(fulfillment.already_fulfilled),
+      purchase: fulfillment.purchase,
+      payment: fulfillment.payment,
+      orderId: razorpay_order_id.trim(),
+      paymentId: razorpay_payment_id.trim(),
+      resourceId: resourceRecord?.id || resourceId.trim()
+    });
+  } catch (err) {
+    console.error("[Resource Verification] Unexpected error:", err);
+    return res.status(500).json({
+      success: false,
+      verified: false,
+      error: "An unexpected error occurred during resource payment verification."
     });
   }
 });

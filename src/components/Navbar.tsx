@@ -310,8 +310,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
       id="main-navbar"
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
         isScrolled
-          ? 'bg-[#07111F]/95 backdrop-blur-md border-b border-white/10 shadow-xl shadow-black/40 py-3 sm:py-3.5'
-          : 'bg-[#07111F]/90 backdrop-blur-md border-b border-white/5 py-3.5 sm:py-4.5'
+          ? 'bg-[#FFFFFF]/95 backdrop-blur-md border-b border-[#E5EAF2] shadow-sm py-3 sm:py-3.5'
+          : 'bg-[#FFFFFF]/90 backdrop-blur-md border-b border-[#E5EAF2] py-3.5 sm:py-4.5'
       }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
@@ -324,15 +324,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             className="flex items-center gap-2.5 group text-left focus:outline-none cursor-pointer"
             aria-label="Digital Muid Home"
           >
-            <div className="w-8 h-8 rounded bg-[#1877F2] flex items-center justify-center text-white font-display font-bold text-sm shadow-md shadow-[#1877F2]/20 group-hover:scale-105 transition-transform">
+            <div className="w-8 h-8 rounded-lg bg-[#2457D6] flex items-center justify-center text-white font-display font-bold text-sm shadow-md shadow-[#2457D6]/20 group-hover:scale-105 transition-transform">
               M
             </div>
             <div>
-              <div className="font-display font-bold text-base sm:text-lg tracking-tight text-white flex items-center gap-2">
+              <div className="font-display font-bold text-base sm:text-lg tracking-tight text-[#172033] flex items-center gap-2">
                 <span>DIGITAL MUID</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-[#FF6B00]"></span>
+                <span className="w-1.5 h-1.5 rounded-full bg-[#2457D6]"></span>
               </div>
-              <p className="text-[9px] text-white/50 font-interface tracking-[0.2em] uppercase hidden sm:block">
+              <p className="text-[9px] text-[#596579] font-interface tracking-[0.2em] uppercase hidden sm:block">
                 Growth · AI · Transformation
               </p>
             </div>
@@ -342,9 +342,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             <button
               type="button"
               onClick={() => handleNav('/admin')}
-              className="hidden xl:flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#1877F2]/15 border border-[#1877F2]/30 text-[#60A5FA] text-[10px] uppercase font-bold tracking-wider hover:bg-[#1877F2]/25 transition-colors cursor-pointer"
+              className="hidden xl:flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#E8EFFF] border border-[#2457D6]/30 text-[#2457D6] text-[10px] uppercase font-bold tracking-wider hover:bg-[#2457D6]/15 transition-colors cursor-pointer"
             >
-              <ShieldCheck className="w-3 h-3" />
+              <ShieldCheck className="w-3 h-3 text-[#2457D6]" />
               <span>Admin</span>
             </button>
           )}
@@ -362,8 +362,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             }}
             className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer rounded-md px-1.5 ${
               isAboutActive
-                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                : 'text-slate-300 hover:text-white'
+                ? 'text-[#2457D6] border-b-2 border-[#2457D6] font-bold'
+                : 'text-[#465166] hover:text-[#172033]'
             }`}
           >
             About
@@ -382,16 +382,16 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               aria-expanded={activeDropdown === 'services'}
               aria-haspopup="true"
               aria-controls="nav-services-dropdown"
-              className={`inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#FF6B00] rounded-md px-1.5 ${
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#2457D6] rounded-md px-1.5 ${
                 isServicesActive
-                  ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                  : 'text-slate-300 hover:text-white'
+                  ? 'text-[#2457D6] border-b-2 border-[#2457D6] font-bold'
+                  : 'text-[#465166] hover:text-[#172033]'
               }`}
             >
               <span>Services</span>
               <ChevronDown
                 className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                  activeDropdown === 'services' ? 'rotate-180 text-[#FF6B00]' : 'text-slate-400'
+                  activeDropdown === 'services' ? 'rotate-180 text-[#2457D6]' : 'text-[#596579]'
                 }`}
               />
             </button>
@@ -401,9 +401,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                 id="nav-services-dropdown"
                 role="menu"
                 aria-labelledby="nav-services-btn"
-                className="absolute left-0 top-full mt-2 w-80 rounded-2xl bg-[#0F172A] border border-slate-700/80 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+                className="absolute left-0 top-full mt-2 w-80 rounded-2xl bg-[#FFFFFF] border border-[#E5EAF2] shadow-xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
               >
-                <div className="px-3 py-1.5 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-interface">
+                <div className="px-3 py-1.5 border-b border-[#E5EAF2] text-[10px] font-bold uppercase tracking-wider text-[#596579] font-interface">
                   Services
                 </div>
                 <div className="py-1 space-y-1">
@@ -421,23 +421,23 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                         }}
                         className={`w-full text-left px-3 py-2.5 rounded-xl text-xs transition-colors flex items-start gap-3 cursor-pointer group ${
                           isActive
-                            ? 'bg-[#FF6B00]/15 text-white border border-[#FF6B00]/30'
-                            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                            ? 'bg-[#E8EFFF] text-[#2457D6] border border-[#2457D6]/30'
+                            : 'text-[#172033] hover:bg-[#EEF3FA]'
                         }`}
                       >
                         <div
                           className={`p-2 rounded-lg mt-0.5 shrink-0 ${
-                            isActive ? 'bg-[#FF6B00] text-white' : 'bg-slate-800 text-[#FF6B00] group-hover:bg-[#FF6B00]/20'
+                            isActive ? 'bg-[#2457D6] text-white' : 'bg-[#EEF3FA] text-[#2457D6] group-hover:bg-[#E8EFFF]'
                           }`}
                         >
                           <ItemIcon className="w-4 h-4" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="font-semibold text-white flex items-center justify-between">
+                          <div className="font-semibold text-[#172033] flex items-center justify-between">
                             <span>{item.label}</span>
-                            <ArrowRight className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                            <ArrowRight className="w-3 h-3 text-[#2457D6] opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
                           </div>
-                          <p className="text-[11px] text-slate-400 leading-snug mt-0.5">
+                          <p className="text-[11px] text-[#596579] leading-snug mt-0.5">
                             {item.desc}
                           </p>
                         </div>
@@ -462,16 +462,16 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               aria-expanded={activeDropdown === 'learn'}
               aria-haspopup="true"
               aria-controls="nav-learn-dropdown"
-              className={`inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#FF6B00] rounded-md px-1.5 ${
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#2457D6] rounded-md px-1.5 ${
                 isLearnActive
-                  ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                  : 'text-slate-300 hover:text-white'
+                  ? 'text-[#2457D6] border-b-2 border-[#2457D6] font-bold'
+                  : 'text-[#465166] hover:text-[#172033]'
               }`}
             >
               <span>Learn</span>
               <ChevronDown
                 className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                  activeDropdown === 'learn' ? 'rotate-180 text-[#FF6B00]' : 'text-slate-400'
+                  activeDropdown === 'learn' ? 'rotate-180 text-[#2457D6]' : 'text-[#596579]'
                 }`}
               />
             </button>
@@ -481,9 +481,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                 id="nav-learn-dropdown"
                 role="menu"
                 aria-labelledby="nav-learn-btn"
-                className="absolute left-0 top-full mt-2 w-80 rounded-2xl bg-[#0F172A] border border-slate-700/80 shadow-2xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+                className="absolute left-0 top-full mt-2 w-80 rounded-2xl bg-[#FFFFFF] border border-[#E5EAF2] shadow-xl p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
               >
-                <div className="px-3 py-1.5 border-b border-slate-800 text-[10px] font-bold uppercase tracking-wider text-slate-400 font-interface">
+                <div className="px-3 py-1.5 border-b border-[#E5EAF2] text-[10px] font-bold uppercase tracking-wider text-[#596579] font-interface">
                   Education & Learning
                 </div>
                 <div className="py-1 space-y-1">
@@ -504,23 +504,23 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                         }}
                         className={`w-full text-left px-3 py-2.5 rounded-xl text-xs transition-colors flex items-start gap-3 cursor-pointer group ${
                           isActive
-                            ? 'bg-[#FF6B00]/15 text-white border border-[#FF6B00]/30'
-                            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                            ? 'bg-[#E8EFFF] text-[#2457D6] border border-[#2457D6]/30'
+                            : 'text-[#172033] hover:bg-[#EEF3FA]'
                         }`}
                       >
                         <div
                           className={`p-2 rounded-lg mt-0.5 shrink-0 ${
-                            isActive ? 'bg-[#FF6B00] text-white' : 'bg-slate-800 text-[#FF6B00] group-hover:bg-[#FF6B00]/20'
+                            isActive ? 'bg-[#2457D6] text-white' : 'bg-[#EEF3FA] text-[#2457D6] group-hover:bg-[#E8EFFF]'
                           }`}
                         >
                           <ItemIcon className="w-4 h-4" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="font-semibold text-white flex items-center justify-between">
+                          <div className="font-semibold text-[#172033] flex items-center justify-between">
                             <span>{item.label}</span>
-                            <ArrowRight className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                            <ArrowRight className="w-3 h-3 text-[#2457D6] opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
                           </div>
-                          <p className="text-[11px] text-slate-400 leading-snug mt-0.5">
+                          <p className="text-[11px] text-[#596579] leading-snug mt-0.5">
                             {item.desc}
                           </p>
                         </div>
@@ -545,16 +545,16 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               aria-expanded={activeDropdown === 'frameworks'}
               aria-haspopup="true"
               aria-controls="nav-frameworks-dropdown"
-              className={`inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#FF6B00] rounded-md px-1.5 ${
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#2457D6] rounded-md px-1.5 ${
                 isFrameworksActive
-                  ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                  : 'text-slate-300 hover:text-white'
+                  ? 'text-[#2457D6] border-b-2 border-[#2457D6] font-bold'
+                  : 'text-[#465166] hover:text-[#172033]'
               }`}
             >
               <span>Frameworks</span>
               <ChevronDown
                 className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                  activeDropdown === 'frameworks' ? 'rotate-180 text-[#FF6B00]' : 'text-slate-400'
+                  activeDropdown === 'frameworks' ? 'rotate-180 text-[#2457D6]' : 'text-[#596579]'
                 }`}
               />
             </button>
@@ -564,9 +564,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                 id="nav-frameworks-dropdown"
                 role="menu"
                 aria-labelledby="nav-frameworks-btn"
-                className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-[540px] rounded-2xl bg-[#0F172A] border border-slate-700/80 shadow-2xl p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+                className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-[540px] rounded-2xl bg-[#FFFFFF] border border-[#E5EAF2] shadow-xl p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150"
               >
-                <div className="px-3 py-1.5 border-b border-slate-800 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400 font-interface">
+                <div className="px-3 py-1.5 border-b border-[#E5EAF2] flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-[#596579] font-interface">
                   <span>Proprietary Frameworks</span>
                   <a
                     href="/frameworks"
@@ -574,7 +574,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                       e.preventDefault();
                       handleNav('/frameworks');
                     }}
-                    className="text-[#FF6B00] hover:underline cursor-pointer lowercase first-letter:uppercase"
+                    className="text-[#2457D6] hover:underline cursor-pointer lowercase first-letter:uppercase"
                   >
                     All frameworks →
                   </a>
@@ -595,22 +595,22 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                         }}
                         className={`text-left p-2.5 rounded-xl text-xs transition-colors flex items-start gap-2.5 cursor-pointer group ${
                           isActive
-                            ? 'bg-[#FF6B00]/15 text-white border border-[#FF6B00]/30'
-                            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                            ? 'bg-[#E8EFFF] text-[#2457D6] border border-[#2457D6]/30'
+                            : 'text-[#172033] hover:bg-[#EEF3FA]'
                         }`}
                       >
                         <div
                           className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${
-                            isActive ? 'bg-[#FF6B00] text-white' : 'bg-slate-800 text-[#FF6B00] group-hover:bg-[#FF6B00]/20'
+                            isActive ? 'bg-[#2457D6] text-white' : 'bg-[#EEF3FA] text-[#2457D6] group-hover:bg-[#E8EFFF]'
                           }`}
                         >
                           <ItemIcon className="w-3.5 h-3.5" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="font-semibold text-white text-[12px] group-hover:text-[#FF6B00] transition-colors leading-tight">
+                          <div className="font-semibold text-[#172033] text-[12px] group-hover:text-[#2457D6] transition-colors leading-tight">
                             {item.label}
                           </div>
-                          <p className="text-[10px] text-slate-400 leading-snug mt-0.5 line-clamp-1">
+                          <p className="text-[10px] text-[#596579] leading-snug mt-0.5 line-clamp-1">
                             {item.desc}
                           </p>
                         </div>
@@ -618,14 +618,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     );
                   })}
                 </div>
-                <div className="p-2 border-t border-slate-800 bg-slate-900/40 text-center rounded-b-xl">
+                <div className="p-2 border-t border-[#E5EAF2] bg-[#F7F9FC] text-center rounded-b-xl">
                   <a
                     href="/frameworks"
                     onClick={(e) => {
                       e.preventDefault();
                       handleNav('/frameworks');
                     }}
-                    className="text-[11px] font-semibold text-slate-300 hover:text-[#FF6B00] transition-colors cursor-pointer"
+                    className="text-[11px] font-semibold text-[#465166] hover:text-[#2457D6] transition-colors cursor-pointer"
                   >
                     Explore all proprietary models and architectures →
                   </a>
@@ -644,8 +644,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             }}
             className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer rounded-md px-1.5 ${
               isBlogActive
-                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                : 'text-slate-300 hover:text-white'
+                ? 'text-[#2457D6] border-b-2 border-[#2457D6] font-bold'
+                : 'text-[#465166] hover:text-[#172033]'
             }`}
           >
             Blog
@@ -661,8 +661,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             }}
             className={`text-xs font-semibold tracking-wide transition-colors py-1.5 whitespace-nowrap cursor-pointer rounded-md px-1.5 ${
               isContactActive
-                ? 'text-white border-b-2 border-[#FF6B00] font-bold'
-                : 'text-slate-300 hover:text-white'
+                ? 'text-[#2457D6] border-b-2 border-[#2457D6] font-bold'
+                : 'text-[#465166] hover:text-[#172033]'
             }`}
           >
             Contact
@@ -676,12 +676,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             id="nav-search-btn"
             type="button"
             onClick={() => (onOpenSearch ? onOpenSearch() : setIsSearchOpen(true))}
-            className="p-2 sm:p-2.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition-colors flex items-center gap-2 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#FF6B00] min-h-[44px] min-w-[44px] justify-center"
+            className="p-2 sm:p-2.5 text-[#465166] hover:text-[#172033] hover:bg-[#EEF3FA] rounded-xl transition-colors flex items-center gap-2 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#2457D6] min-h-[44px] min-w-[44px] justify-center border border-[#E5EAF2] bg-[#FFFFFF]"
             title="Search knowledge base (Cmd+K)"
             aria-label="Search knowledge base"
           >
-            <Search className="w-4 h-4" />
-            <span className="hidden xl:inline text-[10px] text-white/50 font-interface bg-white/5 px-1.5 py-0.5 rounded border border-white/10 uppercase tracking-wider">
+            <Search className="w-4 h-4 text-[#465166]" />
+            <span className="hidden xl:inline text-[10px] text-[#596579] font-interface bg-[#EEF3FA] px-1.5 py-0.5 rounded border border-[#E5EAF2] uppercase tracking-wider font-semibold">
               ⌘K
             </span>
           </button>
@@ -1036,16 +1036,16 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               id="nav-account-btn"
               type="button"
               onClick={() => handleNav(currentUser ? (isAdminAuthenticated ? '/admin' : '/account') : '/login')}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl text-[11px] font-semibold uppercase tracking-wider transition-colors cursor-pointer border border-white/10 min-h-[44px]"
-              title={currentUser ? (isAdminAuthenticated ? 'Admin Panel' : 'My Account') : 'Sign In'}
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 text-[#465166] hover:text-[#172033] hover:bg-[#EEF3FA] rounded-xl text-[11px] font-semibold uppercase tracking-wider transition-colors cursor-pointer border border-[#E5EAF2] min-h-[44px]"
+              title={currentUser ? (isAdminAuthenticated ? 'Admin Panel' : 'My Account') : 'Student Login'}
             >
               {isAdminAuthenticated ? (
-                <ShieldCheck className="w-3.5 h-3.5 text-red-500" />
+                <ShieldCheck className="w-3.5 h-3.5 text-[#2457D6]" />
               ) : (
-                <User className="w-3.5 h-3.5 text-[#FF6B00]" />
+                <User className="w-3.5 h-3.5 text-[#2457D6]" />
               )}
               <span className="hidden md:inline">
-                {currentUser ? (isAdminAuthenticated ? 'Admin' : (userProfile?.fullName?.split(' ')[0] || 'Account')) : 'Sign In'}
+                {currentUser ? (isAdminAuthenticated ? 'Admin' : (userProfile?.fullName?.split(' ')[0] || 'Account')) : 'Student Login'}
               </span>
             </button>
           )}
@@ -1059,7 +1059,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               analytics.trackGrowthAuditCta('navbar');
               handleNav('/business-growth-consultation');
             }}
-            className="hidden sm:inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 bg-[#FF6B00] hover:bg-[#FF7A1A] text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-[#FF6B00]/25 active:scale-[0.98] rounded-xl font-interface min-h-[44px] whitespace-nowrap"
+            className="hidden sm:inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 bg-[#2457D6] hover:bg-[#1D46B3] text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-[#2457D6]/25 active:scale-[0.98] rounded-xl font-interface min-h-[44px] whitespace-nowrap"
           >
             <span>Book Consultation</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -1074,15 +1074,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               e.stopPropagation();
               setIsMobileMenuOpen((prev) => !prev);
             }}
-            className="lg:hidden p-2.5 text-slate-200 hover:text-white hover:bg-white/10 rounded-xl transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#FF6B00] min-h-[44px] min-w-[44px] flex items-center justify-center bg-white/5 border border-white/10 active:scale-95"
+            className="lg:hidden p-2.5 text-[#172033] hover:text-[#2457D6] hover:bg-[#EEF3FA] rounded-xl transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#2457D6] min-h-[44px] min-w-[44px] flex items-center justify-center bg-[#F7F9FC] border border-[#E5EAF2] active:scale-95"
             aria-label={isMobileMenuOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={isMobileMenuOpen}
             aria-controls="mobile-navigation-drawer"
           >
             {isMobileMenuOpen ? (
-              <X className="w-6 h-6 text-[#FF6B00]" />
+              <X className="w-6 h-6 text-[#2457D6]" />
             ) : (
-              <Menu className="w-6 h-6 text-white" />
+              <Menu className="w-6 h-6 text-[#172033]" />
             )}
           </button>
         </div>
@@ -1095,11 +1095,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
           role="dialog"
           aria-modal="true"
           aria-label="Mobile Navigation"
-          className="lg:hidden fixed inset-x-0 top-[58px] sm:top-[68px] bottom-0 h-[calc(100dvh-58px)] sm:h-[calc(100dvh-68px)] bg-[#07111F]/98 backdrop-blur-2xl z-50 overflow-y-auto overscroll-contain flex flex-col justify-between p-5 sm:p-6 border-t border-slate-800 shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200"
+          className="lg:hidden fixed inset-x-0 top-[58px] sm:top-[68px] bottom-0 h-[calc(100dvh-58px)] sm:h-[calc(100dvh-68px)] bg-[#FFFFFF]/98 backdrop-blur-2xl z-50 overflow-y-auto overscroll-contain flex flex-col justify-between p-5 sm:p-6 border-t border-[#E5EAF2] shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200"
         >
           <div className="space-y-3 pt-1">
-            <div className="pb-3 border-b border-slate-800/80 flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400 font-interface">Navigation</span>
+            <div className="pb-3 border-b border-[#E5EAF2] flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#596579] font-interface">Navigation</span>
               <button
                 type="button"
                 onClick={() => {
@@ -1109,7 +1109,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   if (onOpenSearch) onOpenSearch();
                   else setIsSearchOpen(true);
                 }}
-                className="text-xs text-[#1877F2] hover:text-blue-400 flex items-center gap-1.5 font-semibold cursor-pointer py-1 px-2.5 rounded-lg bg-blue-500/10 border border-blue-500/20"
+                className="text-xs text-[#2457D6] hover:text-[#1D46B3] flex items-center gap-1.5 font-semibold cursor-pointer py-1.5 px-3 rounded-lg bg-[#E8EFFF] border border-[#2457D6]/20 transition-colors"
               >
                 <Search className="w-3.5 h-3.5" />
                 <span>Search Knowledge</span>
@@ -1126,36 +1126,36 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   e.preventDefault();
                   handleNav('/about');
                 }}
-                className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all flex items-center justify-between cursor-pointer font-interface ${
+                className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-semibold tracking-wide transition-all flex items-center justify-between cursor-pointer font-interface ${
                   isAboutActive
-                    ? 'text-white bg-[#FF6B00]/20 border border-[#FF6B00]/40 font-bold'
-                    : 'text-slate-200 hover:bg-slate-800/60 bg-slate-900/40 border border-slate-800/80'
+                    ? 'text-[#2457D6] bg-[#E8EFFF] border border-[#2457D6]/30 font-bold'
+                    : 'text-[#172033] hover:bg-[#EEF3FA] bg-[#F7F9FC] border border-[#E5EAF2]'
                 }`}
               >
                 <span>About</span>
-                <ArrowRight className="w-4 h-4 text-slate-400" />
+                <ArrowRight className="w-4 h-4 text-[#596579]" />
               </a>
 
               {/* 2. Services Accordion */}
-              <div className="rounded-xl border border-slate-800/80 overflow-hidden bg-slate-900/40">
+              <div className="rounded-xl border border-[#E5EAF2] overflow-hidden bg-[#F7F9FC]">
                 <button
                   type="button"
                   onClick={() => toggleMobileAccordion('services')}
                   aria-expanded={mobileExpandedSection === 'services'}
-                  className="w-full min-h-[44px] px-4 py-3.5 text-left text-sm font-bold uppercase tracking-wider text-slate-200 hover:text-white flex items-center justify-between cursor-pointer focus:outline-none focus:bg-slate-800/80 font-interface"
+                  className="w-full min-h-[44px] px-4 py-3.5 text-left text-sm font-semibold tracking-wide text-[#172033] hover:text-[#2457D6] flex items-center justify-between cursor-pointer focus:outline-none focus:bg-[#EEF3FA] font-interface transition-colors"
                 >
                   <span className="flex items-center gap-2">
-                    <span>SERVICES</span>
-                    {isServicesActive && <span className="w-1.5 h-1.5 rounded-full bg-[#FF6B00]"></span>}
+                    <span>Services</span>
+                    {isServicesActive && <span className="w-1.5 h-1.5 rounded-full bg-[#2457D6]"></span>}
                   </span>
                   <ChevronDown
-                    className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
-                      mobileExpandedSection === 'services' ? 'rotate-180 text-[#FF6B00]' : ''
+                    className={`w-4 h-4 text-[#596579] transition-transform duration-200 ${
+                      mobileExpandedSection === 'services' ? 'rotate-180 text-[#2457D6]' : ''
                     }`}
                   />
                 </button>
                 {mobileExpandedSection === 'services' && (
-                  <div className="px-3 pb-3 space-y-1 bg-slate-950/50 border-t border-slate-800/60 pt-2 animate-in fade-in duration-150">
+                  <div className="px-3 pb-3 space-y-1 bg-[#FFFFFF] border-t border-[#E5EAF2] pt-2 animate-in fade-in duration-150">
                     {servicesSubmenu.map((sub) => {
                       const SubIcon = sub.icon;
                       const isActive = currentPath === sub.path;
@@ -1169,15 +1169,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                           }}
                           className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
                             isActive
-                              ? 'bg-[#FF6B00]/20 text-white font-semibold border border-[#FF6B00]/30'
-                              : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                              ? 'bg-[#E8EFFF] text-[#2457D6] font-semibold border border-[#2457D6]/30'
+                              : 'text-[#465166] hover:text-[#172033] hover:bg-[#EEF3FA]'
                           }`}
                         >
                           <span className="flex items-center gap-2.5">
-                            <SubIcon className="w-3.5 h-3.5 text-[#FF6B00]" />
+                            <SubIcon className="w-3.5 h-3.5 text-[#2457D6]" />
                             <span>{sub.label}</span>
                           </span>
-                          <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
+                          <ArrowRight className="w-3.5 h-3.5 text-[#596579]" />
                         </a>
                       );
                     })}
@@ -1186,25 +1186,25 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               </div>
 
               {/* 3. Learn Accordion */}
-              <div className="rounded-xl border border-slate-800/80 overflow-hidden bg-slate-900/40">
+              <div className="rounded-xl border border-[#E5EAF2] overflow-hidden bg-[#F7F9FC]">
                 <button
                   type="button"
                   onClick={() => toggleMobileAccordion('learn')}
                   aria-expanded={mobileExpandedSection === 'learn'}
-                  className="w-full min-h-[44px] px-4 py-3.5 text-left text-sm font-bold uppercase tracking-wider text-slate-200 hover:text-white flex items-center justify-between cursor-pointer focus:outline-none focus:bg-slate-800/80 font-interface"
+                  className="w-full min-h-[44px] px-4 py-3.5 text-left text-sm font-semibold tracking-wide text-[#172033] hover:text-[#2457D6] flex items-center justify-between cursor-pointer focus:outline-none focus:bg-[#EEF3FA] font-interface transition-colors"
                 >
                   <span className="flex items-center gap-2">
-                    <span>LEARN</span>
-                    {isLearnActive && <span className="w-1.5 h-1.5 rounded-full bg-[#FF6B00]"></span>}
+                    <span>Learn</span>
+                    {isLearnActive && <span className="w-1.5 h-1.5 rounded-full bg-[#2457D6]"></span>}
                   </span>
                   <ChevronDown
-                    className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
-                      mobileExpandedSection === 'learn' ? 'rotate-180 text-[#FF6B00]' : ''
+                    className={`w-4 h-4 text-[#596579] transition-transform duration-200 ${
+                      mobileExpandedSection === 'learn' ? 'rotate-180 text-[#2457D6]' : ''
                     }`}
                   />
                 </button>
                 {mobileExpandedSection === 'learn' && (
-                  <div className="px-3 pb-3 space-y-1 bg-slate-950/50 border-t border-slate-800/60 pt-2 animate-in fade-in duration-150">
+                  <div className="px-3 pb-3 space-y-1 bg-[#FFFFFF] border-t border-[#E5EAF2] pt-2 animate-in fade-in duration-150">
                     {learnSubmenu.map((sub) => {
                       const SubIcon = sub.icon;
                       const isActive = currentPath === sub.path || (sub.path === '/learn' && currentPath.startsWith('/learn/'));
@@ -1221,15 +1221,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                           }}
                           className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
                             isActive
-                              ? 'bg-[#FF6B00]/20 text-white font-semibold border border-[#FF6B00]/30'
-                              : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                              ? 'bg-[#E8EFFF] text-[#2457D6] font-semibold border border-[#2457D6]/30'
+                              : 'text-[#465166] hover:text-[#172033] hover:bg-[#EEF3FA]'
                           }`}
                         >
                           <span className="flex items-center gap-2.5">
-                            <SubIcon className="w-3.5 h-3.5 text-[#FF6B00]" />
+                            <SubIcon className="w-3.5 h-3.5 text-[#2457D6]" />
                             <span>{sub.label}</span>
                           </span>
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white/10 text-slate-300">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[#E8EFFF] text-[#2457D6]">
                             {sub.badge}
                           </span>
                         </a>
@@ -1240,25 +1240,25 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               </div>
 
               {/* 4. Frameworks Accordion */}
-              <div className="rounded-xl border border-slate-800/80 overflow-hidden bg-slate-900/40">
+              <div className="rounded-xl border border-[#E5EAF2] overflow-hidden bg-[#F7F9FC]">
                 <button
                   type="button"
                   onClick={() => toggleMobileAccordion('frameworks')}
                   aria-expanded={mobileExpandedSection === 'frameworks'}
-                  className="w-full min-h-[44px] px-4 py-3.5 text-left text-sm font-bold uppercase tracking-wider text-slate-200 hover:text-white flex items-center justify-between cursor-pointer focus:outline-none focus:bg-slate-800/80 font-interface"
+                  className="w-full min-h-[44px] px-4 py-3.5 text-left text-sm font-semibold tracking-wide text-[#172033] hover:text-[#2457D6] flex items-center justify-between cursor-pointer focus:outline-none focus:bg-[#EEF3FA] font-interface transition-colors"
                 >
                   <span className="flex items-center gap-2">
-                    <span>FRAMEWORKS</span>
-                    {isFrameworksActive && <span className="w-1.5 h-1.5 rounded-full bg-[#FF6B00]"></span>}
+                    <span>Frameworks</span>
+                    {isFrameworksActive && <span className="w-1.5 h-1.5 rounded-full bg-[#2457D6]"></span>}
                   </span>
                   <ChevronDown
-                    className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
-                      mobileExpandedSection === 'frameworks' ? 'rotate-180 text-[#FF6B00]' : ''
+                    className={`w-4 h-4 text-[#596579] transition-transform duration-200 ${
+                      mobileExpandedSection === 'frameworks' ? 'rotate-180 text-[#2457D6]' : ''
                     }`}
                   />
                 </button>
                 {mobileExpandedSection === 'frameworks' && (
-                  <div className="px-3 pb-3 space-y-1 bg-slate-950/50 border-t border-slate-800/60 pt-2 animate-in fade-in duration-150">
+                  <div className="px-3 pb-3 space-y-1 bg-[#FFFFFF] border-t border-[#E5EAF2] pt-2 animate-in fade-in duration-150">
                     {frameworksSubmenu.map((sub) => {
                       const SubIcon = sub.icon;
                       const isActive = currentPath === sub.path;
@@ -1273,15 +1273,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                           }}
                           className={`w-full min-h-[44px] text-left px-3 py-2 rounded-lg text-xs transition-colors flex items-center justify-between cursor-pointer ${
                             isActive
-                              ? 'bg-[#FF6B00]/20 text-white font-semibold border border-[#FF6B00]/30'
-                              : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                              ? 'bg-[#E8EFFF] text-[#2457D6] font-semibold border border-[#2457D6]/30'
+                              : 'text-[#465166] hover:text-[#172033] hover:bg-[#EEF3FA]'
                           }`}
                         >
                           <span className="flex items-center gap-2.5">
-                            <SubIcon className="w-3.5 h-3.5 text-[#FF6B00]" />
+                            <SubIcon className="w-3.5 h-3.5 text-[#2457D6]" />
                             <span>{sub.label}</span>
                           </span>
-                          <ArrowRight className="w-3 h-3 text-slate-500" />
+                          <ArrowRight className="w-3.5 h-3.5 text-[#596579]" />
                         </a>
                       );
                     })}
@@ -1291,7 +1291,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                         e.preventDefault();
                         handleNav('/frameworks');
                       }}
-                      className="w-full min-h-[40px] text-center px-3 py-2 rounded-lg text-xs font-semibold text-[#FF6B00] hover:bg-white/5 flex items-center justify-center gap-1.5 cursor-pointer pt-2 border-t border-slate-800/60"
+                      className="w-full min-h-[40px] text-center px-3 py-2 rounded-lg text-xs font-semibold text-[#2457D6] hover:bg-[#E8EFFF] flex items-center justify-center gap-1.5 cursor-pointer pt-2 border-t border-[#E5EAF2]"
                     >
                       <span>Explore all proprietary frameworks</span>
                       <ArrowRight className="w-3.5 h-3.5" />
@@ -1308,14 +1308,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   e.preventDefault();
                   handleNav('/blog');
                 }}
-                className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all flex items-center justify-between cursor-pointer font-interface ${
+                className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-semibold tracking-wide transition-all flex items-center justify-between cursor-pointer font-interface ${
                   isBlogActive
-                    ? 'text-white bg-[#FF6B00]/20 border border-[#FF6B00]/40 font-bold'
-                    : 'text-slate-200 hover:bg-slate-800/60 bg-slate-900/40 border border-slate-800/80'
+                    ? 'text-[#2457D6] bg-[#E8EFFF] border border-[#2457D6]/30 font-bold'
+                    : 'text-[#172033] hover:bg-[#EEF3FA] bg-[#F7F9FC] border border-[#E5EAF2]'
                 }`}
               >
                 <span>Blog</span>
-                <ArrowRight className="w-4 h-4 text-slate-400" />
+                <ArrowRight className="w-4 h-4 text-[#596579]" />
               </a>
 
               {/* 6. Contact */}
@@ -1326,28 +1326,28 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   e.preventDefault();
                   handleNav('/contact');
                 }}
-                className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all flex items-center justify-between cursor-pointer font-interface ${
+                className={`w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-sm font-semibold tracking-wide transition-all flex items-center justify-between cursor-pointer font-interface ${
                   isContactActive
-                    ? 'text-white bg-[#FF6B00]/20 border border-[#FF6B00]/40 font-bold'
-                    : 'text-slate-200 hover:bg-slate-800/60 bg-slate-900/40 border border-slate-800/80'
+                    ? 'text-[#2457D6] bg-[#E8EFFF] border border-[#2457D6]/30 font-bold'
+                    : 'text-[#172033] hover:bg-[#EEF3FA] bg-[#F7F9FC] border border-[#E5EAF2]'
                 }`}
               >
                 <span>Contact</span>
-                <ArrowRight className="w-4 h-4 text-slate-400" />
+                <ArrowRight className="w-4 h-4 text-[#596579]" />
               </a>
             </div>
 
             {/* Member / Student Navigation Section */}
             {currentUser && !isAdminAuthenticated ? (
-              <div className="space-y-1.5 p-2 rounded-2xl bg-white/5 border border-white/10">
-                <div className="px-3 py-1.5 flex items-center justify-between border-b border-white/10">
+              <div className="space-y-1.5 p-2 rounded-2xl bg-[#F7F9FC] border border-[#E5EAF2]">
+                <div className="px-3 py-1.5 flex items-center justify-between border-b border-[#E5EAF2]">
                   <div className="flex items-center gap-2">
-                    <User className="w-4 h-4 text-[#FF6B00]" />
-                    <span className="text-xs font-bold text-white">
+                    <User className="w-4 h-4 text-[#2457D6]" />
+                    <span className="text-xs font-bold text-[#172033]">
                       {userProfile?.fullName || 'Student'}
                     </span>
                   </div>
-                  <span className="text-[10px] text-orange-400 font-bold uppercase tracking-wider">
+                  <span className="text-[10px] text-[#2457D6] font-bold uppercase tracking-wider bg-[#E8EFFF] px-2 py-0.5 rounded-full">
                     Student
                   </span>
                 </div>
@@ -1358,20 +1358,20 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     onClick={() => handleNav('/dashboard')}
                     className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/dashboard'
-                        ? 'text-[#FF6B00] bg-white/10'
-                        : 'text-slate-200 hover:bg-white/10'
+                        ? 'text-[#2457D6] bg-[#E8EFFF]'
+                        : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
                     }`}
                   >
                     <span className="flex items-center gap-2">
-                      <LayoutDashboard className="w-4 h-4 text-[#FF6B00]" />
+                      <LayoutDashboard className="w-4 h-4 text-[#2457D6]" />
                       <span>Student Dashboard</span>
                     </span>
                     {unreadNotificationsCount > 0 ? (
-                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[#FF6B00] text-white">
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[#2457D6] text-white">
                         {unreadNotificationsCount}
                       </span>
                     ) : (
-                      <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                      <ArrowRight className="w-3.5 h-3.5 text-[#596579]" />
                     )}
                   </button>
 
@@ -1380,15 +1380,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     onClick={() => handleNav('/my-courses')}
                     className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/my-courses'
-                        ? 'text-[#FF6B00] bg-white/10'
-                        : 'text-slate-200 hover:bg-white/10'
+                        ? 'text-[#2457D6] bg-[#E8EFFF]'
+                        : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
                     }`}
                   >
                     <span className="flex items-center gap-2">
-                      <BookOpen className="w-4 h-4 text-[#FF6B00]" />
+                      <BookOpen className="w-4 h-4 text-[#2457D6]" />
                       <span>My Courses</span>
                     </span>
-                    <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                    <ArrowRight className="w-3.5 h-3.5 text-[#596579]" />
                   </button>
 
                   <button
@@ -1396,15 +1396,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     onClick={() => handleNav('/my-consultations')}
                     className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/my-consultations'
-                        ? 'text-[#FF6B00] bg-white/10'
-                        : 'text-slate-200 hover:bg-white/10'
+                        ? 'text-[#2457D6] bg-[#E8EFFF]'
+                        : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
                     }`}
                   >
                     <span className="flex items-center gap-2">
-                      <Calendar className="w-4 h-4 text-[#FF6B00]" />
+                      <Calendar className="w-4 h-4 text-[#2457D6]" />
                       <span>My Consultations</span>
                     </span>
-                    <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                    <ArrowRight className="w-3.5 h-3.5 text-[#596579]" />
                   </button>
 
                   <button
@@ -1413,20 +1413,20 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     onClick={() => handleNav('/saved')}
                     className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/saved'
-                        ? 'text-[#FF6B00] bg-white/10'
-                        : 'text-slate-200 hover:bg-white/10'
+                        ? 'text-[#2457D6] bg-[#E8EFFF]'
+                        : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
                     }`}
                   >
                     <span className="flex items-center gap-2">
-                      <Bookmark className="w-4 h-4 text-[#FF6B00]" />
+                      <Bookmark className="w-4 h-4 text-[#2457D6]" />
                       <span>Saved Content</span>
                     </span>
                     {studentBookmarks && studentBookmarks.length > 0 ? (
-                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[#FF6B00] text-white">
+                      <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[#2457D6] text-white">
                         {studentBookmarks.length}
                       </span>
                     ) : (
-                      <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                      <ArrowRight className="w-3.5 h-3.5 text-[#596579]" />
                     )}
                   </button>
 
@@ -1436,12 +1436,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     onClick={() => handleNav('/wishlist')}
                     className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/wishlist'
-                        ? 'text-[#FF6B00] bg-white/10'
-                        : 'text-slate-200 hover:bg-white/10'
+                        ? 'text-[#2457D6] bg-[#E8EFFF]'
+                        : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
                     }`}
                   >
                     <span className="flex items-center gap-2">
-                      <Heart className="w-4 h-4 text-[#FF6B00]" />
+                      <Heart className="w-4 h-4 text-[#2457D6]" />
                       <span>Course Wishlist</span>
                     </span>
                     {courseWishlist && courseWishlist.length > 0 ? (
@@ -1449,7 +1449,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                         {courseWishlist.length}
                       </span>
                     ) : (
-                      <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                      <ArrowRight className="w-3.5 h-3.5 text-[#596579]" />
                     )}
                   </button>
 
@@ -1458,15 +1458,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     onClick={() => handleNav('/resources')}
                     className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/resources'
-                        ? 'text-[#FF6B00] bg-white/10'
-                        : 'text-slate-200 hover:bg-white/10'
+                        ? 'text-[#2457D6] bg-[#E8EFFF]'
+                        : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
                     }`}
                   >
                     <span className="flex items-center gap-2">
-                      <Download className="w-4 h-4 text-[#FF6B00]" />
+                      <Download className="w-4 h-4 text-[#2457D6]" />
                       <span>Toolkits & Resources</span>
                     </span>
-                    <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                    <ArrowRight className="w-3.5 h-3.5 text-[#596579]" />
                   </button>
 
                   <button
@@ -1474,15 +1474,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     onClick={() => handleNav('/account?tab=billing')}
                     className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/account' && window.location.search.includes('tab=billing')
-                        ? 'text-[#FF6B00] bg-white/10'
-                        : 'text-slate-200 hover:bg-white/10'
+                        ? 'text-[#2457D6] bg-[#E8EFFF]'
+                        : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
                     }`}
                   >
                     <span className="flex items-center gap-2">
-                      <CreditCard className="w-4 h-4 text-[#FF6B00]" />
+                      <CreditCard className="w-4 h-4 text-[#2457D6]" />
                       <span>Billing & Invoices</span>
                     </span>
-                    <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                    <ArrowRight className="w-3.5 h-3.5 text-[#596579]" />
                   </button>
 
                   <button
@@ -1490,15 +1490,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     onClick={() => handleNav('/account')}
                     className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/account' && !window.location.search.includes('tab=billing')
-                        ? 'text-[#FF6B00] bg-white/10'
-                        : 'text-slate-200 hover:bg-white/10'
+                        ? 'text-[#2457D6] bg-[#E8EFFF]'
+                        : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
                     }`}
                   >
                     <span className="flex items-center gap-2">
-                      <User className="w-4 h-4 text-slate-400" />
+                      <User className="w-4 h-4 text-[#596579]" />
                       <span>Account Profile</span>
                     </span>
-                    <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+                    <ArrowRight className="w-3.5 h-3.5 text-[#596579]" />
                   </button>
 
                   <button
@@ -1507,10 +1507,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                       await studentLogout();
                       handleNav('/');
                     }}
-                    className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-red-400 hover:bg-red-950/40 hover:text-red-300 flex items-center justify-between cursor-pointer transition-colors"
+                    className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-red-600 hover:bg-red-50 hover:text-red-700 flex items-center justify-between cursor-pointer transition-colors"
                   >
                     <span className="flex items-center gap-2">
-                      <LogOut className="w-4 h-4 text-red-400" />
+                      <LogOut className="w-4 h-4 text-red-600" />
                       <span>Sign Out</span>
                     </span>
                   </button>
@@ -1520,27 +1520,27 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               <button
                 type="button"
                 onClick={() => handleNav(currentUser ? (isAdminAuthenticated ? '/admin' : '/account') : '/login')}
-                className="w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-xs font-semibold text-slate-200 bg-white/5 border border-white/10 flex items-center justify-between cursor-pointer hover:bg-white/10"
+                className="w-full min-h-[44px] text-left px-4 py-3 rounded-xl text-xs font-semibold text-[#172033] bg-[#F7F9FC] border border-[#E5EAF2] flex items-center justify-between cursor-pointer hover:bg-[#EEF3FA] transition-colors"
               >
                 <span className="flex items-center gap-2">
                   {isAdminAuthenticated ? (
-                    <ShieldCheck className="w-4 h-4 text-red-500" />
+                    <ShieldCheck className="w-4 h-4 text-[#2457D6]" />
                   ) : (
-                    <User className="w-4 h-4 text-[#FF6B00]" />
+                    <User className="w-4 h-4 text-[#2457D6]" />
                   )}
                   <span>
                     {currentUser
                       ? (isAdminAuthenticated ? 'Admin Command Center' : `My Account (${userProfile?.fullName?.split(' ')[0] || 'Member'})`)
-                      : 'Student / Member Sign In'}
+                      : 'Student Login'}
                   </span>
                 </span>
-                <ArrowRight className="w-4 h-4 text-slate-400" />
+                <ArrowRight className="w-4 h-4 text-[#596579]" />
               </button>
             )}
           </div>
 
           {/* Bottom Mobile Action CTAs & Social Links */}
-          <div className="pt-4 pb-6 border-t border-slate-800/80 space-y-3 mt-4">
+          <div className="pt-4 pb-6 border-t border-[#E5EAF2] space-y-3 mt-4">
             {/* Primary Mobile CTA: Book Consultation */}
             <a
               id="mobile-book-consultation-btn"
@@ -1550,12 +1550,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                 analytics.trackGrowthAuditCta('mobile_navbar');
                 handleNav('/business-growth-consultation');
               }}
-              className="w-full min-h-[48px] py-3.5 px-4 bg-[#FF6B00] hover:bg-[#FF7A1A] text-white font-bold text-xs uppercase tracking-wider text-center flex items-center justify-center gap-2 shadow-lg shadow-[#FF6B00]/30 cursor-pointer active:scale-98 transition-all font-interface rounded-xl"
+              className="w-full min-h-[48px] py-3.5 px-4 bg-[#2457D6] hover:bg-[#1D46B3] text-white font-bold text-xs uppercase tracking-wider text-center flex items-center justify-center gap-2 shadow-lg shadow-[#2457D6]/20 cursor-pointer active:scale-98 transition-all font-interface rounded-xl"
             >
               <span>Book Consultation</span>
               <ArrowRight className="w-4 h-4" />
             </a>
-            <p className="text-center text-[11px] text-slate-400 font-interface">
+            <p className="text-center text-[11px] text-[#596579] font-interface">
               Strategic 1-on-1 business growth consultation with Digital Muid
             </p>
 
@@ -1569,7 +1569,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     href={item.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="w-10 h-10 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-600 flex items-center justify-center text-slate-300 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-[#FF6B00]"
+                    className="w-10 h-10 rounded-lg bg-[#F7F9FC] border border-[#E5EAF2] hover:border-[#2457D6]/40 flex items-center justify-center text-[#465166] hover:text-[#2457D6] hover:bg-[#E8EFFF] transition-colors focus:outline-none focus:ring-2 focus:ring-[#2457D6]"
                     aria-label={item.ariaLabel}
                     title={item.name}
                   >

@@ -74,7 +74,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
   const [selectedCertForModal, setSelectedCertForModal] = useState<Certificate | null>(null);
   const [copiedPaymentId, setCopiedPaymentId] = useState<string | null>(null);
   const [downloadingReceiptId, setDownloadingReceiptId] = useState<string | null>(null);
-  const [billingSubFilter, setBillingSubFilter] = useState<'all' | 'courses' | 'consultations'>('all');
+  const [billingSubFilter, setBillingSubFilter] = useState<'all' | 'courses' | 'consultations' | 'resources'>('all');
 
   // Synchronize initialTab or URL query parameter
   useEffect(() => {
@@ -1109,17 +1109,20 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                   {(() => {
                     const coursePayments = studentPayments.filter((p) => p.itemType === 'course');
                     const consultationPayments = studentPayments.filter((p) => p.itemType === 'consultation');
+                    const resourcePayments = studentPayments.filter((p) => p.itemType === 'resource');
                     const displayedPayments =
                       billingSubFilter === 'courses'
                         ? coursePayments
                         : billingSubFilter === 'consultations'
                         ? consultationPayments
+                        : billingSubFilter === 'resources'
+                        ? resourcePayments
                         : studentPayments;
 
                     return (
                       <>
                         <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-slate-200">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <button
                               type="button"
                               onClick={() => setBillingSubFilter('all')}
@@ -1155,6 +1158,18 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                               <UserCheck className="w-3.5 h-3.5" />
                               <span>Paid Consultations ({consultationPayments.length})</span>
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => setBillingSubFilter('resources')}
+                              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                                billingSubFilter === 'resources'
+                                  ? 'bg-[#2457D6] text-white border-[#2457D6] shadow-xs'
+                                  : 'bg-white text-slate-600 hover:text-slate-900 border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>Paid Resources ({resourcePayments.length})</span>
+                            </button>
                           </div>
 
                           <span className="text-[11px] font-mono text-slate-500">
@@ -1167,6 +1182,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                             <div className="w-12 h-12 rounded-2xl bg-white border border-slate-200 flex items-center justify-center mx-auto text-slate-400">
                               {billingSubFilter === 'courses' ? (
                                 <BookOpen className="w-6 h-6 text-[#FF6B00]" />
+                              ) : billingSubFilter === 'resources' ? (
+                                <Download className="w-6 h-6 text-[#2457D6]" />
                               ) : (
                                 <UserCheck className="w-6 h-6 text-purple-600" />
                               )}
@@ -1175,24 +1192,28 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                               <h4 className="text-sm font-bold text-slate-900">
                                 {billingSubFilter === 'courses'
                                   ? 'No Paid Course Purchases Found'
+                                  : billingSubFilter === 'resources'
+                                  ? 'No Paid Resource Purchases Found'
                                   : 'No Paid Consultation Purchases Found'}
                               </h4>
                               <p className="text-xs text-slate-500">
                                 {billingSubFilter === 'courses'
                                   ? 'You have not completed any course masterclass transactions yet.'
+                                  : billingSubFilter === 'resources'
+                                  ? 'You have not completed any paid toolkit or resource purchases yet.'
                                   : 'You have not booked or completed any paid advisory consultation sessions yet.'}
                               </p>
                             </div>
                             <div className="pt-1">
                               <a
-                                href={billingSubFilter === 'courses' ? '/learn' : '/business-growth-consultation'}
+                                href={billingSubFilter === 'courses' ? '/learn' : billingSubFilter === 'resources' ? '/resources' : '/business-growth-consultation'}
                                 onClick={(e) => {
                                   e.preventDefault();
-                                  navigate(billingSubFilter === 'courses' ? '/learn' : '/business-growth-consultation');
+                                  navigate(billingSubFilter === 'courses' ? '/learn' : billingSubFilter === 'resources' ? '/resources' : '/business-growth-consultation');
                                 }}
                                 className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-[#FF6B00] text-white text-xs font-semibold transition-colors cursor-pointer inline-flex items-center gap-1.5"
                               >
-                                <span>{billingSubFilter === 'courses' ? 'Browse Masterclasses' : 'Book a Consultation'}</span>
+                                <span>{billingSubFilter === 'courses' ? 'Browse Masterclasses' : billingSubFilter === 'resources' ? 'Explore Resources' : 'Book a Consultation'}</span>
                                 <ArrowRight className="w-3.5 h-3.5" />
                               </a>
                             </div>
@@ -1219,6 +1240,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                                     const isFailed = p.status === 'failed';
                                     const isRefunded = p.status === 'refunded';
                                     const isCourse = p.itemType === 'course';
+                                    const isResource = p.itemType === 'resource';
 
                                     let formattedDate = 'Recent';
                                     try {
@@ -1238,7 +1260,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                                           {formattedDate}
                                         </td>
                                         <td className="py-4 px-4 font-medium text-slate-900 max-w-xs">
-                                          <div className="truncate font-semibold">{p.itemTitle || (isCourse ? 'Course Masterclass' : 'Consultation Session')}</div>
+                                          <div className="truncate font-semibold">{p.itemTitle || (isResource ? 'Digital Toolkit / Resource' : (isCourse ? 'Course Masterclass' : 'Consultation Session'))}</div>
                                           {p.razorpayOrderId && (
                                             <div className="text-[10px] font-mono text-slate-400 truncate">
                                               Order: {p.razorpayOrderId}
@@ -1249,9 +1271,11 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                                           <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider inline-flex items-center gap-1 ${
                                             isCourse
                                               ? 'bg-orange-50 text-[#FF6B00] border border-orange-200'
+                                              : isResource
+                                              ? 'bg-blue-50 text-[#2457D6] border border-blue-200'
                                               : 'bg-purple-50 text-purple-700 border border-purple-200'
                                           }`}>
-                                            {isCourse ? 'Course' : 'Consultation'}
+                                            {isCourse ? 'Course' : isResource ? 'Resource' : 'Consultation'}
                                           </span>
                                         </td>
                                         <td className="py-4 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
@@ -1363,6 +1387,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                               {displayedPayments.map((p) => {
                                 const isCaptured = p.status === 'captured';
                                 const isCourse = p.itemType === 'course';
+                                const isResource = p.itemType === 'resource';
                                 let formattedDate = 'Recent';
                                 try {
                                   const d = new Date(p.createdAt);
@@ -1385,12 +1410,12 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                                         <div className="flex items-center gap-2 mb-1">
                                           <span className="text-[10px] font-mono text-slate-500">{formattedDate}</span>
                                           <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider ${
-                                            isCourse ? 'bg-orange-50 text-[#FF6B00]' : 'bg-purple-50 text-purple-700'
+                                            isCourse ? 'bg-orange-50 text-[#FF6B00]' : isResource ? 'bg-blue-50 text-[#2457D6]' : 'bg-purple-50 text-purple-700'
                                           }`}>
-                                            {isCourse ? 'Course' : 'Consultation'}
+                                            {isCourse ? 'Course' : isResource ? 'Resource' : 'Consultation'}
                                           </span>
                                         </div>
-                                        <h4 className="text-sm font-bold text-slate-900">{p.itemTitle || (isCourse ? 'Course Masterclass' : 'Consultation Session')}</h4>
+                                        <h4 className="text-sm font-bold text-slate-900">{p.itemTitle || (isResource ? 'Digital Toolkit / Resource' : (isCourse ? 'Course Masterclass' : 'Consultation Session'))}</h4>
                                       </div>
                                       <span className="font-mono font-bold text-slate-900 text-sm">
                                         {p.currency || 'INR'} {p.amount.toLocaleString('en-IN')}

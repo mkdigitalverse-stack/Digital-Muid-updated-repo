@@ -15,11 +15,10 @@ import { injectSeoIntoHtml } from "./server/htmlSeoInjector.js";
 
 async function startServer() {
   const app = express();
-  const isProduction = process.env.NODE_ENV === "production";
-  const defaultPort = isProduction
-    ? (process.env.PORT || "8080")
-    : (process.env.DEFAULT_APP_PORT || "3000");
-  const PORT = parseInt(process.env.TEST_PORT || defaultPort, 10);
+  const portArgIndex = process.argv.indexOf("--port");
+  const cliPort = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? process.argv[portArgIndex + 1] : null;
+  // AI Studio environment routes reverse-proxy from 8080 to internal port 3000
+  const PORT = parseInt(process.env.TEST_PORT || cliPort || "3000", 10);
 
   // 1. Mount Razorpay Webhook endpoint with exact raw body handling BEFORE express.json()
   app.post(
@@ -165,13 +164,17 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
     if (isRazorpayConfigured()) {
       console.log("[Payment Gateway] Razorpay server credentials detected.");
     } else {
       console.log("[Payment Gateway] Razorpay server credentials not configured (development mode).");
     }
+  });
+
+  server.on("error", (err: any) => {
+    console.error("[Server Error]", err);
   });
 }
 

@@ -238,7 +238,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
 
   // Payment Ledger Filter & Search State
   const [paymentSearch, setPaymentSearch] = useState('');
-  const [paymentTypeFilter, setPaymentTypeFilter] = useState<'all' | 'course' | 'consultation'>('all');
+  const [paymentTypeFilter, setPaymentTypeFilter] = useState<'all' | 'course' | 'consultation' | 'resource'>('all');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<'all' | string>('all');
 
   // Bookings Filter & Search State
@@ -1379,7 +1379,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
           </div>
 
           {/* Metrics summary cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {(() => {
               const totalRevenue = adminPayments.reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
               const courseRevenue = adminPayments
@@ -1387,6 +1387,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
                 .reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
               const consultationRevenue = adminPayments
                 .filter((p) => p.itemType === 'consultation')
+                .reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
+              const resourceRevenue = adminPayments
+                .filter((p) => p.itemType === 'resource' || (p as any).itemType === 'resource')
                 .reduce((acc, p) => acc + (Number(p.amount) || 0), 0);
               return (
                 <>
@@ -1415,6 +1418,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
                       {adminPayments.filter((p) => p.itemType === 'consultation').length} advisory sessions
                     </div>
                   </div>
+                  <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 space-y-1">
+                    <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Download className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Resource Purchases</span>
+                    </div>
+                    <div className="text-2xl font-mono font-bold text-white">₹{resourceRevenue.toLocaleString('en-IN')}</div>
+                    <div className="text-[11px] text-slate-500 font-interface">
+                      {adminPayments.filter((p) => p.itemType === 'resource' || (p as any).itemType === 'resource').length} toolkits acquired
+                    </div>
+                  </div>
                 </>
               );
             })()}
@@ -1439,7 +1452,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
               {[
                 { id: 'all', label: `All (${adminPayments.length})` },
                 { id: 'course', label: `Courses (${adminPayments.filter((p) => p.itemType === 'course').length})` },
-                { id: 'consultation', label: `Consultations (${adminPayments.filter((p) => p.itemType === 'consultation').length})` }
+                { id: 'consultation', label: `Consultations (${adminPayments.filter((p) => p.itemType === 'consultation').length})` },
+                { id: 'resource', label: `Resources (${adminPayments.filter((p) => p.itemType === 'resource' || (p as any).itemType === 'resource').length})` }
               ].map((filterTab) => (
                 <button
                   key={filterTab.id}
@@ -1506,7 +1520,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
                           {formattedDate}
                         </td>
                         <td className="py-3.5 px-4 whitespace-nowrap">
-                          {isConsultation ? (
+                          {p.itemType === 'resource' || (p as any).itemType === 'resource' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold uppercase tracking-wider">
+                              <Download className="w-3 h-3" />
+                              <span>Resource</span>
+                            </span>
+                          ) : isConsultation ? (
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[10px] font-bold uppercase tracking-wider">
                               <Calendar className="w-3 h-3" />
                               <span>Consultation</span>
@@ -4273,6 +4292,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
                           <th className="py-3.5 px-4">Resource</th>
                           <th className="py-3.5 px-4">Type & Category</th>
                           <th className="py-3.5 px-4">Status</th>
+                          <th className="py-3.5 px-4">Access & Price</th>
                           <th className="py-3.5 px-4">Format & Downloads</th>
                           <th className="py-3.5 px-4 text-right">Actions</th>
                         </tr>
@@ -4341,6 +4361,23 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
                                   <span className={`w-1.5 h-1.5 rounded-full ${res.status === 'published' ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
                                   <span>{res.status === 'published' ? 'Published' : 'Draft'}</span>
                                 </button>
+                              </td>
+                              <td className="py-3.5 px-4 whitespace-nowrap">
+                                {res.accessType === 'paid' ? (
+                                  <div className="space-y-0.5">
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-amber-500/15 text-amber-300 font-bold border border-amber-500/30 text-[11px] font-mono">
+                                      Paid • ₹{res.price || 0}
+                                    </span>
+                                    <div className="text-[10px] text-slate-500">Requires checkout</div>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-0.5">
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 font-bold border border-emerald-500/30 text-[11px]">
+                                      Free • ₹0
+                                    </span>
+                                    <div className="text-[10px] text-slate-500">Direct / Lead Capture</div>
+                                  </div>
+                                )}
                               </td>
                               <td className="py-3.5 px-4 whitespace-nowrap text-slate-400 text-[11px]">
                                 <div className="space-y-0.5">
@@ -4450,9 +4487,20 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
                         </div>
 
                         <div className="flex items-center justify-between text-xs">
-                          <span className="px-2.5 py-0.5 rounded-md bg-amber-500/10 text-amber-300 font-semibold border border-amber-500/20">
-                            {res.category}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-2.5 py-0.5 rounded-md bg-amber-500/10 text-amber-300 font-semibold border border-amber-500/20">
+                              {res.category}
+                            </span>
+                            {res.accessType === 'paid' ? (
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 font-bold border border-emerald-500/30 text-[10px] font-mono">
+                                ₹{res.price || 0}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-md bg-blue-500/15 text-blue-400 font-bold border border-blue-500/30 text-[10px]">
+                                Free
+                              </span>
+                            )}
+                          </div>
                           {res.status === 'published' ? (
                             <span className="text-emerald-400 font-medium flex items-center gap-1">
                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>

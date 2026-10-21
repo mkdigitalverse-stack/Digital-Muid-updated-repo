@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Download, CheckCircle2, ArrowRight, ShieldCheck, X, ExternalLink, Search, Clock, Star, Loader2, Layers, Bookmark } from 'lucide-react';
+import { Download, CheckCircle2, ArrowRight, ShieldCheck, X, ExternalLink, Search, Clock, Star, Loader2, Layers, Bookmark, Lock, CreditCard } from 'lucide-react';
 import { Resource } from '../types';
 import { resourceService } from '../services/resourceService';
+import { paymentService } from '../services/paymentService';
 import { findFrameworksForResource } from '../utils/frameworkRelationships';
+import { loadRazorpayCheckoutScript, getClientRazorpayKeyId } from '../lib/razorpay';
 
 interface ResourcesPageProps {
   navigate: (path: string) => void;
@@ -20,6 +22,8 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
     resources,
     frameworks,
     recordResourceDownload,
+    hasPurchasedResource,
+    purchaseResource,
     notify,
     currentUser,
     userProfile,
@@ -31,6 +35,8 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
   const isAuthenticatedStudent = Boolean(currentUser && !isAdminAuthenticated);
 
   const [activeDownloadResource, setActiveDownloadResource] = useState<Resource | null>(null);
+  const [paidModalResource, setPaidModalResource] = useState<Resource | null>(null);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [name, setName] = useState('');
   const [mobile, setMobile] = useState('');
   const [email, setEmail] = useState('');
@@ -53,13 +59,18 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
     if (selectedResourceId) {
       const res = publishedResources.find((r) => r.id === selectedResourceId || r.slug === selectedResourceId);
       if (res) {
-        setActiveDownloadResource(res);
-        if (currentUser && !isAdminAuthenticated) {
-          setIsCompleted(true);
+        const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
+        if (isPaid && !hasPurchasedResource(res.id)) {
+          setPaidModalResource(res);
+        } else {
+          setActiveDownloadResource(res);
+          if (currentUser && !isAdminAuthenticated) {
+            setIsCompleted(true);
+          }
         }
       }
     }
-  }, [selectedResourceId, publishedResources, currentUser, isAdminAuthenticated]);
+  }, [selectedResourceId, publishedResources, currentUser, isAdminAuthenticated, hasPurchasedResource]);
 
   const handleToggleResourceBookmark = async (resourceId: string) => {
     if (!currentUser) {
@@ -71,8 +82,21 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
   };
 
   const handleDownloadClick = async (res: Resource) => {
-    // Authenticated students bypass the public lead-capture form and directly access/deliver the resource
-    if (isAuthenticatedStudent) {
+    const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
+
+    // 1. Paid resource protection: require payment before granting access
+    if (isPaid && !hasPurchasedResource(res.id)) {
+      setPaidModalResource(res);
+      setName(userProfile?.fullName || '');
+      setEmail(currentUser?.email || '');
+      setMobile(userProfile?.phone || '');
+      setProfession(userProfile?.title || '');
+      setFormError(null);
+      return;
+    }
+
+    // 2. Either free or already purchased:
+    if (isAuthenticatedStudent || hasPurchasedResource(res.id)) {
       setActiveDownloadResource(res);
       setIsCompleted(true);
       setFormError(null);
@@ -80,26 +104,29 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
       setIsDownloading(true);
 
       try {
-        // Record download in CRM/history asynchronously without blocking
         recordResourceDownload(
           res.id,
-          currentUser?.email || '',
-          userProfile?.fullName || 'Student',
-          userProfile?.phone || 'Student Member',
-          userProfile?.title || 'Student'
+          currentUser?.email || email || '',
+          userProfile?.fullName || name || 'Member',
+          userProfile?.phone || mobile || '',
+          userProfile?.title || profession || ''
         ).catch((err) => {
           console.warn('[ResourcesPage] Could not auto-record student download:', err);
         });
 
-        const deliveryRes = await resourceService.deliverResource(res);
+        const isEntitled = res.accessType !== 'paid' && res.access_type !== 'paid'
+          ? true
+          : hasPurchasedResource(res.id);
+
+        const deliveryRes = await resourceService.deliverResource(res, { isAuthorized: isEntitled });
         if (!deliveryRes.success) {
           setDownloadError(deliveryRes.error || "We're unable to open this resource right now. Please try again.");
           notify(deliveryRes.error || "Unable to open resource", "error");
         } else {
-          notify(`Student Access: Delivering ${res.title || res.name || 'resource'}...`, "success");
+          notify(`Access granted: Delivering ${res.title || res.name || 'resource'}...`, "success");
         }
       } catch (err: any) {
-        console.error('[ResourcesPage] Error delivering resource to student:', err);
+        console.error('[ResourcesPage] Error delivering resource:', err);
         setDownloadError("We're unable to open this resource right now. Please try again.");
       } finally {
         setIsDownloading(false);
@@ -107,11 +134,127 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
       return;
     }
 
-    // Anonymous visitors keep the existing lead-capture flow unchanged
+    // 3. Anonymous visitors accessing free resources:
     setActiveDownloadResource(res);
     setIsCompleted(false);
     setFormError(null);
     setDownloadError(null);
+  };
+
+  const handlePaidCheckout = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paidModalResource) return;
+
+    if (!email.trim() || !email.includes('@')) {
+      setFormError('Please enter a valid email address.');
+      return;
+    }
+    if (!name.trim()) {
+      setFormError('Please enter your full name.');
+      return;
+    }
+
+    setIsProcessingPayment(true);
+    setFormError(null);
+
+    try {
+      // 1. Authoritative server-side Razorpay order creation (strict server price)
+      const orderResult = await paymentService.createResourceOrder(paidModalResource.id, {
+        name: name.trim(),
+        email: email.trim(),
+        phone: mobile.trim()
+      });
+
+      if (!orderResult.success || !orderResult.orderId) {
+        const errMsg = orderResult.error || 'Failed to initialize payment order with server. Please try again.';
+        setFormError(errMsg);
+        notify(errMsg, 'error');
+        setIsProcessingPayment(false);
+        return;
+      }
+
+      // 2. Load Razorpay Checkout SDK
+      const scriptLoaded = await loadRazorpayCheckoutScript();
+      const clientKey = orderResult.keyId || getClientRazorpayKeyId();
+
+      if (!scriptLoaded || typeof window.Razorpay !== 'function' || !clientKey) {
+        const errMsg = 'Payment gateway interface failed to load. Please check your network connection and retry.';
+        setFormError(errMsg);
+        notify(errMsg, 'error');
+        setIsProcessingPayment(false);
+        return;
+      }
+
+      const options = {
+        key: clientKey,
+        order_id: orderResult.orderId,
+        amount: orderResult.amount,
+        currency: orderResult.currency || 'INR',
+        name: 'Digital MUID',
+        description: `Resource: ${paidModalResource.title || paidModalResource.name}`,
+        prefill: {
+          name: name.trim(),
+          email: email.trim(),
+          contact: mobile.trim()
+        },
+        theme: {
+          color: '#FF6B00'
+        },
+        handler: async (response: any) => {
+          setIsProcessingPayment(true);
+          try {
+            // 3. Cryptographic server-side HMAC-SHA256 signature verification & fulfillment
+            const verifyResult = await paymentService.verifyResourcePayment({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              resourceId: paidModalResource.id,
+              customerDetails: {
+                name: name.trim(),
+                email: email.trim(),
+                phone: mobile.trim(),
+                profession: profession.trim()
+              }
+            });
+
+            if (!verifyResult.success || !verifyResult.verified) {
+              const verifyErrMsg = verifyResult.error || 'Payment signature verification failed on server.';
+              setFormError(verifyErrMsg);
+              notify(verifyErrMsg, 'error');
+              return;
+            }
+
+            // 4. Verification successful: persist purchase and deliver resource
+            await purchaseResource(paidModalResource, response.razorpay_payment_id, response.razorpay_order_id);
+            const unlocked = paidModalResource;
+            setPaidModalResource(null);
+            setActiveDownloadResource(unlocked);
+            setIsCompleted(true);
+            await resourceService.deliverResource(unlocked, { isAuthorized: true });
+            notify(`Payment verified! Access granted to ${unlocked.title || unlocked.name}.`, 'success');
+          } catch (vErr: any) {
+            console.error('[ResourcesPage] Error verifying resource payment:', vErr);
+            setFormError(vErr?.message || 'Payment verification failed on server. Please contact support.');
+            notify('Payment verification failed on server.', 'error');
+          } finally {
+            setIsProcessingPayment(false);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setIsProcessingPayment(false);
+          }
+        }
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+    } catch (err: any) {
+      console.error('[ResourcesPage] Error processing resource payment:', err);
+      setFormError(err?.message || 'Payment processing failed. Please try again.');
+    } finally {
+      setIsProcessingPayment(false);
+    }
   };
 
   const handleModalClose = () => {
@@ -128,7 +271,10 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
     setDownloadError(null);
 
     try {
-      const res = await resourceService.deliverResource(activeDownloadResource);
+      const isEntitled = activeDownloadResource.accessType !== 'paid' && activeDownloadResource.access_type !== 'paid'
+        ? true
+        : hasPurchasedResource(activeDownloadResource.id);
+      const res = await resourceService.deliverResource(activeDownloadResource, { isAuthorized: isEntitled });
       if (!res.success) {
         setDownloadError(res.error || "We're unable to open this resource right now. Please try again.");
       }
@@ -297,9 +443,23 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                   )}
 
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono font-bold text-amber-800 bg-amber-50 px-2.5 py-1 rounded border border-amber-200 uppercase tracking-wider">
-                      {resType}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs font-mono font-bold text-amber-800 bg-amber-50 px-2.5 py-1 rounded border border-amber-200 uppercase tracking-wider">
+                        {resType}
+                      </span>
+                      {(() => {
+                        const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
+                        return isPaid ? (
+                          <span className="text-xs font-mono font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200">
+                            Paid • ₹{res.price}
+                          </span>
+                        ) : (
+                          <span className="text-xs font-mono font-bold text-blue-800 bg-blue-50 px-2.5 py-1 rounded border border-blue-200">
+                            Free • ₹0
+                          </span>
+                        );
+                      })()}
+                    </div>
                     <div className="flex items-center gap-2 text-xs text-slate-500 font-mono font-medium">
                       {res.readingTimeMinutes && (
                         <span className="flex items-center gap-1">
@@ -358,18 +518,42 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2 pt-1">
-                  <button
-                    id={`download-btn-${res.slug}`}
-                    onClick={() => handleDownloadClick(res)}
-                    className="flex-1 py-3 rounded-xl bg-slate-900 hover:bg-amber-600 text-white font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>
-                      {isAuthenticatedStudent
-                        ? (res.externalUrl ? '1-Click Student Access' : `Instant Download (${fileMeta})`)
-                        : (res.externalUrl ? 'Access Toolkit' : `Download Free (${fileMeta})`)}
-                    </span>
-                  </button>
+                  {(() => {
+                    const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
+                    const isPurchased = hasPurchasedResource(res.id);
+
+                    return (
+                      <button
+                        id={`download-btn-${res.slug}`}
+                        onClick={() => handleDownloadClick(res)}
+                        className={`flex-1 py-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs ${
+                          isPaid && !isPurchased
+                            ? 'bg-[#FF6B00] hover:bg-[#FF7A1A] text-white shadow-[#FF6B00]/20'
+                            : isPurchased && isPaid
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                            : 'bg-slate-900 hover:bg-amber-600 text-white'
+                        }`}
+                      >
+                        {isPaid && !isPurchased ? (
+                          <>
+                            <Lock className="w-4 h-4" />
+                            <span>Unlock Toolkit • ₹{res.price}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-4 h-4" />
+                            <span>
+                              {isPaid && isPurchased
+                                ? 'Instant Download (Purchased)'
+                                : isAuthenticatedStudent
+                                ? (res.externalUrl ? '1-Click Student Access' : `Instant Download (${fileMeta})`)
+                                : (res.externalUrl ? 'Access Toolkit' : `Download Free (${fileMeta})`)}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    );
+                  })()}
 
                   <button
                     id={`bookmark-resource-${res.id}`}
@@ -611,6 +795,125 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Paid Resource Checkout Modal */}
+      {paidModalResource && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            <button
+              onClick={() => {
+                setPaidModalResource(null);
+                setFormError(null);
+              }}
+              className="absolute top-5 right-5 text-slate-400 hover:text-slate-900 p-1 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <form onSubmit={handlePaidCheckout} className="space-y-5">
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-700 text-[11px] font-bold uppercase tracking-wider font-interface">
+                  <Lock className="w-3.5 h-3.5 text-amber-600" /> Premium Paid Resource
+                </div>
+                <h3 className="text-2xl font-display font-bold text-slate-900">
+                  {paidModalResource.title || paidModalResource.name}
+                </h3>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  {paidModalResource.description}
+                </p>
+              </div>
+
+              {/* Price & Guarantee Box */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                <div>
+                  <span className="text-xs text-slate-500 font-interface">One-time Investment</span>
+                  <div className="text-2xl font-display font-bold text-slate-900">
+                    ₹{paidModalResource.price || 0}
+                    <span className="text-xs text-slate-500 font-normal ml-1.5">INR</span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded border border-emerald-200">
+                    Lifetime Access
+                  </span>
+                  <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1 justify-end font-medium">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Instant Delivery</span>
+                  </div>
+                </div>
+              </div>
+
+              {formError && (
+                <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+                  {formError}
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs text-slate-700 font-semibold block mb-1">Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Rahul Sharma"
+                    className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-700 font-semibold block mb-1">Email Address *</label>
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="rahul@company.com"
+                      className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-700 font-semibold block mb-1">WhatsApp / Phone</label>
+                    <input
+                      type="tel"
+                      value={mobile}
+                      onChange={(e) => setMobile(e.target.value)}
+                      placeholder="+91 98765 43210"
+                      className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={isProcessingPayment}
+                  className="w-full py-4 rounded-xl bg-[#FF6B00] hover:bg-[#FF7A1A] text-white font-bold text-sm tracking-wide shadow-lg shadow-[#FF6B00]/25 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                >
+                  {isProcessingPayment ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>INITIALIZING SECURE CHECKOUT...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="w-4 h-4" />
+                      <span>PAY ₹{paidModalResource.price || 0} &amp; UNLOCK ACCESS</span>
+                    </>
+                  )}
+                </button>
+                <div className="flex items-center justify-center gap-2 mt-2 text-[10px] text-slate-400">
+                  <ShieldCheck className="w-3 h-3 text-slate-400" />
+                  <span>Secure 256-bit encrypted transaction • Recorded in student ledger</span>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}

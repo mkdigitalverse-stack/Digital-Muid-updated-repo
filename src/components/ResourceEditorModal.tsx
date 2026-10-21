@@ -22,7 +22,8 @@ import {
   Link2,
   Layers,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  ShieldCheck
 } from 'lucide-react';
 import { Resource, ResourceType } from '../types';
 import { slugify } from '../services/articleService';
@@ -91,6 +92,10 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
   const [tags, setTags] = useState<string[]>([]);
   const [publishedAt, setPublishedAt] = useState('');
 
+  // Access Type & Pricing (Free / Paid)
+  const [accessType, setAccessType] = useState<'free' | 'paid'>('free');
+  const [price, setPrice] = useState<number | ''>(0);
+
   // SEO State
   const [isSeoOpen, setIsSeoOpen] = useState(false);
   const [seoTitle, setSeoTitle] = useState('');
@@ -136,6 +141,9 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
         );
         setSeoTitle(initialResource.seoTitle || '');
         setSeoDescription(initialResource.seoDescription || '');
+        const isPaid = (initialResource.accessType || initialResource.access_type) === 'paid';
+        setAccessType(isPaid ? 'paid' : 'free');
+        setPrice(typeof initialResource.price === 'number' ? initialResource.price : (isPaid ? 499 : 0));
         setActiveDeliveryTab(initialResource.externalUrl && !initialResource.fileUrl ? 'external' : 'file');
       } else {
         // Defaults for new resource
@@ -157,6 +165,8 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
         setPublishedAt(new Date().toISOString().split('T')[0]);
         setSeoTitle('');
         setSeoDescription('');
+        setAccessType('free');
+        setPrice(0);
         setActiveDeliveryTab('file');
       }
       setUploadNotice(null);
@@ -306,7 +316,11 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
       featured: isFeatured,
       publishedAt: publishedAt || undefined,
       seoTitle: seoTitle.trim() || undefined,
-      seoDescription: seoDescription.trim() || undefined
+      seoDescription: seoDescription.trim() || undefined,
+      accessType,
+      access_type: accessType,
+      price: accessType === 'paid' ? (typeof price === 'number' ? Math.max(0, price) : 0) : 0,
+      currency: 'INR'
     };
   };
 
@@ -321,6 +335,10 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
   const handlePublish = async () => {
     if (!title.trim()) {
       alert('Please provide a title for the resource.');
+      return;
+    }
+    if (accessType === 'paid' && (typeof price !== 'number' || price <= 0)) {
+      alert('Please set a valid price (greater than ₹0) for paid resources before publishing.');
       return;
     }
     await onSave(buildPayload(), 'published');
@@ -459,6 +477,106 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
                     ))}
                   </datalist>
                 </div>
+              </div>
+
+              {/* Resource Access Type (Free vs Paid) */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-amber-400" />
+                    Resource Access Type
+                  </label>
+                  <span className="text-[10px] text-slate-400">
+                    {accessType === 'free' ? 'Public / Lead capture access' : 'Gated behind paid transaction'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAccessType('free');
+                      setPrice(0);
+                    }}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                      accessType === 'free'
+                        ? 'bg-emerald-500/10 border-emerald-500/40 text-white shadow-sm'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full border mt-0.5 flex items-center justify-center shrink-0 ${
+                      accessType === 'free' ? 'border-emerald-400 bg-emerald-400' : 'border-slate-600'
+                    }`}>
+                      {accessType === 'free' && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <span>Free</span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-bold">₹0</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5 leading-snug">
+                        Set price to ₹0. Accessible without payment via standard lead capture or 1-click student delivery.
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAccessType('paid');
+                      if (typeof price !== 'number' || price <= 0) {
+                        setPrice(499);
+                      }
+                    }}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-2.5 ${
+                      accessType === 'paid'
+                        ? 'bg-amber-500/10 border-amber-500/40 text-white shadow-sm'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded-full border mt-0.5 flex items-center justify-center shrink-0 ${
+                      accessType === 'paid' ? 'border-amber-400 bg-amber-400' : 'border-slate-600'
+                    }`}>
+                      {accessType === 'paid' && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <span>Paid</span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-bold">Paid</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5 leading-snug">
+                        Requires verified payment before unlocking. Automatically recorded in purchase ledger.
+                      </div>
+                    </div>
+                  </button>
+                </div>
+
+                {/* Paid Price Setting Input */}
+                {accessType === 'paid' && (
+                  <div className="pt-2.5 border-t border-slate-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-amber-300">
+                        Resource Price (₹ INR)
+                      </label>
+                      <p className="text-[10px] text-slate-400">
+                        Set the price in ₹. Unpaid users cannot access protected content without completing checkout.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 w-full sm:w-44">
+                      <span className="text-amber-400 font-bold font-mono text-xs">₹</span>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={price}
+                        onChange={(e) => setPrice(e.target.value === '' ? '' : Math.max(0, parseInt(e.target.value, 10) || 0))}
+                        placeholder="499"
+                        className="w-full bg-transparent text-white font-mono text-sm font-bold focus:outline-none"
+                      />
+                      <span className="text-slate-500 text-[10px] uppercase font-mono">INR</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Description */}
@@ -875,9 +993,20 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
 
                   {/* Category & Status */}
                   <div className="flex items-center justify-between text-xs">
-                    <span className="px-2.5 py-0.5 rounded-md bg-amber-500/10 text-amber-300 font-semibold border border-amber-500/20">
-                      {category}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="px-2.5 py-0.5 rounded-md bg-amber-500/10 text-amber-300 font-semibold border border-amber-500/20">
+                        {category}
+                      </span>
+                      {accessType === 'paid' ? (
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 font-bold border border-emerald-500/30 text-[10px] font-mono">
+                          ₹{price || 0}
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-md bg-blue-500/15 text-blue-400 font-bold border border-blue-500/30 text-[10px]">
+                          Free
+                        </span>
+                      )}
+                    </div>
                     <span className="text-slate-400 text-[11px] flex items-center gap-1">
                       <Clock className="w-3 h-3" />
                       {readingTimeMinutes ? `${readingTimeMinutes} min` : '10 min'}
@@ -915,7 +1044,7 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
                       className="px-3.5 py-1.5 rounded-xl bg-amber-500 text-slate-950 text-xs font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/20"
                     >
                       <Download className="w-3.5 h-3.5" />
-                      <span>{externalUrl ? 'Access Resource' : 'Download Free'}</span>
+                      <span>{accessType === 'paid' ? `Buy Now (₹${price || 0})` : (externalUrl ? 'Access Resource' : 'Download Free')}</span>
                     </button>
                   </div>
                 </div>

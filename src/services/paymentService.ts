@@ -4,7 +4,9 @@ import {
   CreateCourseOrderResult,
   VerifyCoursePaymentResult,
   CreateConsultationOrderResult,
-  VerifyConsultationPaymentResult
+  VerifyConsultationPaymentResult,
+  CreateResourceOrderResult,
+  VerifyResourcePaymentResult
 } from '../types';
 
 /**
@@ -280,5 +282,85 @@ export const paymentService = {
         error: err?.message || 'Network error while verifying consultation payment with server.'
       };
     }
+  },
+
+  /**
+   * Requests server-side Razorpay order creation for a paid digital resource.
+   * Price is read strictly server-side from public.resources (authoritative).
+   */
+  async createResourceOrder(resourceId: string, customerDetails?: {
+    name?: string;
+    email?: string;
+    phone?: string;
+  }): Promise<CreateResourceOrderResult> {
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+
+      if (isSupabaseConfigured()) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers.Authorization = `Bearer ${session.access_token}`;
+        }
+      }
+
+      const response = await fetch('/api/payments/create-resource-order', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ resourceId, customerDetails })
+      });
+
+      const result: CreateResourceOrderResult = await response.json();
+      return result;
+    } catch (err: any) {
+      console.error('[PaymentService] Error creating resource order:', err);
+      return {
+        success: false,
+        error: err?.message || 'Failed to connect to resource order service.'
+      };
+    }
+  },
+
+  /**
+   * Cryptographically verifies a completed Razorpay payment for a paid resource.
+   * Records purchase in public.resource_purchases and payment in public.payments.
+   */
+  async verifyResourcePayment(params: {
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+    resourceId: string;
+    customerDetails?: any;
+  }): Promise<VerifyResourcePaymentResult> {
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+
+      if (isSupabaseConfigured()) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers.Authorization = `Bearer ${session.access_token}`;
+        }
+      }
+
+      const response = await fetch('/api/payments/verify-resource-payment', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(params)
+      });
+
+      const result: VerifyResourcePaymentResult = await response.json();
+      return result;
+    } catch (err: any) {
+      console.error('[PaymentService] Error verifying resource payment:', err);
+      return {
+        success: false,
+        verified: false,
+        error: err?.message || 'Network error while verifying resource payment with server.'
+      };
+    }
   }
 };
+

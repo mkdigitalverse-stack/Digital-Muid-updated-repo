@@ -66,6 +66,7 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
     studentCertificates,
     studentPayments,
     isPaymentsLoading,
+    hasPurchasedResource,
     notify
   } = useApp();
 
@@ -113,9 +114,18 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
   }, [studentEnrollments, resources, frameworks]);
 
   const handleDeliverToolkit = async (res: Resource) => {
+    const isPaid = (res.accessType === 'paid' || (res as any).access_type === 'paid') && (res.price || 0) > 0;
+    const isEntitled = !isPaid || hasPurchasedResource(res.id);
+
+    if (isPaid && !isEntitled) {
+      notify(`This is a paid toolkit (₹${res.price}). Please purchase it from the Resource Vault to unlock access.`, 'info');
+      navigate('/resources');
+      return;
+    }
+
     setDeliveringResourceId(res.id);
     try {
-      const deliveryRes = await resourceService.deliverResource(res);
+      const deliveryRes = await resourceService.deliverResource(res, { isAuthorized: true });
       if (!deliveryRes.success) {
         notify(deliveryRes.error || 'Unable to open toolkit.', 'error');
       } else {
@@ -1125,29 +1135,49 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
                       </h4>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleDeliverToolkit(res)}
-                      disabled={deliveringResourceId === res.id}
-                      className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-amber-600 text-white text-[11px] font-bold uppercase tracking-wider transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-60"
-                    >
-                      {deliveringResourceId === res.id ? (
-                        <>
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                          <span>Opening...</span>
-                        </>
-                      ) : res.externalUrl ? (
-                        <>
-                          <ExternalLink className="w-3 h-3" />
-                          <span>Open</span>
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-3 h-3" />
-                          <span>Download</span>
-                        </>
-                      )}
-                    </button>
+                    {(() => {
+                      const isPaid = (res.accessType === 'paid' || (res as any).access_type === 'paid') && (res.price || 0) > 0;
+                      const isEntitled = !isPaid || hasPurchasedResource(res.id);
+
+                      if (isPaid && !isEntitled) {
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => handleDeliverToolkit(res)}
+                            className="px-3 py-1.5 rounded-lg bg-[#FF6B00] hover:bg-[#FF7A1A] text-white text-[11px] font-bold uppercase tracking-wider transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                          >
+                            <Lock className="w-3 h-3" />
+                            <span>Unlock ₹{res.price}</span>
+                          </button>
+                        );
+                      }
+
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => handleDeliverToolkit(res)}
+                          disabled={deliveringResourceId === res.id}
+                          className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-amber-600 text-white text-[11px] font-bold uppercase tracking-wider transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-60"
+                        >
+                          {deliveringResourceId === res.id ? (
+                            <>
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span>Opening...</span>
+                            </>
+                          ) : res.externalUrl ? (
+                            <>
+                              <ExternalLink className="w-3 h-3" />
+                              <span>Open</span>
+                            </>
+                          ) : (
+                            <>
+                              <Download className="w-3 h-3" />
+                              <span>Download</span>
+                            </>
+                          )}
+                        </button>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>

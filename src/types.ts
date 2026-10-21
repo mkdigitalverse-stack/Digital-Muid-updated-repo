@@ -181,9 +181,31 @@ export interface Resource {
   leadCaptureRequired?: boolean;
   seoTitle?: string;
   seoDescription?: string;
+  accessType?: 'free' | 'paid';
+  access_type?: 'free' | 'paid'; // alias for DB compatibility
+  price?: number;
+  currency?: string;
   createdAt?: string;
   updatedAt?: string;
   downloadUrl?: string; // alias for UI compatibility
+}
+
+export interface ResourcePurchase {
+  id: string;
+  userId: string;
+  user_id?: string;
+  resourceId: string;
+  resource_id?: string;
+  razorpayOrderId?: string;
+  razorpay_order_id?: string;
+  razorpayPaymentId?: string;
+  razorpay_payment_id?: string;
+  amount: number;
+  currency: string;
+  status: 'active' | 'revoked';
+  purchasedAt: string;
+  purchased_at?: string;
+  createdAt?: string;
 }
 
 export interface CourseLesson {
@@ -689,6 +711,30 @@ export interface VerifyConsultationPaymentResult {
   warning?: string;
   error?: string;
 }
+
+export interface CreateResourceOrderResult {
+  success: boolean;
+  orderId?: string;
+  amount?: number;
+  currency?: string;
+  keyId?: string;
+  resourceId?: string;
+  resourceTitle?: string;
+  error?: string;
+}
+
+export interface VerifyResourcePaymentResult {
+  success: boolean;
+  verified?: boolean;
+  fulfilled?: boolean;
+  purchase?: ResourcePurchase;
+  paymentDbId?: string;
+  alreadyFulfilled?: boolean;
+  orderId?: string;
+  paymentId?: string;
+  error?: string;
+}
+
 
 
 

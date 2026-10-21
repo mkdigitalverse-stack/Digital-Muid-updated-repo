@@ -1,7 +1,26 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { Resource } from '../types';
+import { Resource, ResourcePurchase } from '../types';
 import { slugify } from './articleService';
 import { generateResourcePdfBlob } from '../utils/pdfGenerator';
+
+/**
+ * Transforms a raw row from public.resource_purchases into a domain ResourcePurchase object.
+ */
+export const mapDbRowToResourcePurchase = (row: any): ResourcePurchase => ({
+  id: String(row.id),
+  userId: String(row.user_id || row.userId || ''),
+  user_id: String(row.user_id || row.userId || ''),
+  resourceId: String(row.resource_id || row.resourceId || ''),
+  resource_id: String(row.resource_id || row.resourceId || ''),
+  razorpayOrderId: row.razorpay_order_id || row.razorpayOrderId || undefined,
+  razorpay_order_id: row.razorpay_order_id || row.razorpayOrderId || undefined,
+  razorpayPaymentId: row.razorpay_payment_id || row.razorpayPaymentId || undefined,
+  razorpay_payment_id: row.razorpay_payment_id || row.razorpayPaymentId || undefined,
+  amount: typeof row.amount === 'number' ? row.amount : parseFloat(row.amount || '0') || 0,
+  currency: row.currency || 'INR',
+  status: (row.status || 'active') as 'active' | 'revoked',
+  purchasedAt: String(row.purchased_at || row.purchasedAt || row.created_at || new Date().toISOString())
+});
 
 /**
  * Transforms a Supabase database row from public.resources into an application Resource object.
@@ -49,6 +68,10 @@ export const mapDbRowToResource = (row: any): Resource => {
     leadCaptureRequired: row.lead_capture_required !== undefined ? Boolean(row.lead_capture_required) : true,
     seoTitle: row.seo_title || row.seoTitle || undefined,
     seoDescription: row.seo_description || row.seoDescription || undefined,
+    accessType: (row.access_type || row.accessType || 'free') as 'free' | 'paid',
+    access_type: (row.access_type || row.accessType || 'free') as 'free' | 'paid',
+    price: typeof row.price === 'number' ? row.price : (parseFloat(row.price || '0') || 0),
+    currency: row.currency || 'INR',
     createdAt: String(row.created_at || row.createdAt || new Date().toISOString()),
     updatedAt: String(row.updated_at || row.updatedAt || new Date().toISOString())
   };
@@ -144,6 +167,19 @@ export const mapResourceToDbPayload = (r: Partial<Resource>): Record<string, any
 
   if (r.seoDescription !== undefined) {
     payload.seo_description = r.seoDescription ? r.seoDescription.trim() : null;
+  }
+
+  if (r.accessType !== undefined || r.access_type !== undefined) {
+    const at = (r.accessType || r.access_type || 'free').toLowerCase();
+    payload.access_type = at === 'paid' ? 'paid' : 'free';
+  }
+
+  if (r.price !== undefined) {
+    payload.price = typeof r.price === 'number' ? Math.max(0, r.price) : 0;
+  }
+
+  if (r.currency !== undefined) {
+    payload.currency = r.currency || 'INR';
   }
 
   payload.updated_at = new Date().toISOString();
@@ -482,16 +518,29 @@ export const resourceService = {
 
   /**
    * Safely delivers/downloads a resource asset to the client without React Router navigation.
+   * Enforces payment verification for paid resources before allowing download or PDF generation.
    * Handles:
    * 1. External URLs (Google Drive, Dropbox, Notion, GitHub, etc.)
    * 2. Supabase Storage URLs (public and signed URLs)
    * 3. Static server assets (/downloads/*.pdf)
    * 4. Reliable Client-Side standard PDF generation fallback
    */
-  async deliverResource(resource: Resource): Promise<{ success: boolean; error?: string }> {
+  async deliverResource(
+    resource: Resource,
+    options?: { isAuthorized?: boolean }
+  ): Promise<{ success: boolean; error?: string }> {
     if (!resource) {
       console.error('[Resource Delivery Error] No resource object provided');
       return { success: false, error: 'This resource is temporarily unavailable. Please try again later.' };
+    }
+
+    const isPaid = (resource.accessType === 'paid' || (resource as any).access_type === 'paid') && (resource.price || 0) > 0;
+    if (isPaid && !options?.isAuthorized) {
+      console.warn(`[Resource Delivery Guard] Unauthorized delivery attempt for paid resource: ${resource.id}`);
+      return {
+        success: false,
+        error: 'This is a paid resource. Valid payment verification is required to download or access this content.'
+      };
     }
 
     const externalUrl = resource.externalUrl?.trim() || null;
@@ -769,5 +818,66 @@ export const resourceService = {
       `error code: ${diag.errorCode || 'none'}\n` +
       `error message: ${diag.errorMessage || 'none'}`
     );
+  },
+
+  /**
+   * Fetches verified resource purchases for the currently authenticated student from Supabase.
+   */
+  async fetchMyPurchases(): Promise<{ data: ResourcePurchase[]; error: any }> {
+    try {
+      if (!isSupabaseConfigured()) {
+        return { data: [], error: null };
+      }
+
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        return { data: [], error: authError || new Error('User is not authenticated') };
+      }
+
+      const { data, error } = await supabase
+        .from('resource_purchases')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .order('purchased_at', { ascending: false });
+
+      if (error) {
+        console.warn('[ResourceService] Notice fetching student resource purchases:', error);
+        return { data: [], error };
+      }
+
+      const purchases = (data || []).map(mapDbRowToResourcePurchase);
+      return { data: purchases, error: null };
+    } catch (err: any) {
+      console.error('[ResourceService] Unexpected exception fetching student purchases:', err);
+      return { data: [], error: err };
+    }
+  },
+
+  /**
+   * Fetches all resource purchases for authenticated administrators.
+   */
+  async fetchAllPurchasesForAdmin(): Promise<{ data: ResourcePurchase[]; error: any }> {
+    try {
+      if (!isSupabaseConfigured()) {
+        return { data: [], error: null };
+      }
+
+      const { data, error } = await supabase
+        .from('resource_purchases')
+        .select('*')
+        .order('purchased_at', { ascending: false });
+
+      if (error) {
+        console.warn('[ResourceService] Notice querying all resource purchases for admin:', error);
+        return { data: [], error };
+      }
+
+      const purchases = (data || []).map(mapDbRowToResourcePurchase);
+      return { data: purchases, error: null };
+    } catch (err: any) {
+      console.error('[ResourceService] Exception fetching admin purchases:', err);
+      return { data: [], error: err };
+    }
   }
 };

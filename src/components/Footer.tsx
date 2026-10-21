@@ -318,11 +318,6 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
                     Contact
                   </a>
                 </li>
-                <li>
-                  <a href="/admin" onClick={(e) => { e.preventDefault(); handleNav('/admin'); }} className="text-white/40 hover:text-white text-xs flex items-center gap-1 pt-2 cursor-pointer">
-                    <ShieldCheck className="w-3 h-3" /> Admin Center
-                  </a>
-                </li>
               </ul>
             </div>
           </div>

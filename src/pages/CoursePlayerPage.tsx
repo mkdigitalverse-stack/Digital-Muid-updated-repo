@@ -112,7 +112,7 @@ export const CoursePlayerPage: React.FC<CoursePlayerPageProps> = ({ slug, naviga
   const handleDeliverCourseResource = async (res: Resource) => {
     setDownloadingResourceId(res.id);
     try {
-      const deliveryRes = await resourceService.deliverResource(res);
+      const deliveryRes = await resourceService.deliverResource(res, { isAuthorized: true });
       if (!deliveryRes.success) {
         notify(deliveryRes.error || 'Failed to open resource.', 'error');
       } else {

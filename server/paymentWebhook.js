@@ -4,7 +4,7 @@ import {
   getRazorpayClient
 } from "./razorpay.js";
 import { isValidUUID } from "./supabaseServer.js";
-import { fulfillCourseEnrollment } from "./paymentFulfillment.js";
+import { fulfillCourseEnrollment, fulfillResourcePurchase } from "./paymentFulfillment.js";
 
 /**
  * Handles incoming Razorpay webhook notifications.
@@ -100,21 +100,25 @@ export async function handleRazorpayWebhook(req, res) {
           `[Razorpay Webhook] Cryptographically verified event: ${event} (orderId: ${orderId}, paymentId: ${paymentId})`
         );
 
-        // Attempt asynchronous enrollment fulfillment (Phase 2K-E)
+        // Attempt asynchronous enrollment / resource fulfillment
         let fulfillmentOutcome = { fulfilled: false };
         try {
           const notes = paymentEntity?.notes || payload?.payload?.order?.entity?.notes || {};
           let courseId = notes.courseId;
+          let resourceId = notes.resourceId;
+          let itemType = notes.itemType;
           let userId = notes.userId;
 
           // If notes are not directly attached to payment entity, fetch order from gateway if orderId exists
-          if ((!courseId || !userId) && orderId) {
+          if ((!courseId && !resourceId) && orderId) {
             const razorpay = getRazorpayClient();
             if (razorpay) {
               try {
                 const fetchedOrder = await razorpay.orders.fetch(orderId);
                 if (fetchedOrder?.notes) {
                   courseId = courseId || fetchedOrder.notes.courseId;
+                  resourceId = resourceId || fetchedOrder.notes.resourceId;
+                  itemType = itemType || fetchedOrder.notes.itemType;
                   userId = userId || fetchedOrder.notes.userId;
                 }
               } catch (fetchErr) {
@@ -123,7 +127,33 @@ export async function handleRazorpayWebhook(req, res) {
             }
           }
 
-          if (
+          const amountInPaise =
+            paymentEntity?.amount || payload?.payload?.order?.entity?.amount || 0;
+          const amountInRupees = amountInPaise / 100;
+          const currency = (
+            paymentEntity?.currency ||
+            payload?.payload?.order?.entity?.currency ||
+            "INR"
+          ).toUpperCase();
+
+          if (resourceId || itemType === "resource") {
+            fulfillmentOutcome = await fulfillResourcePurchase({
+              userId,
+              resourceId,
+              amount: amountInRupees,
+              currency,
+              orderId,
+              paymentId,
+              customerName: notes.customerName || "",
+              customerEmail: notes.customerEmail || "",
+              customerPhone: notes.customerPhone || "",
+              resourceTitle: notes.resourceTitle || ""
+            });
+
+            console.log(
+              `[Razorpay Webhook] Resource fulfillment result for payment ${paymentId}: fulfilled=${fulfillmentOutcome.fulfilled}, already_fulfilled=${fulfillmentOutcome.already_fulfilled}`
+            );
+          } else if (
             courseId &&
             userId &&
             isValidUUID(courseId) &&
@@ -131,15 +161,6 @@ export async function handleRazorpayWebhook(req, res) {
             paymentId &&
             orderId
           ) {
-            const amountInPaise =
-              paymentEntity?.amount || payload?.payload?.order?.entity?.amount || 0;
-            const amountInRupees = amountInPaise / 100;
-            const currency = (
-              paymentEntity?.currency ||
-              payload?.payload?.order?.entity?.currency ||
-              "INR"
-            ).toUpperCase();
-
             fulfillmentOutcome = await fulfillCourseEnrollment({
               userId,
               courseId,
@@ -150,11 +171,11 @@ export async function handleRazorpayWebhook(req, res) {
             });
 
             console.log(
-              `[Razorpay Webhook] Fulfillment result for payment ${paymentId}: fulfilled=${fulfillmentOutcome.fulfilled}, already_fulfilled=${fulfillmentOutcome.already_fulfilled}`
+              `[Razorpay Webhook] Course fulfillment result for payment ${paymentId}: fulfilled=${fulfillmentOutcome.fulfilled}, already_fulfilled=${fulfillmentOutcome.already_fulfilled}`
             );
           } else {
             console.warn(
-              `[Razorpay Webhook] Insufficient trusted metadata to auto-fulfill webhook event: courseId=${courseId}, userId=${userId}, paymentId=${paymentId}`
+              `[Razorpay Webhook] Insufficient trusted metadata to auto-fulfill webhook event: courseId=${courseId}, resourceId=${resourceId}, userId=${userId}, paymentId=${paymentId}`
             );
           }
         } catch (fErr) {

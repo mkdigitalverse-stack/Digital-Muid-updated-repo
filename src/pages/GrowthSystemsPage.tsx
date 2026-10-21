@@ -92,7 +92,7 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
   ];
 
   return (
-    <div className="min-h-screen bg-[#07111F] text-slate-100 selection:bg-[#FF6B00] selection:text-white">
+    <div className="min-h-screen bg-white selection:bg-[#FF6B00] selection:text-white">
       {/* Search Engine Optimization & Structured Data */}
       <SEOHead
         path="/services/growth-systems"
@@ -105,103 +105,106 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
       />
 
       {/* =========================================================================
-          SECTION 1 — THE PROOF HERO
+          SECTION 1 — THE PROOF HERO (Restrained Dark Section — 10% of page)
           Stark, center-aligned, technical aesthetic with generous whitespace
           ========================================================================= */}
-      <section
-        id="proof-hero"
-        className="relative pt-36 pb-20 sm:pt-44 sm:pb-28 lg:pt-48 lg:pb-32 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto text-center"
-      >
-        {/* Subtle radial glow */}
-        <div
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[650px] h-[350px] bg-[#1877F2]/10 blur-[130px] rounded-full pointer-events-none -z-10"
-          aria-hidden="true"
-        />
+      <div className="bg-[#07111F] text-slate-100 border-b border-slate-800 relative">
+        <section
+          id="proof-hero"
+          className="relative pt-36 pb-20 sm:pt-44 sm:pb-28 lg:pt-48 lg:pb-32 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto text-center"
+        >
+          {/* Subtle radial glow */}
+          <div
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[650px] h-[350px] bg-[#1877F2]/10 blur-[130px] rounded-full pointer-events-none -z-10"
+            aria-hidden="true"
+          />
 
-        <div className="space-y-8">
-          {/* Eyebrow */}
-          <div className="flex items-center justify-center">
-            <span className="text-[11px] sm:text-xs font-semibold uppercase tracking-[0.24em] text-[#FF6B00] font-interface">
-              STRATEGIC TEARDOWNS &amp; MARKET VALIDATION
-            </span>
+          <div className="space-y-8">
+            {/* Eyebrow */}
+            <div className="flex items-center justify-center">
+              <span className="text-[11px] sm:text-xs font-semibold uppercase tracking-[0.24em] text-[#FF6B00] font-interface">
+                STRATEGIC TEARDOWNS &amp; MARKET VALIDATION
+              </span>
+            </div>
+
+            {/* Main H1 */}
+            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-display font-bold tracking-tight text-white leading-[1.12] text-balance max-w-4xl mx-auto">
+              We do not sell claims. We engineer unit economics.
+            </h1>
+
+            {/* Subheadline */}
+            <p className="text-base sm:text-lg lg:text-xl text-slate-300 font-interface leading-relaxed max-w-2xl mx-auto font-light">
+              High-ticket growth is built on verifiable mechanics, not marketing hype. Explore our clinical teardowns, raw data deployments, and the frameworks we use to scale modern businesses.
+            </p>
+
+            {/* Button: Review the Teardowns */}
+            <div className="pt-4 flex justify-center">
+              <a
+                id="hero-review-teardowns-btn"
+                href="#operational-breakdowns"
+                onClick={(e) => {
+                  e.preventDefault();
+                  const target = document.getElementById('operational-breakdowns');
+                  if (target) {
+                    target.scrollIntoView({ behavior: 'smooth' });
+                  }
+                }}
+                className="px-8 py-4 rounded-xl bg-[#FF6B00] hover:bg-[#FF7A1A] text-white font-bold text-sm tracking-wide shadow-xl shadow-[#FF6B00]/25 transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 group active:scale-[0.98] font-interface"
+              >
+                <span>Review the Teardowns</span>
+                <ChevronDown className="w-4 h-4 group-hover:translate-y-0.5 transition-transform" />
+              </a>
+            </div>
           </div>
-
-          {/* Main H1 */}
-          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-display font-bold tracking-tight text-white leading-[1.12] text-balance max-w-4xl mx-auto">
-            We do not sell claims. We engineer unit economics.
-          </h1>
-
-          {/* Subheadline */}
-          <p className="text-base sm:text-lg lg:text-xl text-slate-300 font-interface leading-relaxed max-w-2xl mx-auto font-light">
-            High-ticket growth is built on verifiable mechanics, not marketing hype. Explore our clinical teardowns, raw data deployments, and the frameworks we use to scale modern businesses.
-          </p>
-
-          {/* Button: Review the Teardowns */}
-          <div className="pt-4 flex justify-center">
-            <a
-              id="hero-review-teardowns-btn"
-              href="#operational-breakdowns"
-              onClick={(e) => {
-                e.preventDefault();
-                const target = document.getElementById('operational-breakdowns');
-                if (target) {
-                  target.scrollIntoView({ behavior: 'smooth' });
-                }
-              }}
-              className="px-8 py-4 rounded-xl bg-[#FF6B00] hover:bg-[#FF7A1A] text-white font-bold text-sm tracking-wide shadow-xl shadow-[#FF6B00]/25 transition-all duration-200 cursor-pointer flex items-center justify-center gap-2 group active:scale-[0.98] font-interface"
-            >
-              <span>Review the Teardowns</span>
-              <ChevronDown className="w-4 h-4 group-hover:translate-y-0.5 transition-transform" />
-            </a>
-          </div>
-        </div>
-      </section>
+        </section>
+      </div>
 
       {/* =========================================================================
-          SECTION 2 — THE CLINICAL TEARDOWNS
+          SECTION 2 — THE CLINICAL TEARDOWNS (Light Section — 70% of page)
           Expansive, clickable case-study cards with Problem, Intervention, Outcome
           ========================================================================= */}
-      <section
-        id="operational-breakdowns"
-        className="scroll-mt-24 py-20 sm:py-28 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto border-t border-white/10"
-      >
-        <div className="space-y-4 mb-14 text-center">
-          <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FF6B00] font-interface">
-            CASE STUDY DOSSIERS
-          </span>
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white">
-            Operational Breakdowns
-          </h2>
-          <p className="text-sm sm:text-base text-slate-300 font-interface leading-relaxed max-w-2xl mx-auto font-light">
-            How we diagnose bottlenecks and deploy React/Node.js architecture and algorithmic media buying to fix them.
-          </p>
-        </div>
+      <div className="bg-white text-slate-900 border-b border-slate-200">
+        <section
+          id="operational-breakdowns"
+          className="scroll-mt-24 py-20 sm:py-28 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto"
+        >
+          <div className="space-y-4 mb-14 text-center">
+            <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FF6B00] font-interface">
+              CASE STUDY DOSSIERS
+            </span>
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-slate-900">
+              Operational Breakdowns
+            </h2>
+            <p className="text-sm sm:text-base text-slate-600 font-interface leading-relaxed max-w-2xl mx-auto">
+              How we diagnose bottlenecks and deploy React/Node.js architecture and algorithmic media buying to fix them.
+            </p>
+          </div>
 
         {/* Vertically Scrolling List of Expansive Cards */}
         <div className="space-y-8">
           {/* Case Study 1 — E-commerce / D2C */}
-          <div className="rounded-2xl bg-[#0B1526] border border-white/10 hover:border-white/20 transition-all p-6 sm:p-8 space-y-6 shadow-xl">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-white/10">
+          <div className="rounded-2xl bg-[#F8FAFC] border border-slate-200 hover:border-slate-300 transition-all p-6 sm:p-8 space-y-6 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
               <div className="space-y-1">
                 <div className="flex items-center gap-2.5">
                   <span className="px-2.5 py-0.5 rounded bg-[#FF6B00]/15 text-[#FF6B00] text-[10px] font-mono font-bold uppercase tracking-wider">
                     D2C / E-Commerce
                   </span>
-                  <span className="text-xs font-mono text-slate-400">Case ID: CS-D2C-01</span>
+                  <span className="text-xs font-mono text-slate-500">Case ID: CS-D2C-01</span>
                 </div>
-                <h3 className="text-xl sm:text-2xl font-display font-bold text-white">
+                <h3 className="text-xl sm:text-2xl font-display font-bold text-slate-900">
                   Fixing a 1.2% Conversion Rate for a D2C Brand.
                 </h3>
               </div>
 
               <div className="flex items-center gap-3">
-                <span className="text-emerald-400 text-xs font-mono bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20 font-bold">
+                <span className="text-emerald-700 text-xs font-mono bg-emerald-100 px-3 py-1.5 rounded-lg border border-emerald-200 font-bold">
                   3.4% CRO Achieved
                 </span>
                 <button
                   type="button"
                   onClick={() => toggleCaseStudy(1)}
-                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                  className="p-2 rounded-lg bg-slate-200/80 hover:bg-slate-300 text-slate-700 transition-colors cursor-pointer"
                   aria-expanded={expandedCaseStudy === 1}
                   aria-label="Toggle technical breakdown"
                 >
@@ -213,34 +216,34 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
             {/* Three Pillar Breakdown */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 font-interface">
               {/* Problem */}
-              <div className="space-y-2 p-4 rounded-xl bg-rose-950/20 border border-rose-500/20">
-                <div className="flex items-center gap-2 text-rose-400 text-xs font-bold uppercase tracking-wider">
-                  <AlertTriangle className="w-3.5 h-3.5" />
+              <div className="space-y-2 p-4 rounded-xl bg-rose-50 border border-rose-200">
+                <div className="flex items-center gap-2 text-rose-700 text-xs font-bold uppercase tracking-wider">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
                   <span>The Symptom</span>
                 </div>
-                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
                   High Meta Ads traffic, but the landing page was built on a bloated generic CMS causing 4-second load times.
                 </p>
               </div>
 
               {/* Intervention */}
-              <div className="space-y-2 p-4 rounded-xl bg-blue-950/20 border border-blue-500/20">
-                <div className="flex items-center gap-2 text-blue-400 text-xs font-bold uppercase tracking-wider">
-                  <Code2 className="w-3.5 h-3.5" />
+              <div className="space-y-2 p-4 rounded-xl bg-blue-50 border border-blue-200">
+                <div className="flex items-center gap-2 text-blue-700 text-xs font-bold uppercase tracking-wider">
+                  <Code2 className="w-3.5 h-3.5 text-blue-600" />
                   <span>The Intervention</span>
                 </div>
-                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
                   Hard-coded a custom React frontend. Re-mapped Meta pixel attribution via Google Tag Manager.
                 </p>
               </div>
 
               {/* Outcome */}
-              <div className="space-y-2 p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/20">
-                <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold uppercase tracking-wider">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
+              <div className="space-y-2 p-4 rounded-xl bg-emerald-50 border border-emerald-200">
+                <div className="flex items-center gap-2 text-emerald-700 text-xs font-bold uppercase tracking-wider">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                   <span>The Result</span>
                 </div>
-                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
                   Sub-second load times. Conversion rate lifted to 3.4%. CAC dropped by 38%.
                 </p>
               </div>
@@ -248,20 +251,20 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
 
             {/* Expanded Technical Deep-Dive */}
             {expandedCaseStudy === 1 && (
-              <div className="mt-4 pt-6 border-t border-white/10 space-y-4 animate-in fade-in duration-200">
-                <h4 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider">
+              <div className="mt-4 pt-6 border-t border-slate-200 space-y-4 animate-in fade-in duration-200">
+                <h4 className="text-xs font-mono font-bold text-slate-800 uppercase tracking-wider">
                   Engineered Execution Vectors:
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 font-mono text-xs">
-                  <div className="p-3.5 rounded-lg bg-black/40 border border-white/5 space-y-1">
+                  <div className="p-3.5 rounded-lg bg-white border border-slate-200 space-y-1">
                     <span className="text-[#FF6B00] font-semibold">// Frontend Performance</span>
-                    <p className="text-slate-400 font-interface">
+                    <p className="text-slate-600 font-interface">
                       Replaced 37 render-blocking plugins with zero-dependency React hydration. Dropped payload weight from 4.2 MB to 320 KB.
                     </p>
                   </div>
-                  <div className="p-3.5 rounded-lg bg-black/40 border border-white/5 space-y-1">
-                    <span className="text-blue-400 font-semibold">// Meta Pixel &amp; CAPI Attributions</span>
-                    <p className="text-slate-400 font-interface">
+                  <div className="p-3.5 rounded-lg bg-white border border-slate-200 space-y-1">
+                    <span className="text-blue-600 font-semibold">// Meta Pixel &amp; CAPI Attributions</span>
+                    <p className="text-slate-600 font-interface">
                       Deployed server-side conversion telemetry directly to Meta Graph API, capturing 28% previously lost purchase attribution signals.
                     </p>
                   </div>
@@ -271,28 +274,28 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
           </div>
 
           {/* Case Study 2 — B2B / Healthcare */}
-          <div className="rounded-2xl bg-[#0B1526] border border-white/10 hover:border-white/20 transition-all p-6 sm:p-8 space-y-6 shadow-xl">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-white/10">
+          <div className="rounded-2xl bg-[#F8FAFC] border border-slate-200 hover:border-slate-300 transition-all p-6 sm:p-8 space-y-6 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-200">
               <div className="space-y-1">
                 <div className="flex items-center gap-2.5">
-                  <span className="px-2.5 py-0.5 rounded bg-blue-500/15 text-blue-400 text-[10px] font-mono font-bold uppercase tracking-wider">
+                  <span className="px-2.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-mono font-bold uppercase tracking-wider">
                     B2B / Healthcare Clinic
                   </span>
-                  <span className="text-xs font-mono text-slate-400">Case ID: CS-MED-02</span>
+                  <span className="text-xs font-mono text-slate-500">Case ID: CS-MED-02</span>
                 </div>
-                <h3 className="text-xl sm:text-2xl font-display font-bold text-white">
+                <h3 className="text-xl sm:text-2xl font-display font-bold text-slate-900">
                   Automating Lead Triage &amp; Lowering CPL by 42%.
                 </h3>
               </div>
 
               <div className="flex items-center gap-3">
-                <span className="text-emerald-400 text-xs font-mono bg-emerald-500/10 px-3 py-1.5 rounded-lg border border-emerald-500/20 font-bold">
+                <span className="text-emerald-700 text-xs font-mono bg-emerald-100 px-3 py-1.5 rounded-lg border border-emerald-200 font-bold">
                   3.2x Pipeline Speed
                 </span>
                 <button
                   type="button"
                   onClick={() => toggleCaseStudy(2)}
-                  className="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                  className="p-2 rounded-lg bg-slate-200/80 hover:bg-slate-300 text-slate-700 transition-colors cursor-pointer"
                   aria-expanded={expandedCaseStudy === 2}
                   aria-label="Toggle technical breakdown"
                 >
@@ -304,34 +307,34 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
             {/* Three Pillar Breakdown */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 font-interface">
               {/* Problem */}
-              <div className="space-y-2 p-4 rounded-xl bg-rose-950/20 border border-rose-500/20">
-                <div className="flex items-center gap-2 text-rose-400 text-xs font-bold uppercase tracking-wider">
-                  <AlertTriangle className="w-3.5 h-3.5" />
+              <div className="space-y-2 p-4 rounded-xl bg-rose-50 border border-rose-200">
+                <div className="flex items-center gap-2 text-rose-700 text-xs font-bold uppercase tracking-wider">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
                   <span>The Symptom</span>
                 </div>
-                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
                   Clinic sales team wasting 20 hours a week calling unqualified leads from broad Google Ads.
                 </p>
               </div>
 
               {/* Intervention */}
-              <div className="space-y-2 p-4 rounded-xl bg-blue-950/20 border border-blue-500/20">
-                <div className="flex items-center gap-2 text-blue-400 text-xs font-bold uppercase tracking-wider">
-                  <Code2 className="w-3.5 h-3.5" />
+              <div className="space-y-2 p-4 rounded-xl bg-blue-50 border border-blue-200">
+                <div className="flex items-center gap-2 text-blue-700 text-xs font-bold uppercase tracking-wider">
+                  <Code2 className="w-3.5 h-3.5 text-blue-600" />
                   <span>The Intervention</span>
                 </div>
-                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
                   Built a multi-step qualification funnel in Node.js. Integrated AI CRM routing to instantly disqualify low-intent leads and push high-intent leads to WhatsApp.
                 </p>
               </div>
 
               {/* Outcome */}
-              <div className="space-y-2 p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/20">
-                <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold uppercase tracking-wider">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
+              <div className="space-y-2 p-4 rounded-xl bg-emerald-50 border border-emerald-200">
+                <div className="flex items-center gap-2 text-emerald-700 text-xs font-bold uppercase tracking-wider">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                   <span>The Result</span>
                 </div>
-                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
                   100% elimination of manual data entry. 3.2x increase in pipeline velocity.
                 </p>
               </div>
@@ -339,20 +342,20 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
 
             {/* Expanded Technical Deep-Dive */}
             {expandedCaseStudy === 2 && (
-              <div className="mt-4 pt-6 border-t border-white/10 space-y-4 animate-in fade-in duration-200">
-                <h4 className="text-xs font-mono font-bold text-slate-300 uppercase tracking-wider">
+              <div className="mt-4 pt-6 border-t border-slate-200 space-y-4 animate-in fade-in duration-200">
+                <h4 className="text-xs font-mono font-bold text-slate-800 uppercase tracking-wider">
                   Engineered Execution Vectors:
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 font-mono text-xs">
-                  <div className="p-3.5 rounded-lg bg-black/40 border border-white/5 space-y-1">
-                    <span className="text-emerald-400 font-semibold">// Node.js Intake Validation</span>
-                    <p className="text-slate-400 font-interface">
+                  <div className="p-3.5 rounded-lg bg-white border border-slate-200 space-y-1">
+                    <span className="text-emerald-700 font-semibold">// Node.js Intake Validation</span>
+                    <p className="text-slate-600 font-interface">
                       Custom qualification engine scoring budget, treatment urgency, and geographic location before recording data.
                     </p>
                   </div>
-                  <div className="p-3.5 rounded-lg bg-black/40 border border-white/5 space-y-1">
+                  <div className="p-3.5 rounded-lg bg-white border border-slate-200 space-y-1">
                     <span className="text-[#FF6B00] font-semibold">// WhatsApp Cloud API Instant Route</span>
-                    <p className="text-slate-400 font-interface">
+                    <p className="text-slate-600 font-interface">
                       Instant WhatsApp push for score &ge; 70 leads within 90 seconds, securing 74% consultation confirmation rates.
                     </p>
                   </div>
@@ -363,33 +366,35 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
         </div>
 
         {/* Truthful Case-Study Integrity Footnote */}
-        <div className="mt-8 p-4 rounded-xl bg-white/[0.03] border border-white/10 flex items-start gap-3 text-xs text-slate-400 font-interface">
+        <div className="mt-8 p-4 rounded-xl bg-slate-50 border border-slate-200 flex items-start gap-3 text-xs text-slate-600 font-interface">
           <ShieldCheck className="w-4 h-4 text-[#FF6B00] shrink-0 mt-0.5" />
           <p>
-            <strong className="text-slate-300">Case-Study Data Integrity:</strong> Operational figures represent real architectural deployments. Client identifiers and specific accounts are anonymized to protect proprietary commercial advantage and privacy. Outcomes measured across 90-day post-launch optimization windows.
+            <strong className="text-slate-800">Case-Study Data Integrity:</strong> Operational figures represent real architectural deployments. Client identifiers and specific accounts are anonymized to protect proprietary commercial advantage and privacy. Outcomes measured across 90-day post-launch optimization windows.
           </p>
         </div>
       </section>
+    </div>
 
       {/* =========================================================================
-          SECTION 3 — THE DATA ROOM
+          SECTION 3 — THE DATA ROOM (Light Neutral Section — 70% of page)
           Dense, responsive masonry-style grid with 4 underlying evidence items
           ========================================================================= */}
-      <section
-        id="data-room"
-        className="py-20 sm:py-28 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto border-t border-white/10 bg-[#060D18]"
-      >
-        <div className="max-w-3xl mx-auto text-center space-y-4 mb-16">
-          <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FF6B00] font-interface">
-            RAW ARCHITECTURAL EVIDENCE
-          </span>
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white">
-            The underlying mechanics.
-          </h2>
-          <p className="text-base sm:text-lg text-slate-300 font-interface leading-relaxed font-light">
-            Behind every high-converting growth engine is clean code, disciplined campaign structure, and automated logic.
-          </p>
-        </div>
+      <div className="bg-[#F8FAFC] text-slate-900 border-b border-slate-200">
+        <section
+          id="data-room"
+          className="py-20 sm:py-28 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto"
+        >
+          <div className="max-w-3xl mx-auto text-center space-y-4 mb-16">
+            <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FF6B00] font-interface">
+              RAW ARCHITECTURAL EVIDENCE
+            </span>
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-slate-900">
+              The underlying mechanics.
+            </h2>
+            <p className="text-base sm:text-lg text-slate-600 font-interface leading-relaxed">
+              Behind every high-converting growth engine is clean code, disciplined campaign structure, and automated logic.
+            </p>
+          </div>
 
         {/* 4-Item Responsive Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -587,26 +592,28 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
           </div>
         </div>
       </section>
+    </div>
 
       {/* =========================================================================
-          SECTION 4 — MARKET VALIDATION
+          SECTION 4 — MARKET VALIDATION (Blue Brand Section — 20% of page)
           Horizontal swipeable track + High-contrast testimonial block
           ========================================================================= */}
-      <section
-        id="market-validation"
-        className="py-20 sm:py-28 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto border-t border-white/10 bg-[#07111F]"
-      >
-        <div className="max-w-3xl mx-auto text-center space-y-4 mb-16">
-          <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FF6B00] font-interface">
-            AUTHENTIC OPERATOR ENDORSEMENTS
-          </span>
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white">
-            Validated by founders and operators.
-          </h2>
-          <p className="text-base sm:text-lg text-slate-300 font-interface leading-relaxed font-light">
-            Real outcomes from leadership teams who traded platform hacks for verifiable unit economics.
-          </p>
-        </div>
+      <div className="bg-gradient-to-b from-[#102A6B] via-[#0E245C] to-[#0A1A45] border-b border-blue-500/20 text-white">
+        <section
+          id="market-validation"
+          className="py-20 sm:py-28 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto"
+        >
+          <div className="max-w-3xl mx-auto text-center space-y-4 mb-16">
+            <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FF6B00] font-interface">
+              AUTHENTIC OPERATOR ENDORSEMENTS
+            </span>
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white">
+              Validated by founders and operators.
+            </h2>
+            <p className="text-base sm:text-lg text-blue-100 font-interface leading-relaxed font-light">
+              Real outcomes from leadership teams who traded platform hacks for verifiable unit economics.
+            </p>
+          </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
           {/* Left Column: High-Contrast Testimonial Text Block */}
@@ -689,44 +696,46 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
           </div>
         </div>
       </section>
+    </div>
 
       {/* =========================================================================
-          SECTION 5 — THE INTELLECTUAL PROPERTY MOAT
+          SECTION 5 — THE INTELLECTUAL PROPERTY MOAT (Light Section — 70% of page)
           Proprietary frameworks powering the results (3-column grid)
           ========================================================================= */}
-      <section
-        id="intellectual-property-moat"
-        className="py-20 sm:py-28 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto border-t border-white/10 bg-[#060D18] text-center"
-      >
-        <div className="max-w-3xl mx-auto space-y-4 mb-16">
-          <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FF6B00] font-interface">
-            OPERATING ARCHITECTURES
-          </span>
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white">
-            The frameworks powering the results.
-          </h2>
-          <p className="text-base sm:text-lg text-slate-300 font-interface leading-relaxed font-light">
-            We execute using proprietary models that simplify complex digital challenges into repeatable loops.
-          </p>
-        </div>
+      <div className="bg-white text-slate-900 border-b border-slate-200">
+        <section
+          id="intellectual-property-moat"
+          className="py-20 sm:py-28 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto text-center"
+        >
+          <div className="max-w-3xl mx-auto space-y-4 mb-16">
+            <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FF6B00] font-interface">
+              OPERATING ARCHITECTURES
+            </span>
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-slate-900">
+              The frameworks powering the results.
+            </h2>
+            <p className="text-base sm:text-lg text-slate-600 font-interface leading-relaxed">
+              We execute using proprietary models that simplify complex digital challenges into repeatable loops.
+            </p>
+          </div>
 
         {/* 3-Column Card Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 text-left">
           {/* Card 1 — The Digital Growth Stack™ */}
-          <div className="p-7 rounded-2xl bg-[#0A1322] border border-white/10 hover:border-[#FF6B00]/40 transition-all duration-200 flex flex-col justify-between group shadow-xl">
+          <div className="p-7 rounded-2xl bg-[#F8FAFC] border border-slate-200 hover:border-[#FF6B00]/40 transition-all duration-200 flex flex-col justify-between group shadow-xs hover:shadow-md">
             <div className="space-y-4">
-              <div className="w-10 h-10 rounded-xl bg-[#FF6B00]/10 border border-[#FF6B00]/20 flex items-center justify-center text-[#FF6B00]">
+              <div className="w-10 h-10 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center text-[#FF6B00]">
                 <Layers className="w-5 h-5" />
               </div>
-              <h3 className="text-xl font-display font-bold text-white group-hover:text-[#FF6B00] transition-colors">
+              <h3 className="text-xl font-display font-bold text-slate-900 group-hover:text-[#FF6B00] transition-colors">
                 The Digital Growth Stack™
               </h3>
-              <p className="text-sm text-slate-300 font-interface leading-relaxed font-light">
+              <p className="text-sm text-slate-600 font-interface leading-relaxed">
                 6-Stage integrated architecture for modern growth across Strategy, Visibility, Authority, Conversion, Automation, and Scale.
               </p>
             </div>
 
-            <div className="pt-6 border-t border-white/5 mt-6">
+            <div className="pt-6 border-t border-slate-200 mt-6">
               <a
                 href="/frameworks/digital-growth-stack"
                 onClick={(e) => {
@@ -743,20 +752,20 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
           </div>
 
           {/* Card 2 — AI Transformation Framework™ */}
-          <div className="p-7 rounded-2xl bg-[#0A1322] border border-white/10 hover:border-blue-500/40 transition-all duration-200 flex flex-col justify-between group shadow-xl">
+          <div className="p-7 rounded-2xl bg-[#F8FAFC] border border-slate-200 hover:border-blue-400 transition-all duration-200 flex flex-col justify-between group shadow-xs hover:shadow-md">
             <div className="space-y-4">
-              <div className="w-10 h-10 rounded-xl bg-[#1877F2]/10 border border-[#1877F2]/20 flex items-center justify-center text-[#1877F2]">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-[#1877F2]">
                 <Cpu className="w-5 h-5" />
               </div>
-              <h3 className="text-xl font-display font-bold text-white group-hover:text-[#1877F2] transition-colors">
+              <h3 className="text-xl font-display font-bold text-slate-900 group-hover:text-[#1877F2] transition-colors">
                 AI Transformation Framework™
               </h3>
-              <p className="text-sm text-slate-300 font-interface leading-relaxed font-light">
+              <p className="text-sm text-slate-600 font-interface leading-relaxed">
                 From generic prompts to autonomous enterprise leverage. Audit, decompose, deploy, and compound operational AI.
               </p>
             </div>
 
-            <div className="pt-6 border-t border-white/5 mt-6">
+            <div className="pt-6 border-t border-slate-200 mt-6">
               <a
                 href="/frameworks/ai-transformation-framework"
                 onClick={(e) => {
@@ -764,7 +773,7 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
                   analytics.trackFrameworkClick('ai-transformation-framework', 'AI Transformation Framework™');
                   navigate('/frameworks/ai-transformation-framework');
                 }}
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1877F2] hover:text-blue-400 uppercase tracking-wider font-interface cursor-pointer"
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1877F2] hover:text-blue-700 uppercase tracking-wider font-interface cursor-pointer"
               >
                 <span>Explore Framework</span>
                 <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
@@ -773,20 +782,20 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
           </div>
 
           {/* Card 3 — Personal Authority Framework™ */}
-          <div className="p-7 rounded-2xl bg-[#0A1322] border border-white/10 hover:border-emerald-500/40 transition-all duration-200 flex flex-col justify-between group shadow-xl">
+          <div className="p-7 rounded-2xl bg-[#F8FAFC] border border-slate-200 hover:border-emerald-500/40 transition-all duration-200 flex flex-col justify-between group shadow-xs hover:shadow-md">
             <div className="space-y-4">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
                 <Award className="w-5 h-5" />
               </div>
-              <h3 className="text-xl font-display font-bold text-white group-hover:text-emerald-400 transition-colors">
+              <h3 className="text-xl font-display font-bold text-slate-900 group-hover:text-emerald-700 transition-colors">
                 Personal Authority Framework™
               </h3>
-              <p className="text-sm text-slate-300 font-interface leading-relaxed font-light">
+              <p className="text-sm text-slate-600 font-interface leading-relaxed">
                 Turning private expertise into market pull. Building undeniable founder authority that attracts enterprise-tier clients.
               </p>
             </div>
 
-            <div className="pt-6 border-t border-white/5 mt-6">
+            <div className="pt-6 border-t border-slate-200 mt-6">
               <a
                 href="/frameworks/personal-authority-framework"
                 onClick={(e) => {
@@ -794,7 +803,7 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
                   analytics.trackFrameworkClick('personal-authority-framework', 'Personal Authority Framework™');
                   navigate('/frameworks/personal-authority-framework');
                 }}
-                className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400 hover:text-emerald-300 uppercase tracking-wider font-interface cursor-pointer"
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 hover:text-emerald-700 uppercase tracking-wider font-interface cursor-pointer"
               >
                 <span>Explore Framework</span>
                 <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
@@ -803,6 +812,7 @@ export const GrowthSystemsPage: React.FC<GrowthSystemsPageProps> = ({ navigate }
           </div>
         </div>
       </section>
+    </div>
 
       {/* =========================================================================
           SECTION 6 — QUALIFICATION CTA

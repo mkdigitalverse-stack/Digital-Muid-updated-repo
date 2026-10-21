@@ -39,6 +39,7 @@ export const SavedContentPage: React.FC<SavedContentPageProps> = ({ navigate }) 
     frameworks,
     articles,
     videos,
+    hasPurchasedResource,
     notify
   } = useApp();
 
@@ -204,9 +205,19 @@ export const SavedContentPage: React.FC<SavedContentPageProps> = ({ navigate }) 
   // Direct Resource Download Action
   const handleDeliverResource = async (res: Resource) => {
     if (!res) return;
+
+    const isPaid = (res.accessType === 'paid' || (res as any).access_type === 'paid') && (res.price || 0) > 0;
+    const isEntitled = !isPaid || hasPurchasedResource(res.id);
+
+    if (isPaid && !isEntitled) {
+      notify(`This is a paid resource (₹${res.price}). Please acquire it from the Resource Vault to unlock access.`, 'info');
+      navigate('/resources');
+      return;
+    }
+
     setDownloadingId(res.id);
     try {
-      const result = await resourceService.deliverResource(res);
+      const result = await resourceService.deliverResource(res, { isAuthorized: true });
       if (result.success) {
         notify(`Opening "${res.title || res.name || 'Resource'}"...`, 'success');
       } else {
