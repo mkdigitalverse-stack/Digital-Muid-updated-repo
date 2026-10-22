@@ -22,6 +22,7 @@ import { FrameworkDetailPage } from './pages/FrameworkDetailPage';
 import { ResourcesPage } from './pages/ResourcesPage';
 import { FreeResourceThankYouPage } from './pages/FreeResourceThankYouPage';
 import { PaidResourceThankYouPage } from './pages/PaidResourceThankYouPage';
+import { BundleAccessPage } from './pages/BundleAccessPage';
 import { SpeakingPage } from './pages/SpeakingPage';
 import { ServicesPage } from './pages/ServicesPage';
 import { GrowthSystemsPage } from './pages/GrowthSystemsPage';
@@ -170,6 +171,10 @@ const MainApp: React.FC = () => {
     }
     if (path === '/resources/thank-you/paid') {
       return <PaidResourceThankYouPage navigate={navigate} />;
+    }
+    if (path.startsWith('/resources/bundle/') || path === '/resources/bundle-access' || path === '/resources/bundle') {
+      const slug = path.startsWith('/resources/bundle/') ? path.replace('/resources/bundle/', '') : 'meta-ads-campaign-planner-bundle';
+      return <BundleAccessPage slug={slug} navigate={navigate} />;
     }
     if (path === '/resources' || path.startsWith('/resources/') || path.startsWith('/downloads/')) {
       const slug = path.startsWith('/resources/') ? path.replace('/resources/', '') : selectedResourceIdForModal;

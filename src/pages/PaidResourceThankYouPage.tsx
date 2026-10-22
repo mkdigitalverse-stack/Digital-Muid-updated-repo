@@ -13,7 +13,8 @@ import {
   AlertCircle,
   Loader2,
   LayoutDashboard,
-  GraduationCap
+  GraduationCap,
+  Layers
 } from 'lucide-react';
 
 interface PaidResourceThankYouPageProps {
@@ -202,6 +203,12 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
     setDownloadError(null);
 
     try {
+      const isBundle = matchedResource.id === '2d50e5e3-711d-4461-a70d-0ed54dd29f17' || matchedResource.slug === 'meta-ads-campaign-planner-bundle';
+      if (isBundle) {
+        navigate(`/resources/bundle/meta-ads-campaign-planner-bundle?orderId=${encodeURIComponent(verifiedDetails?.orderId || queryParams.orderId || '')}&paymentId=${encodeURIComponent(verifiedDetails?.paymentId || queryParams.paymentId || '')}`);
+        return;
+      }
+
       analytics.trackPaidResourceDownload({
         resourceId: matchedResource.id,
         resourceTitle: matchedResource.title || matchedResource.name || 'Digital Resource Toolkit',
@@ -213,6 +220,11 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
         orderId: verifiedDetails?.orderId || queryParams.orderId || undefined,
         paymentId: verifiedDetails?.paymentId || queryParams.paymentId || undefined
       });
+
+      if ((delivery as any).isBundle) {
+        navigate((delivery as any).bundleUrl || '/resources/bundle/meta-ads-campaign-planner-bundle');
+        return;
+      }
 
       if (delivery.success) {
         setDownloadSuccess(true);
@@ -382,6 +394,11 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
                     <span>Preparing Asset...</span>
+                  </>
+                ) : (matchedResource.id === '2d50e5e3-711d-4461-a70d-0ed54dd29f17' || matchedResource.slug === 'meta-ads-campaign-planner-bundle') ? (
+                  <>
+                    <Layers className="w-4 h-4" />
+                    <span>Access 4 Bundle Deliverables</span>
                   </>
                 ) : (
                   <>

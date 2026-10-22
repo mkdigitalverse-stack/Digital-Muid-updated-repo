@@ -100,6 +100,11 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
     // 2. Either free or already purchased:
     if (isAuthenticatedStudent || hasPurchasedResource(res.id)) {
       if (isPaid) {
+        const isBundle = res.id === '2d50e5e3-711d-4461-a70d-0ed54dd29f17' || res.slug === 'meta-ads-campaign-planner-bundle';
+        if (isBundle) {
+          navigate('/resources/bundle/meta-ads-campaign-planner-bundle');
+          return;
+        }
         navigate(`/resources/thank-you/paid?resourceId=${encodeURIComponent(res.id)}`);
         return;
       }
@@ -218,13 +223,19 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
               return;
             }
 
-            // 4. Verification successful: persist purchase and redirect to paid thank-you page
+            // 4. Verification successful: persist purchase and redirect to paid thank-you or bundle page
             await purchaseResource(paidModalResource, response.razorpay_payment_id, response.razorpay_order_id);
             const unlocked = paidModalResource;
             setPaidModalResource(null);
             if (onCloseModal) onCloseModal();
             notify(`Payment verified! Access granted to ${unlocked.title || unlocked.name}.`, 'success');
-            navigate(`/resources/thank-you/paid?resourceId=${encodeURIComponent(unlocked.id)}&orderId=${encodeURIComponent(response.razorpay_order_id)}&paymentId=${encodeURIComponent(response.razorpay_payment_id)}&amount=${encodeURIComponent(unlocked.price || 0)}`);
+
+            const isBundle = unlocked.id === '2d50e5e3-711d-4461-a70d-0ed54dd29f17' || unlocked.slug === 'meta-ads-campaign-planner-bundle';
+            if (isBundle) {
+              navigate(`/resources/bundle/meta-ads-campaign-planner-bundle?orderId=${encodeURIComponent(response.razorpay_order_id)}&paymentId=${encodeURIComponent(response.razorpay_payment_id)}`);
+            } else {
+              navigate(`/resources/thank-you/paid?resourceId=${encodeURIComponent(unlocked.id)}&orderId=${encodeURIComponent(response.razorpay_order_id)}&paymentId=${encodeURIComponent(response.razorpay_payment_id)}&amount=${encodeURIComponent(unlocked.price || 0)}`);
+            }
           } catch (vErr: any) {
             console.error('[ResourcesPage] Error verifying resource payment:', vErr);
             setFormError(vErr?.message || 'Payment verification failed on server. Please contact support.');

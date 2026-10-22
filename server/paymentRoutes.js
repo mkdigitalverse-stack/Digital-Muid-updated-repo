@@ -973,6 +973,83 @@ router.post("/verify-resource-payment", async (req, res) => {
   }
 });
 
+// ==============================================================================
+// DIGITAL MUID BUNDLE CONFIGURATION & PRIVATE STORAGE MAPPING
+// Authoritative definitions for the 4-file Meta Ads Campaign Planner Bundle
+// ==============================================================================
+export const BUNDLE_RESOURCE_ID = "2d50e5e3-711d-4461-a70d-0ed54dd29f17";
+export const BUNDLE_SLUG = "meta-ads-campaign-planner-bundle";
+
+export const BUNDLE_ITEMS = [
+  {
+    id: "27ef2c04-4d4a-4dbe-a702-d4013b2542b9",
+    slug: "meta-ads-campaign-planner-workbook",
+    title: "The Meta Ads Campaign Planner Workbook",
+    description: "Step-by-step operating system, TOF/MOF/BOF architecture & 48-hour decision matrix.",
+    format: "PDF Document (Workbook)",
+    fileSize: "2.3 MB",
+    filename: "meta-ads-campaign-planner-workbook.pdf",
+    storagePath: "paid/meta-ads-campaign-planner-workbook.pdf"
+  },
+  {
+    id: "fafe5ffc-3323-4761-9d22-50a2588f6326",
+    slug: "the-ad-budget-breat-even-calculate",
+    title: "Interactive Ad Budget & Break-Even Calculator",
+    description: "Unit economics engine, target ROAS forecaster & volume scenario planner.",
+    format: "PDF Protocol & Calculator",
+    fileSize: "1.9 MB",
+    filename: "the-ad-budget-break-even-calculator.pdf",
+    storagePath: "paid/the-ad-budget-break-even-calculator.pdf"
+  },
+  {
+    id: "004d374c-d872-4bfe-bf54-8083504e9174",
+    slug: "10-high-converting-meta-ads-copy-frameworks",
+    title: "10 High-Converting Meta Ads Copy Frameworks",
+    description: "Plug-and-play ad copy frameworks, headline swipe files & creative hook formulas.",
+    format: "PDF Document (Swipe File)",
+    fileSize: "1.9 MB",
+    filename: "10-high-converting-meta-ads-copy-frameworks.pdf",
+    storagePath: "paid/10-high-converting-meta-ads-copy-frameworks.pdf"
+  },
+  {
+    id: "6867ecdd-2797-40f0-bdc8-ead20600ac6c",
+    slug: "pre-launch-tracking-audit-checklist",
+    title: "Pre-Launch & Tracking Audit Checklist",
+    description: "1-page rapid audit protocol covering pixel verification, CAPI setup & checkout friction.",
+    format: "PDF Checklist",
+    fileSize: "943 KB",
+    filename: "pre-launch-tracking-audit-checklist.pdf",
+    storagePath: "paid/pre-launch-tracking-audit-checklist.pdf"
+  }
+];
+
+export function isBundleOrBundleItem(idOrSlug) {
+  if (!idOrSlug) return { isBundle: false, isChild: false, item: null };
+  const clean = String(idOrSlug).trim();
+  if (clean === BUNDLE_RESOURCE_ID || clean === BUNDLE_SLUG) {
+    return { isBundle: true, isChild: false, item: null };
+  }
+  const child = BUNDLE_ITEMS.find((i) => i.id === clean || i.slug === clean);
+  if (child) {
+    return { isBundle: false, isChild: true, item: child };
+  }
+  return { isBundle: false, isChild: false, item: null };
+}
+
+function getAllowedResourceIdsForAuthorization(targetResourceRecord) {
+  const { isBundle, isChild } = isBundleOrBundleItem(targetResourceRecord.id || targetResourceRecord.slug);
+  if (isChild) {
+    // Both individual purchase of this child OR purchase of the parent bundle unlocks this child
+    return [targetResourceRecord.id, BUNDLE_RESOURCE_ID];
+  }
+  if (isBundle) {
+    // Only purchase of the bundle unlocks the bundle
+    return [BUNDLE_RESOURCE_ID];
+  }
+  // Standalone resource: only its own ID unlocks it
+  return [targetResourceRecord.id];
+}
+
 /**
  * GET /api/payments/verify-purchase-status
  *
@@ -1032,6 +1109,7 @@ router.get("/verify-purchase-status", async (req, res) => {
       });
     }
 
+    const allowedResourceIds = getAllowedResourceIdsForAuthorization(resourceRecord);
     const expectedAmountInPaise = Math.round(Number(resourceRecord.price) * 100);
     const expectedCurrency = (resourceRecord.currency || "INR").toUpperCase();
 
@@ -1041,7 +1119,7 @@ router.get("/verify-purchase-status", async (req, res) => {
         .from("resource_purchases")
         .select("*")
         .eq("razorpay_payment_id", cleanPaymentId)
-        .eq("resource_id", resolvedResId)
+        .in("resource_id", allowedResourceIds)
         .eq("status", "active")
         .maybeSingle();
 
@@ -1057,12 +1135,12 @@ router.get("/verify-purchase-status", async (req, res) => {
         });
       }
 
-      // Check public.payments by razorpay_payment_id strictly for this resource
+      // Check public.payments by razorpay_payment_id strictly for this resource or parent bundle
       const { data: paymentRecord } = await supabaseServer
         .from("payments")
         .select("*")
         .eq("razorpay_payment_id", cleanPaymentId)
-        .eq("item_id", resolvedResId)
+        .in("item_id", allowedResourceIds)
         .eq("item_type", "resource")
         .eq("status", "captured")
         .maybeSingle();
@@ -1087,28 +1165,30 @@ router.get("/verify-purchase-status", async (req, res) => {
           if (
             rzpPayment &&
             rzpPayment.status === "captured" &&
-            rzpPayment.amount === expectedAmountInPaise &&
             (rzpPayment.currency || "").toUpperCase() === expectedCurrency
           ) {
-            const orderIdToFetch = rzpPayment.order_id || cleanOrderId;
-            if (orderIdToFetch) {
-              const rzpOrder = await razorpay.orders.fetch(orderIdToFetch);
-              const orderMatchesResource =
-                !rzpOrder.notes?.resourceId || rzpOrder.notes.resourceId === resolvedResId;
-              const orderMatchesAmount =
-                rzpOrder.amount === expectedAmountInPaise &&
-                (rzpOrder.currency || "").toUpperCase() === expectedCurrency;
+            // Check if amount matches this resource OR bundle price
+            const isDirectMatch = Number(rzpPayment.amount) === expectedAmountInPaise;
+            const isBundleMatch = allowedResourceIds.includes(BUNDLE_RESOURCE_ID) && Number(rzpPayment.amount) === 29900;
 
-              if (orderMatchesResource && orderMatchesAmount) {
-                return res.json({
-                  success: true,
-                  verified: true,
-                  resourceId: resolvedResId,
-                  orderId: rzpOrder.id,
-                  paymentId: rzpPayment.id,
-                  amount: (rzpPayment.amount || 0) / 100,
-                  currency: expectedCurrency
-                });
+            if (isDirectMatch || isBundleMatch) {
+              const orderIdToFetch = rzpPayment.order_id || cleanOrderId;
+              if (orderIdToFetch) {
+                const rzpOrder = await razorpay.orders.fetch(orderIdToFetch);
+                const orderResNote = rzpOrder.notes?.resourceId;
+                const orderMatchesResource = !orderResNote || allowedResourceIds.includes(orderResNote);
+
+                if (orderMatchesResource) {
+                  return res.json({
+                    success: true,
+                    verified: true,
+                    resourceId: resolvedResId,
+                    orderId: rzpOrder.id,
+                    paymentId: rzpPayment.id,
+                    amount: (rzpPayment.amount || 0) / 100,
+                    currency: expectedCurrency
+                  });
+                }
               }
             }
           }
@@ -1118,13 +1198,24 @@ router.get("/verify-purchase-status", async (req, res) => {
       }
     }
 
-    // 3. Check if authenticated user owns the resource
+    // 3. Check if authenticated user owns the resource or bundle
     if (authenticatedUser) {
+      if (checkIsAdmin(authenticatedUser)) {
+        return res.json({
+          success: true,
+          verified: true,
+          isAdmin: true,
+          resourceId: resolvedResId,
+          amount: Number(resourceRecord?.price) || 0,
+          currency: "INR"
+        });
+      }
+
       const { data: userPurchases } = await supabaseServer
         .from("resource_purchases")
         .select("*")
         .eq("user_id", authenticatedUser.id)
-        .eq("resource_id", resolvedResId)
+        .in("resource_id", allowedResourceIds)
         .eq("status", "active")
         .maybeSingle();
 
@@ -1145,7 +1236,7 @@ router.get("/verify-purchase-status", async (req, res) => {
         .select("*")
         .eq("user_id", authenticatedUser.id)
         .eq("item_type", "resource")
-        .eq("item_id", resolvedResId)
+        .in("item_id", allowedResourceIds)
         .eq("status", "captured")
         .maybeSingle();
 
@@ -1176,8 +1267,9 @@ router.get("/verify-purchase-status", async (req, res) => {
 /**
  * POST /api/payments/get-resource-download-url
  *
- * Server-authoritative endpoint to retrieve the download URL for a paid resource.
- * Enforces server verification: only returns the asset URL if a verified captured payment exists.
+ * Server-authoritative endpoint to retrieve the download URL for a resource.
+ * Enforces server verification: only returns private storage signed URL if a verified captured payment exists.
+ * Rejects cross-resource tampering and never exposes Google Drive or raw storage tokens.
  */
 router.post("/get-resource-download-url", async (req, res) => {
   try {
@@ -1214,16 +1306,29 @@ router.post("/get-resource-download-url", async (req, res) => {
 
     const isPaid = (resourceRecord.access_type || "free") === "paid" && Number(resourceRecord.price) > 0;
 
-    // If it's a free resource, permit retrieval
+    // If it's a free resource, permit retrieval and deliver signed URL or static asset
     if (!isPaid) {
+      let freeDownloadUrl = resourceRecord.file_url || resourceRecord.external_url || null;
+      const matchedBundleItem = BUNDLE_ITEMS.find((i) => i.id === resourceRecord.id || i.slug === resourceRecord.slug);
+      if (matchedBundleItem) {
+        const { data: sData } = await supabaseServer.storage
+          .from("resources")
+          .createSignedUrl(matchedBundleItem.storagePath, 3600);
+        if (sData?.signedUrl) {
+          freeDownloadUrl = sData.signedUrl;
+        }
+      }
+
       return res.json({
         success: true,
-        downloadUrl: resourceRecord.file_url || resourceRecord.external_url || null,
-        externalUrl: resourceRecord.external_url || null,
-        fileUrl: resourceRecord.file_url || null,
+        downloadUrl: freeDownloadUrl || "/downloads/META.pdf",
+        externalUrl: null,
+        fileUrl: freeDownloadUrl || "/downloads/META.pdf",
         accessType: "free"
       });
     }
+
+    const allowedResourceIds = getAllowedResourceIdsForAuthorization(resourceRecord);
 
     // If paid, verify authorization
     let isAuthorized = false;
@@ -1234,10 +1339,12 @@ router.post("/get-resource-download-url", async (req, res) => {
         .from("payments")
         .select("id, status, item_id, item_type")
         .eq("razorpay_payment_id", cleanPaymentId)
+        .in("item_id", allowedResourceIds)
+        .eq("item_type", "resource")
         .eq("status", "captured")
         .maybeSingle();
 
-      if (pRecord && pRecord.item_id === resourceRecord.id && pRecord.item_type === "resource") {
+      if (pRecord) {
         isAuthorized = true;
       }
 
@@ -1246,10 +1353,11 @@ router.post("/get-resource-download-url", async (req, res) => {
           .from("resource_purchases")
           .select("id, status, resource_id")
           .eq("razorpay_payment_id", cleanPaymentId)
+          .in("resource_id", allowedResourceIds)
           .eq("status", "active")
           .maybeSingle();
 
-        if (purRecord && purRecord.resource_id === resourceRecord.id) {
+        if (purRecord) {
           isAuthorized = true;
         }
       }
@@ -1262,13 +1370,13 @@ router.post("/get-resource-download-url", async (req, res) => {
             const rzpPayment = await razorpay.payments.fetch(cleanPaymentId);
             if (rzpPayment && rzpPayment.status === "captured") {
               const expectedAmountInPaise = Math.round(Number(resourceRecord.price) * 100);
-              const matchesOrder = !cleanOrderId || rzpPayment.order_id === cleanOrderId;
-              const matchesAmount = Number(rzpPayment.amount) === expectedAmountInPaise;
+              const matchesDirectAmount = Number(rzpPayment.amount) === expectedAmountInPaise;
+              const matchesBundleAmount = allowedResourceIds.includes(BUNDLE_RESOURCE_ID) && Number(rzpPayment.amount) === 29900;
               const matchesCurrency = !resourceRecord.currency || (rzpPayment.currency || "").toUpperCase() === (resourceRecord.currency || "INR").toUpperCase();
               const paymentNoteResId = rzpPayment.notes?.resourceId || rzpPayment.notes?.resource_id;
-              const matchesResNote = !paymentNoteResId || paymentNoteResId === resourceRecord.id || paymentNoteResId === resourceRecord.slug;
+              const matchesResNote = !paymentNoteResId || allowedResourceIds.includes(paymentNoteResId);
 
-              if (matchesOrder && matchesAmount && matchesCurrency && matchesResNote) {
+              if ((matchesDirectAmount || matchesBundleAmount) && matchesCurrency && matchesResNote) {
                 isAuthorized = true;
               }
             }
@@ -1287,7 +1395,7 @@ router.post("/get-resource-download-url", async (req, res) => {
           .select("id")
           .eq("user_id", authenticatedUser.id)
           .eq("item_type", "resource")
-          .eq("item_id", resourceRecord.id)
+          .in("item_id", allowedResourceIds)
           .eq("status", "captured")
           .maybeSingle();
 
@@ -1298,7 +1406,7 @@ router.post("/get-resource-download-url", async (req, res) => {
             .from("resource_purchases")
             .select("id")
             .eq("user_id", authenticatedUser.id)
-            .eq("resource_id", resourceRecord.id)
+            .in("resource_id", allowedResourceIds)
             .eq("status", "active")
             .maybeSingle();
 
@@ -1316,41 +1424,59 @@ router.post("/get-resource-download-url", async (req, res) => {
       });
     }
 
-    // Generate signed URL if Supabase storage or private asset
-    let finalDownloadUrl = resourceRecord.file_url || resourceRecord.external_url || null;
+    // Check if the resource is the bundle itself: redirect to website-controlled bundle access
+    if (resourceRecord.id === BUNDLE_RESOURCE_ID || resourceRecord.slug === BUNDLE_SLUG) {
+      return res.json({
+        success: true,
+        isBundle: true,
+        downloadUrl: `/resources/bundle/${BUNDLE_SLUG}`,
+        bundleAccessUrl: `/resources/bundle/${BUNDLE_SLUG}`,
+        resourceTitle: resourceRecord.title,
+        accessType: "paid"
+      });
+    }
 
-    // Check if private storage asset exists in bucket
-    if (resourceRecord.slug === "pre-launch-tracking-audit-checklist" || resourceRecord.id === "6867ecdd-2797-40f0-bdc8-ead20600ac6c") {
+    // Generate signed URL from private Supabase Storage
+    let finalDownloadUrl = null;
+
+    // Check if item is in BUNDLE_ITEMS
+    const bundleItem = BUNDLE_ITEMS.find((i) => i.id === resourceRecord.id || i.slug === resourceRecord.slug);
+    if (bundleItem) {
       const { data: signedData } = await supabaseServer.storage
         .from("resources")
-        .createSignedUrl("paid/pre-launch-tracking-audit-checklist.pdf", 3600);
+        .createSignedUrl(bundleItem.storagePath, 3600);
       if (signedData?.signedUrl) {
         finalDownloadUrl = signedData.signedUrl;
       }
-    } else if (finalDownloadUrl && (finalDownloadUrl.includes("/storage/v1/object/") || finalDownloadUrl.startsWith("supabase://resources/"))) {
-      let objectPath = "";
-      if (finalDownloadUrl.startsWith("supabase://resources/")) {
-        objectPath = finalDownloadUrl.replace("supabase://resources/", "");
+    } else {
+      let rawUrl = resourceRecord.file_url || resourceRecord.external_url || null;
+      if (rawUrl && (rawUrl.includes("/storage/v1/object/") || rawUrl.startsWith("supabase://resources/"))) {
+        let objectPath = "";
+        if (rawUrl.startsWith("supabase://resources/")) {
+          objectPath = rawUrl.replace("supabase://resources/", "");
+        } else {
+          const match = rawUrl.match(/\/resources\/(.+)$/);
+          if (match && match[1]) {
+            objectPath = decodeURIComponent(match[1].split("?")[0]);
+          }
+        }
+        if (objectPath) {
+          const { data: signedData } = await supabaseServer.storage
+            .from("resources")
+            .createSignedUrl(objectPath, 3600);
+          if (signedData?.signedUrl) {
+            finalDownloadUrl = signedData.signedUrl;
+          }
+        }
       } else {
-        const match = finalDownloadUrl.match(/\/resources\/(.+)$/);
-        if (match && match[1]) {
-          objectPath = decodeURIComponent(match[1].split("?")[0]);
-        }
-      }
-      if (objectPath) {
-        const { data: signedData } = await supabaseServer.storage
-          .from("resources")
-          .createSignedUrl(objectPath, 3600);
-        if (signedData?.signedUrl) {
-          finalDownloadUrl = signedData.signedUrl;
-        }
+        finalDownloadUrl = rawUrl;
       }
     }
 
     return res.json({
       success: true,
       downloadUrl: finalDownloadUrl,
-      externalUrl: resourceRecord.external_url || null,
+      externalUrl: null, // Never leak external URLs for paid assets
       fileUrl: finalDownloadUrl,
       resourceTitle: resourceRecord.title,
       accessType: "paid"
@@ -1360,6 +1486,172 @@ router.post("/get-resource-download-url", async (req, res) => {
     return res.status(500).json({ success: false, error: "Failed to generate authorized download URL." });
   }
 });
+
+/**
+ * GET & POST /api/payments/bundle-files
+ *
+ * Dedicated website-controlled bundle access endpoint.
+ * Requires verified captured payment for the Meta Ads Campaign Planner Bundle (2d50e5e3-711d-4461-a70d-0ed54dd29f17).
+ * Returns individual signed URLs for all 4 bundle deliverables only to authorized buyers.
+ * Unauthorized visitors receive 403 Forbidden with clear payment required metadata.
+ */
+async function handleBundleFilesRequest(req, res) {
+  try {
+    const authHeader = req.headers.authorization;
+    let authenticatedUser = null;
+    if (authHeader) {
+      const { user } = await verifySupabaseToken(authHeader);
+      authenticatedUser = user;
+    }
+
+    const { bundleId, orderId, paymentId } = req.method === "POST" ? (req.body || {}) : (req.query || {});
+    const cleanPaymentId = paymentId ? String(paymentId).trim() : null;
+    const cleanOrderId = orderId ? String(orderId).trim() : null;
+
+    const supabaseServer = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    if (!supabaseServer) {
+      return res.status(503).json({ success: false, error: "Database service unavailable." });
+    }
+
+    let isAuthorized = false;
+
+    // Check paymentId against database
+    if (cleanPaymentId) {
+      const { data: pRecord } = await supabaseServer
+        .from("payments")
+        .select("id, status, item_id, item_type")
+        .eq("razorpay_payment_id", cleanPaymentId)
+        .eq("item_id", BUNDLE_RESOURCE_ID)
+        .eq("item_type", "resource")
+        .eq("status", "captured")
+        .maybeSingle();
+
+      if (pRecord) {
+        isAuthorized = true;
+      }
+
+      if (!isAuthorized) {
+        const { data: purRecord } = await supabaseServer
+          .from("resource_purchases")
+          .select("id, status, resource_id")
+          .eq("razorpay_payment_id", cleanPaymentId)
+          .eq("resource_id", BUNDLE_RESOURCE_ID)
+          .eq("status", "active")
+          .maybeSingle();
+
+        if (purRecord) {
+          isAuthorized = true;
+        }
+      }
+
+      // Check with Razorpay gateway directly if not in DB yet
+      if (!isAuthorized && cleanPaymentId.startsWith("pay_")) {
+        const razorpay = getRazorpayClient();
+        if (razorpay) {
+          try {
+            const rzpPayment = await razorpay.payments.fetch(cleanPaymentId);
+            if (rzpPayment && rzpPayment.status === "captured") {
+              const matchesAmount = Number(rzpPayment.amount) === 29900;
+              const matchesCurrency = (rzpPayment.currency || "").toUpperCase() === "INR";
+              const matchesOrder = !cleanOrderId || rzpPayment.order_id === cleanOrderId;
+              const paymentNoteResId = rzpPayment.notes?.resourceId || rzpPayment.notes?.resource_id;
+              const matchesNote = !paymentNoteResId || paymentNoteResId === BUNDLE_RESOURCE_ID || paymentNoteResId === BUNDLE_SLUG;
+
+              if (matchesAmount && matchesCurrency && matchesOrder && matchesNote) {
+                isAuthorized = true;
+              }
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // Check authenticated user
+    if (!isAuthorized && authenticatedUser) {
+      if (checkIsAdmin(authenticatedUser)) {
+        isAuthorized = true;
+      } else {
+        const { data: userPayment } = await supabaseServer
+          .from("payments")
+          .select("id")
+          .eq("user_id", authenticatedUser.id)
+          .eq("item_type", "resource")
+          .eq("item_id", BUNDLE_RESOURCE_ID)
+          .eq("status", "captured")
+          .maybeSingle();
+
+        if (userPayment) {
+          isAuthorized = true;
+        } else {
+          const { data: userPur } = await supabaseServer
+            .from("resource_purchases")
+            .select("id")
+            .eq("user_id", authenticatedUser.id)
+            .eq("resource_id", BUNDLE_RESOURCE_ID)
+            .eq("status", "active")
+            .maybeSingle();
+
+          if (userPur) {
+            isAuthorized = true;
+          }
+        }
+      }
+    }
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        authorized: false,
+        error: "Unauthorized: A confirmed purchase of the Meta Ads Campaign Planner Bundle is required to access these assets.",
+        bundle: {
+          id: BUNDLE_RESOURCE_ID,
+          slug: BUNDLE_SLUG,
+          title: "Meta Ads Campaign Planner Bundle",
+          price: 299,
+          currency: "INR"
+        }
+      });
+    }
+
+    // Generate signed URLs for all 4 bundle files
+    const signedFiles = [];
+    for (const item of BUNDLE_ITEMS) {
+      const { data: sData } = await supabaseServer.storage
+        .from("resources")
+        .createSignedUrl(item.storagePath, 3600);
+
+      signedFiles.push({
+        id: item.id,
+        slug: item.slug,
+        title: item.title,
+        description: item.description,
+        format: item.format,
+        fileSize: item.fileSize,
+        filename: item.filename,
+        downloadUrl: sData?.signedUrl || null
+      });
+    }
+
+    return res.json({
+      success: true,
+      authorized: true,
+      bundle: {
+        id: BUNDLE_RESOURCE_ID,
+        slug: BUNDLE_SLUG,
+        title: "Meta Ads Campaign Planner Bundle",
+        price: 299,
+        currency: "INR"
+      },
+      files: signedFiles
+    });
+  } catch (err) {
+    console.error("[Bundle Files] Unexpected error:", err);
+    return res.status(500).json({ success: false, error: "Failed to generate authorized bundle downloads." });
+  }
+}
+
+router.get("/bundle-files", handleBundleFilesRequest);
+router.post("/get-bundle-files", handleBundleFilesRequest);
 
 /**
  * GET /api/payments/admin/all-payments

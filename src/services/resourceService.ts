@@ -787,6 +787,14 @@ export const resourceService = {
           };
         }
 
+        if (verifyData.isBundle) {
+          return {
+            success: true,
+            isBundle: true,
+            bundleUrl: verifyData.bundleAccessUrl || '/resources/bundle/meta-ads-campaign-planner-bundle'
+          } as any;
+        }
+
         rawFileUrl = (verifyData.downloadUrl || verifyData.fileUrl)?.trim() || null;
         externalUrl = verifyData.externalUrl?.trim() || null;
       } catch (fetchErr: any) {
@@ -1173,6 +1181,53 @@ export const resourceService = {
     } catch (err: any) {
       console.error('[ResourceService] Exception fetching admin purchases:', err);
       return { data: [], error: err };
+    }
+  },
+
+  /**
+   * Fetches the 4 authorized deliverable files for the Meta Ads Campaign Planner Bundle.
+   * Calls the server-side /api/payments/bundle-files endpoint which verifies payment status.
+   */
+  async fetchBundleFiles(bundleId: string, options?: { orderId?: string; paymentId?: string }): Promise<{
+    success: boolean;
+    authorized: boolean;
+    bundle?: any;
+    files?: Array<{
+      id: string;
+      slug: string;
+      title: string;
+      description?: string;
+      format?: string;
+      fileSize?: string;
+      filename: string;
+      downloadUrl: string | null;
+    }>;
+    error?: string;
+  }> {
+    try {
+      const { data: authSessionData } = isSupabaseConfigured()
+        ? await supabase.auth.getSession()
+        : { data: { session: null } };
+      const authHeader = authSessionData?.session?.access_token
+        ? `Bearer ${authSessionData.session.access_token}`
+        : undefined;
+
+      const query = new URLSearchParams({
+        bundleId,
+        ...(options?.orderId ? { orderId: options.orderId } : {}),
+        ...(options?.paymentId ? { paymentId: options.paymentId } : {})
+      });
+
+      const resp = await fetch(`/api/payments/bundle-files?${query.toString()}`, {
+        headers: {
+          ...(authHeader ? { Authorization: authHeader } : {})
+        }
+      });
+      const data = await resp.json();
+      return data;
+    } catch (err: any) {
+      console.error('[ResourceService] Exception fetching bundle files:', err);
+      return { success: false, authorized: false, error: err?.message || 'Failed to fetch bundle files.' };
     }
   }
 };
