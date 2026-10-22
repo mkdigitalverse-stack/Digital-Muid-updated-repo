@@ -43,6 +43,14 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
 
   const [matchedResource, setMatchedResource] = useState<Resource | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isVerifying, setIsVerifying] = useState<boolean>(true);
+  const [isServerVerified, setIsServerVerified] = useState<boolean | null>(null);
+  const [verifiedDetails, setVerifiedDetails] = useState<{
+    amount?: number;
+    currency?: string;
+    orderId?: string;
+    paymentId?: string;
+  } | null>(null);
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [downloadSuccess, setDownloadSuccess] = useState<boolean>(false);
@@ -64,6 +72,7 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
 
     if (!resId) {
       setIsLoading(false);
+      setIsVerifying(false);
       return;
     }
 
@@ -83,21 +92,89 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
     }
   }, [resources]);
 
-  // Determine if purchase is verified
+  // Server-authoritative purchase status verification (Never trust raw query parameters)
+  useEffect(() => {
+    if (!matchedResource) return;
+
+    let isMounted = true;
+    setIsVerifying(true);
+
+    const checkVerification = async () => {
+      // 1. If user already owns this resource in student ledger, pass immediately
+      if (hasPurchasedResource(matchedResource.id)) {
+        if (isMounted) {
+          setIsServerVerified(true);
+          setIsVerifying(false);
+        }
+        return;
+      }
+
+      // 2. If no paymentId provided and user doesn't own it, reject
+      if (!queryParams.paymentId && !queryParams.orderId) {
+        if (isMounted) {
+          setIsServerVerified(false);
+          setIsVerifying(false);
+        }
+        return;
+      }
+
+      // 3. Query server endpoint for cryptographic & database verification
+      try {
+        const query = new URLSearchParams({
+          resourceId: matchedResource.id,
+          ...(queryParams.orderId ? { orderId: queryParams.orderId } : {}),
+          ...(queryParams.paymentId ? { paymentId: queryParams.paymentId } : {})
+        });
+
+        const resp = await fetch(`/api/payments/verify-purchase-status?${query.toString()}`);
+        const data = await resp.json();
+
+        if (isMounted) {
+          if (resp.ok && data.success && data.verified === true) {
+            setIsServerVerified(true);
+            setVerifiedDetails({
+              amount: data.amount,
+              currency: data.currency,
+              orderId: data.orderId,
+              paymentId: data.paymentId
+            });
+          } else {
+            console.warn('[Paid Thank You] Server rejected payment verification:', data.message || data.error);
+            setIsServerVerified(false);
+          }
+          setIsVerifying(false);
+        }
+      } catch (err) {
+        console.error('[Paid Thank You] Failed to verify purchase status with server:', err);
+        if (isMounted) {
+          setIsServerVerified(false);
+          setIsVerifying(false);
+        }
+      }
+    };
+
+    checkVerification();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [matchedResource, queryParams.orderId, queryParams.paymentId, hasPurchasedResource]);
+
+  // Determine if purchase is authoritatively verified
   const isVerifiedPurchase = Boolean(
     matchedResource && (
-      hasPurchasedResource(matchedResource.id) ||
-      (queryParams.orderId && queryParams.paymentId)
+      isServerVerified === true ||
+      hasPurchasedResource(matchedResource.id)
     )
   );
 
-  // Track paid_resource_purchase_conversion on mount once verified
+  // Track paid_resource_purchase_conversion ONLY after server verification
   useEffect(() => {
-    if (!matchedResource || !isVerifiedPurchase || conversionTrackedRef.current) return;
+    if (!matchedResource || !isVerifiedPurchase || isVerifying || conversionTrackedRef.current) return;
 
-    const effectiveOrderId = queryParams.orderId || `order_${matchedResource.id}`;
-    const effectivePaymentId = queryParams.paymentId || `pay_${Date.now()}`;
-    const effectiveAmount = queryParams.amount ? Number(queryParams.amount) : (matchedResource.price || 0);
+    const effectiveOrderId = verifiedDetails?.orderId || queryParams.orderId || `order_${matchedResource.id}`;
+    const effectivePaymentId = verifiedDetails?.paymentId || queryParams.paymentId || `pay_${Date.now()}`;
+    const effectiveAmount = verifiedDetails?.amount ?? (queryParams.amount ? Number(queryParams.amount) : (matchedResource.price || 0));
 
     const dedupKey = `tracked_paid_conv_${effectiveOrderId}_${effectivePaymentId}`;
     const alreadyTracked = typeof window !== 'undefined' && window.sessionStorage.getItem(dedupKey);
@@ -109,7 +186,7 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
         orderId: effectiveOrderId,
         paymentId: effectivePaymentId,
         amount: effectiveAmount,
-        currency: matchedResource.currency || 'INR'
+        currency: verifiedDetails?.currency || matchedResource.currency || 'INR'
       });
 
       if (typeof window !== 'undefined') {
@@ -117,7 +194,7 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
       }
       conversionTrackedRef.current = true;
     }
-  }, [matchedResource, isVerifiedPurchase, queryParams]);
+  }, [matchedResource, isVerifiedPurchase, isVerifying, queryParams, verifiedDetails]);
 
   const handleDownload = async () => {
     if (!matchedResource || !isVerifiedPurchase) return;
@@ -128,10 +205,15 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
       analytics.trackPaidResourceDownload({
         resourceId: matchedResource.id,
         resourceTitle: matchedResource.title || matchedResource.name || 'Digital Resource Toolkit',
-        orderId: queryParams.orderId || undefined
+        orderId: verifiedDetails?.orderId || queryParams.orderId || undefined
       });
 
-      const delivery = await resourceService.deliverResource(matchedResource, { isAuthorized: true });
+      const delivery = await resourceService.deliverResource(matchedResource, {
+        isAuthorized: true,
+        orderId: verifiedDetails?.orderId || queryParams.orderId || undefined,
+        paymentId: verifiedDetails?.paymentId || queryParams.paymentId || undefined
+      });
+
       if (delivery.success) {
         setDownloadSuccess(true);
         notify(`Downloading ${matchedResource.title || 'resource'}...`, 'success');
@@ -147,7 +229,7 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
     }
   };
 
-  if (isLoading) {
+  if (isLoading || isVerifying) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center bg-slate-50">
         <div className="text-center space-y-3">
@@ -217,8 +299,10 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
     );
   }
 
-  const displayAmount = queryParams.amount ? Number(queryParams.amount) : (matchedResource.price || 0);
-  const displayCurrency = matchedResource.currency || 'INR';
+  const displayAmount = verifiedDetails?.amount ?? (queryParams.amount ? Number(queryParams.amount) : (matchedResource.price || 0));
+  const displayCurrency = verifiedDetails?.currency || matchedResource.currency || 'INR';
+  const displayOrderId = verifiedDetails?.orderId || queryParams.orderId || 'VERIFIED-ORDER';
+  const displayPaymentId = verifiedDetails?.paymentId || queryParams.paymentId || 'Verified Gateway';
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 py-12 sm:py-20">
@@ -232,7 +316,7 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
             </div>
             <div className="flex items-center gap-2 text-[11px] font-mono text-slate-500">
               <CreditCard className="w-3.5 h-3.5 text-slate-400" />
-              <span>Ref: {queryParams.orderId || 'VERIFIED-ORDER'}</span>
+              <span>Ref: {displayOrderId}</span>
             </div>
           </div>
 
@@ -260,7 +344,7 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
             <div>
               <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">Payment ID</span>
               <span className="font-mono text-slate-700 truncate block max-w-[140px]">
-                {queryParams.paymentId || 'Verified Gateway'}
+                {displayPaymentId}
               </span>
             </div>
             <div>

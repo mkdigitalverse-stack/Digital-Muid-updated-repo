@@ -474,26 +474,53 @@ export async function fulfillResourcePurchase({
       }
     }
 
-    // 2. Resolve user_id: If authenticated student, use userId; else check profiles by email
+    // 2. Resolve user_id: If authenticated student, use userId; else search auth.users by email or auto-provision
     let resolvedUserId = isValidUUID(userId) ? userId : null;
     if (!resolvedUserId && customerEmail && supabaseServer) {
       try {
-        const { data: profile } = await supabaseServer
-          .from("profiles")
-          .select("id")
-          .eq("email", customerEmail.trim().toLowerCase())
-          .maybeSingle();
-        if (profile?.id && isValidUUID(profile.id)) {
-          resolvedUserId = profile.id;
+        const { data: usersData } = await supabaseServer.auth.admin.listUsers();
+        const match = usersData?.users?.find(
+          (u) => u.email?.toLowerCase() === customerEmail.trim().toLowerCase()
+        );
+        if (match?.id && isValidUUID(match.id)) {
+          resolvedUserId = match.id;
+        } else {
+          // Provision authenticated account for buyer so their purchases are permanently bound to student dashboard
+          const tempPassword = `DM_${Math.random().toString(36).slice(2, 10)}!${Date.now()}`;
+          const { data: newUser, error: createErr } = await supabaseServer.auth.admin.createUser({
+            email: customerEmail.trim().toLowerCase(),
+            password: tempPassword,
+            email_confirm: true,
+            user_metadata: {
+              full_name: customerName || "Student Member",
+              phone: customerPhone || null
+            }
+          });
+          if (!createErr && newUser?.user?.id) {
+            resolvedUserId = newUser.user.id;
+          } else {
+            // If user already exists or creation failed, re-query user
+            const { data: retryUsers } = await supabaseServer.auth.admin.listUsers();
+            const retryMatch = retryUsers?.users?.find(
+              (u) => u.email?.toLowerCase() === customerEmail.trim().toLowerCase()
+            );
+            if (retryMatch?.id && isValidUUID(retryMatch.id)) {
+              resolvedUserId = retryMatch.id;
+            }
+          }
         }
-      } catch {}
+      } catch (userErr) {
+        console.warn("[Resource Fulfillment] Notice resolving student account:", userErr?.message);
+      }
     }
 
-    // 3. Insert purchase in public.resource_purchases
+    // 3. Insert purchase in public.resource_purchases (if table exists)
     let purchaseRecord = null;
-    if (supabaseServer && resolvedUserId && isValidUUID(cleanResourceId)) {
+    if (supabaseServer && isValidUUID(cleanResourceId)) {
       const purchasePayload = {
-        user_id: resolvedUserId,
+        user_id: resolvedUserId || null,
+        customer_email: customerEmail ? customerEmail.trim().toLowerCase() : null,
+        customer_phone: customerPhone || null,
         resource_id: cleanResourceId,
         razorpay_order_id: cleanOrderId,
         razorpay_payment_id: cleanPaymentId,
@@ -503,20 +530,24 @@ export async function fulfillResourcePurchase({
         purchased_at: new Date().toISOString()
       };
 
-      const { data: newPurchase, error: purchaseError } = await supabaseServer
-        .from("resource_purchases")
-        .upsert(purchasePayload, { onConflict: "user_id,resource_id" })
-        .select()
-        .maybeSingle();
+      try {
+        const { data: newPurchase, error: purchaseError } = await supabaseServer
+          .from("resource_purchases")
+          .upsert(purchasePayload, { onConflict: "razorpay_payment_id" })
+          .select()
+          .maybeSingle();
 
-      if (purchaseError) {
-        console.warn("[Resource Fulfillment] Notice saving resource_purchases row:", purchaseError.message);
-      } else {
-        purchaseRecord = newPurchase;
+        if (!purchaseError && newPurchase) {
+          purchaseRecord = newPurchase;
+        } else if (purchaseError && purchaseError.code !== "PGRST205") {
+          console.warn("[Resource Fulfillment] Notice saving resource_purchases row:", purchaseError.message);
+        }
+      } catch (tableErr) {
+        console.warn("[Resource Fulfillment] Notice table resource_purchases check:", tableErr?.message);
       }
     }
 
-    // 4. Create payment ledger record in public.payments
+    // 4. Create payment ledger record in public.payments (authoritative ledger)
     let paymentRecord = null;
     if (supabaseServer && resolvedUserId) {
       const paymentPayload = {
@@ -532,36 +563,51 @@ export async function fulfillResourcePurchase({
         created_at: new Date().toISOString()
       };
 
-      const { data: newPayment, error: paymentError } = await supabaseServer
-        .from("payments")
-        .insert(paymentPayload)
-        .select()
-        .maybeSingle();
+      try {
+        const { data: newPayment, error: paymentError } = await supabaseServer
+          .from("payments")
+          .insert(paymentPayload)
+          .select()
+          .maybeSingle();
 
-      if (paymentError) {
-        console.warn("[Resource Fulfillment] Notice inserting payment ledger:", paymentError.message);
-      } else {
-        paymentRecord = newPayment;
+        if (!paymentError && newPayment) {
+          paymentRecord = newPayment;
+        } else if (paymentError) {
+          console.warn("[Resource Fulfillment] Notice inserting payment ledger:", paymentError.message);
+        }
+      } catch (pErr) {
+        console.warn("[Resource Fulfillment] Payments insert error:", pErr?.message);
       }
     }
 
-    // 5. Record CRM Lead in public.crm_leads in background
+    // 5. Record CRM Lead in public.crm_leads as Converted buyer
     if (supabaseServer && (customerEmail || customerName)) {
       try {
         await supabaseServer.from("crm_leads").insert({
           name: customerName || "Resource Buyer",
           email: customerEmail || "",
-          phone: customerPhone || "",
+          phone: customerPhone || null,
           source: "Resource Purchase (Paid)",
           interest: resourceTitle ? `Purchased: ${resourceTitle}` : `Resource ID: ${cleanResourceId}`,
           notes: `Paid ₹${numericAmount}. Order: ${cleanOrderId}, Payment: ${cleanPaymentId}`,
-          status: "New",
+          status: "Converted",
           amount: numericAmount,
           created_at: new Date().toISOString()
         });
       } catch (leadErr) {
         console.warn("[Resource Fulfillment] CRM lead record notice:", leadErr?.message);
       }
+    }
+
+    // Verify that at least one durable ledger record was persisted
+    if (!paymentRecord && !purchaseRecord) {
+      console.error("[Resource Fulfillment] Database transaction failed: Neither payments nor resource_purchases was persisted.");
+      return {
+        success: false,
+        fulfilled: false,
+        error: "Failed to persist purchase record to database ledger. Please retry payment verification.",
+        code: "DATABASE_WRITE_FAILED"
+      };
     }
 
     return {
@@ -579,7 +625,11 @@ export async function fulfillResourcePurchase({
         status: "active",
         purchasedAt: new Date().toISOString()
       },
-      payment: paymentRecord
+      payment: paymentRecord,
+      resourceId: cleanResourceId,
+      orderId: cleanOrderId,
+      paymentId: cleanPaymentId,
+      resolvedUserId
     };
   } catch (err) {
     console.error("[Resource Fulfillment] Unexpected error:", err);

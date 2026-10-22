@@ -87,12 +87,6 @@ export const mapDbRowToResource = (row: any): Resource => {
     ? rawPubDate.split('T')[0]
     : (rawPubDate ? String(rawPubDate) : undefined);
 
-  const fileUrl = row.file_url || row.fileUrl || row.downloadUrl || undefined;
-  const externalUrl = row.external_url || row.externalUrl || undefined;
-  const thumbnailUrl = row.thumbnail_url || row.thumbnailUrl || row.coverImage || undefined;
-  const title = String(row.title || row.name || '');
-  const resourceType = String(row.resource_type || row.resourceType || row.type || 'Guide');
-
   const localOverrides = getResourcePricingOverrides();
   const localOverride = (row.id ? localOverrides[row.id] : null) || (row.slug ? localOverrides[row.slug] : null);
 
@@ -107,6 +101,17 @@ export const mapDbRowToResource = (row: any): Resource => {
     : (rawPrice !== undefined && rawPrice !== null ? (parseFloat(rawPrice) || 0) : (localOverride?.price ?? 0));
 
   const resolvedCurrency = row.currency || localOverride?.currency || 'INR';
+
+  // Security: Redact private paid file locations from unauthenticated public queries
+  const isPaid = resolvedAccessType === 'paid' && resolvedPrice > 0;
+  const allowExplicitUrls = Boolean(row.__allow_paid_urls);
+  const rawFileUrl = row.file_url || row.fileUrl || row.downloadUrl || undefined;
+  const rawExternalUrl = row.external_url || row.externalUrl || undefined;
+  const fileUrl = isPaid && !allowExplicitUrls ? undefined : rawFileUrl;
+  const externalUrl = isPaid && !allowExplicitUrls ? undefined : rawExternalUrl;
+  const thumbnailUrl = row.thumbnail_url || row.thumbnailUrl || row.coverImage || undefined;
+  const title = String(row.title || row.name || '');
+  const resourceType = String(row.resource_type || row.resourceType || row.type || 'Guide');
 
   return {
     id: String(row.id),
@@ -731,7 +736,7 @@ export const resourceService = {
    */
   async deliverResource(
     resource: Resource,
-    options?: { isAuthorized?: boolean }
+    options?: { isAuthorized?: boolean; orderId?: string; paymentId?: string }
   ): Promise<{ success: boolean; error?: string }> {
     if (!resource) {
       console.error('[Resource Delivery Error] No resource object provided');
@@ -747,8 +752,51 @@ export const resourceService = {
       };
     }
 
-    const externalUrl = resource.externalUrl?.trim() || null;
-    const rawFileUrl = (resource.fileUrl || resource.downloadUrl)?.trim() || null;
+    let externalUrl = resource.externalUrl?.trim() || null;
+    let rawFileUrl = (resource.fileUrl || resource.downloadUrl)?.trim() || null;
+
+    // Server-side payment verification and asset link resolution for paid assets
+    if (isPaid) {
+      try {
+        const { data: authSessionData } = isSupabaseConfigured()
+          ? await supabase.auth.getSession()
+          : { data: { session: null } };
+        const authHeader = authSessionData?.session?.access_token
+          ? `Bearer ${authSessionData.session.access_token}`
+          : undefined;
+
+        const verifyResp = await fetch('/api/payments/get-resource-download-url', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authHeader ? { Authorization: authHeader } : {})
+          },
+          body: JSON.stringify({
+            resourceId: resource.id,
+            orderId: options?.orderId,
+            paymentId: options?.paymentId
+          })
+        });
+
+        const verifyData = await verifyResp.json();
+        if (!verifyResp.ok || !verifyData.success) {
+          console.warn('[Resource Delivery Guard] Server rejected download authorization:', verifyData.error);
+          return {
+            success: false,
+            error: verifyData.error || 'A confirmed payment is required to download this paid asset.'
+          };
+        }
+
+        rawFileUrl = (verifyData.downloadUrl || verifyData.fileUrl)?.trim() || null;
+        externalUrl = verifyData.externalUrl?.trim() || null;
+      } catch (fetchErr: any) {
+        console.error('[Resource Delivery Guard] Verification call failed:', fetchErr);
+        return {
+          success: false,
+          error: 'Unable to verify payment authorization with server. Please try again.'
+        };
+      }
+    }
 
     let deliveryMethod = 'Unknown';
     let resolvedUrl = '';
@@ -1038,19 +1086,62 @@ export const resourceService = {
         return { data: [], error: authError || new Error('User is not authenticated') };
       }
 
-      const { data, error } = await supabase
+      let purchases: ResourcePurchase[] = [];
+
+      // 1. Try public.resource_purchases
+      const { data: purData, error: purError } = await supabase
         .from('resource_purchases')
         .select('*')
         .eq('user_id', user.id)
         .eq('status', 'active')
         .order('purchased_at', { ascending: false });
 
-      if (error) {
-        console.warn('[ResourceService] Notice fetching student resource purchases:', error);
-        return { data: [], error };
+      if (!purError && purData && purData.length > 0) {
+        purchases = purData.map(mapDbRowToResourcePurchase);
+      } else if (purError && purError.code !== 'PGRST205') {
+        console.warn('[ResourceService] Notice fetching student resource purchases:', purError.message);
       }
 
-      const purchases = (data || []).map(mapDbRowToResourcePurchase);
+      // 2. Query public.payments for student's resource orders
+      try {
+        const { data: payData, error: payError } = await supabase
+          .from('payments')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('item_type', 'resource')
+          .eq('status', 'captured')
+          .order('created_at', { ascending: false });
+
+        if (!payError && payData && payData.length > 0) {
+          const existingPaymentIds = new Set(purchases.map(p => p.razorpayPaymentId || p.razorpay_payment_id));
+          const existingResourceIds = new Set(purchases.map(p => p.resourceId || p.resource_id));
+
+          payData.forEach((payRow: any) => {
+            const payId = payRow.razorpay_payment_id;
+            const resId = payRow.item_id;
+            if (!existingPaymentIds.has(payId) && !existingResourceIds.has(resId)) {
+              purchases.push({
+                id: payRow.id,
+                userId: payRow.user_id,
+                user_id: payRow.user_id,
+                resourceId: resId,
+                resource_id: resId,
+                razorpayOrderId: payRow.razorpay_order_id,
+                razorpay_order_id: payRow.razorpay_order_id,
+                razorpayPaymentId: payId,
+                razorpay_payment_id: payId,
+                amount: Number(payRow.amount) || 0,
+                currency: payRow.currency || 'INR',
+                status: 'active',
+                purchasedAt: payRow.created_at || new Date().toISOString()
+              });
+            }
+          });
+        }
+      } catch (payErr) {
+        console.warn('[ResourceService] Notice querying payments ledger for student resources:', payErr);
+      }
+
       return { data: purchases, error: null };
     } catch (err: any) {
       console.error('[ResourceService] Unexpected exception fetching student purchases:', err);

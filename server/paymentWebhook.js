@@ -122,7 +122,7 @@ export async function handleRazorpayWebhook(req, res) {
                   userId = userId || fetchedOrder.notes.userId;
                 }
               } catch (fetchErr) {
-                console.warn("[Razorpay Webhook] Failed to fetch order notes from gateway:", fetchErr?.message);
+                console.warn("[Razorpay Webhook] Failed to fetch order notes from gateway:", fetchErr?.error?.description || fetchErr?.message || "Order not found");
               }
             }
           }

@@ -844,6 +844,91 @@ router.post("/verify-resource-payment", async (req, res) => {
     const amount = Number(resourceRecord?.price) || 0;
     const currency = (resourceRecord?.currency || "INR").toUpperCase();
 
+    // 2b. Gateway reconciliation with Razorpay API (order amount & payment status)
+    const razorpay = getRazorpayClient();
+    if (razorpay) {
+      let rzpOrder = null;
+      let rzpPayment = null;
+      try {
+        [rzpOrder, rzpPayment] = await Promise.all([
+          razorpay.orders.fetch(razorpay_order_id.trim()),
+          razorpay.payments.fetch(razorpay_payment_id.trim())
+        ]);
+      } catch (rzpFetchErr) {
+        const errDesc = rzpFetchErr?.error?.description || rzpFetchErr?.message || "Payment or order not found on gateway.";
+        console.warn(`[Resource Verification] Gateway fetch rejected: ${errDesc}`);
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: `Payment verification failed on gateway: ${errDesc}`
+        });
+      }
+
+      if (!rzpPayment || rzpPayment.status !== "captured") {
+        console.warn(`[Resource Verification] Rejected uncaptured payment: status=${rzpPayment?.status}`);
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: `Payment status is ${rzpPayment?.status || "unknown"}. Only captured payments can unlock resources.`
+        });
+      }
+
+      if (rzpPayment.order_id && rzpPayment.order_id !== razorpay_order_id.trim()) {
+        console.warn(`[Resource Verification] Mismatched order ID: payment.order_id=${rzpPayment.order_id}, expected=${razorpay_order_id}`);
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: "Payment does not match the specified order ID."
+        });
+      }
+
+      const expectedAmountInPaise = Math.round(amount * 100);
+      if (expectedAmountInPaise > 0 && rzpPayment.amount !== expectedAmountInPaise) {
+        console.warn(`[Resource Verification] Amount mismatch: paid ${rzpPayment.amount} paise, expected ${expectedAmountInPaise} paise`);
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: "Payment amount does not match authoritative resource price."
+        });
+      }
+
+      const expectedCurrency = currency.toUpperCase();
+      if ((rzpPayment.currency || "").toUpperCase() !== expectedCurrency) {
+        console.warn(`[Resource Verification] Currency mismatch: paid ${rzpPayment.currency}, expected ${expectedCurrency}`);
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: "Payment currency does not match authoritative resource currency."
+        });
+      }
+
+      if (rzpOrder) {
+        if (rzpOrder.amount !== expectedAmountInPaise) {
+          console.warn(`[Resource Verification] Order amount mismatch: order=${rzpOrder.amount}, expected=${expectedAmountInPaise}`);
+          return res.status(400).json({
+            success: false,
+            verified: false,
+            error: "Order amount does not match authoritative resource price."
+          });
+        }
+        if ((rzpOrder.currency || "").toUpperCase() !== expectedCurrency) {
+          return res.status(400).json({
+            success: false,
+            verified: false,
+            error: "Order currency does not match authoritative resource currency."
+          });
+        }
+        if (rzpOrder.notes?.resourceId && rzpOrder.notes.resourceId !== (resourceRecord?.id || resourceId.trim())) {
+          console.warn(`[Resource Verification] Order resourceId note mismatch: note=${rzpOrder.notes.resourceId}, expected=${resourceRecord?.id}`);
+          return res.status(400).json({
+            success: false,
+            verified: false,
+            error: "Order was not created for this resource."
+          });
+        }
+      }
+    }
+
     // 3. Atomic fulfillment into public.resource_purchases and public.payments
     const fulfillment = await fulfillResourcePurchase({
       userId: authenticatedUser?.id || null,
@@ -885,6 +970,394 @@ router.post("/verify-resource-payment", async (req, res) => {
       verified: false,
       error: "An unexpected error occurred during resource payment verification."
     });
+  }
+});
+
+/**
+ * GET /api/payments/verify-purchase-status
+ *
+ * Server-authoritative endpoint to verify whether a customer or visitor has a verified paid purchase.
+ * Query parameters: resourceId, orderId (optional), paymentId (optional).
+ * Authorization: Optional Bearer token for authenticated students.
+ */
+router.get("/verify-purchase-status", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    let authenticatedUser = null;
+    if (authHeader) {
+      const { user } = await verifySupabaseToken(authHeader);
+      authenticatedUser = user;
+    }
+
+    const { resourceId, orderId, paymentId } = req.query || {};
+    if (!resourceId) {
+      return res.status(400).json({ success: false, verified: false, error: "resourceId is required." });
+    }
+
+    const cleanResourceId = String(resourceId).trim();
+    const cleanPaymentId = paymentId ? String(paymentId).trim() : null;
+    const cleanOrderId = orderId ? String(orderId).trim() : null;
+
+    const supabaseServer = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    if (!supabaseServer) {
+      return res.status(503).json({ success: false, verified: false, error: "Database service unavailable." });
+    }
+
+    // 1. Fetch resource to verify ID or slug
+    const isUUID = isValidUUID(cleanResourceId);
+    const { data: resourceRecord } = isUUID
+      ? await supabaseServer.from("resources").select("id, slug, title, access_type, price, currency").eq("id", cleanResourceId).maybeSingle()
+      : await supabaseServer.from("resources").select("id, slug, title, access_type, price, currency").eq("slug", cleanResourceId).maybeSingle();
+
+    if (!resourceRecord) {
+      return res.status(404).json({
+        success: false,
+        verified: false,
+        error: "Resource not found."
+      });
+    }
+
+    const resolvedResId = resourceRecord.id;
+    const isFree = (resourceRecord.access_type || "free") !== "paid" || Number(resourceRecord.price) <= 0;
+
+    if (isFree) {
+      return res.json({
+        success: true,
+        verified: true,
+        isFree: true,
+        resourceId: resolvedResId,
+        resourceTitle: resourceRecord.title || "Free Resource",
+        amount: 0,
+        currency: "INR"
+      });
+    }
+
+    const expectedAmountInPaise = Math.round(Number(resourceRecord.price) * 100);
+    const expectedCurrency = (resourceRecord.currency || "INR").toUpperCase();
+
+    // 2. Check public.resource_purchases if paymentId is provided
+    if (cleanPaymentId) {
+      const { data: purchaseByPayId } = await supabaseServer
+        .from("resource_purchases")
+        .select("*")
+        .eq("razorpay_payment_id", cleanPaymentId)
+        .eq("resource_id", resolvedResId)
+        .eq("status", "active")
+        .maybeSingle();
+
+      if (purchaseByPayId) {
+        return res.json({
+          success: true,
+          verified: true,
+          resourceId: resolvedResId,
+          orderId: purchaseByPayId.razorpay_order_id,
+          paymentId: purchaseByPayId.razorpay_payment_id,
+          amount: Number(purchaseByPayId.amount) || Number(resourceRecord.price) || 0,
+          currency: purchaseByPayId.currency || expectedCurrency
+        });
+      }
+
+      // Check public.payments by razorpay_payment_id strictly for this resource
+      const { data: paymentRecord } = await supabaseServer
+        .from("payments")
+        .select("*")
+        .eq("razorpay_payment_id", cleanPaymentId)
+        .eq("item_id", resolvedResId)
+        .eq("item_type", "resource")
+        .eq("status", "captured")
+        .maybeSingle();
+
+      if (paymentRecord) {
+        return res.json({
+          success: true,
+          verified: true,
+          resourceId: resolvedResId,
+          orderId: paymentRecord.razorpay_order_id,
+          paymentId: paymentRecord.razorpay_payment_id,
+          amount: Number(paymentRecord.amount) || Number(resourceRecord.price) || 0,
+          currency: paymentRecord.currency || expectedCurrency
+        });
+      }
+
+      // Gateway reconciliation fallback with strict amount, currency, and resource verification
+      const razorpay = getRazorpayClient();
+      if (razorpay && cleanPaymentId.startsWith("pay_")) {
+        try {
+          const rzpPayment = await razorpay.payments.fetch(cleanPaymentId);
+          if (
+            rzpPayment &&
+            rzpPayment.status === "captured" &&
+            rzpPayment.amount === expectedAmountInPaise &&
+            (rzpPayment.currency || "").toUpperCase() === expectedCurrency
+          ) {
+            const orderIdToFetch = rzpPayment.order_id || cleanOrderId;
+            if (orderIdToFetch) {
+              const rzpOrder = await razorpay.orders.fetch(orderIdToFetch);
+              const orderMatchesResource =
+                !rzpOrder.notes?.resourceId || rzpOrder.notes.resourceId === resolvedResId;
+              const orderMatchesAmount =
+                rzpOrder.amount === expectedAmountInPaise &&
+                (rzpOrder.currency || "").toUpperCase() === expectedCurrency;
+
+              if (orderMatchesResource && orderMatchesAmount) {
+                return res.json({
+                  success: true,
+                  verified: true,
+                  resourceId: resolvedResId,
+                  orderId: rzpOrder.id,
+                  paymentId: rzpPayment.id,
+                  amount: (rzpPayment.amount || 0) / 100,
+                  currency: expectedCurrency
+                });
+              }
+            }
+          }
+        } catch (rzpErr) {
+          // invalid payment ID or gateway rejection
+        }
+      }
+    }
+
+    // 3. Check if authenticated user owns the resource
+    if (authenticatedUser) {
+      const { data: userPurchases } = await supabaseServer
+        .from("resource_purchases")
+        .select("*")
+        .eq("user_id", authenticatedUser.id)
+        .eq("resource_id", resolvedResId)
+        .eq("status", "active")
+        .maybeSingle();
+
+      if (userPurchases) {
+        return res.json({
+          success: true,
+          verified: true,
+          resourceId: resolvedResId,
+          orderId: userPurchases.razorpay_order_id,
+          paymentId: userPurchases.razorpay_payment_id,
+          amount: Number(userPurchases.amount) || Number(resourceRecord?.price) || 0,
+          currency: userPurchases.currency || "INR"
+        });
+      }
+
+      const { data: userPayment } = await supabaseServer
+        .from("payments")
+        .select("*")
+        .eq("user_id", authenticatedUser.id)
+        .eq("item_type", "resource")
+        .eq("item_id", resolvedResId)
+        .eq("status", "captured")
+        .maybeSingle();
+
+      if (userPayment) {
+        return res.json({
+          success: true,
+          verified: true,
+          resourceId: resolvedResId,
+          orderId: userPayment.razorpay_order_id,
+          paymentId: userPayment.razorpay_payment_id,
+          amount: Number(userPayment.amount) || Number(resourceRecord?.price) || 0,
+          currency: userPayment.currency || "INR"
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      verified: false,
+      message: "No verified payment record found for this resource transaction."
+    });
+  } catch (err) {
+    console.error("[Verify Purchase Status] Unexpected error:", err);
+    return res.status(500).json({ success: false, verified: false, error: "Failed to verify purchase status." });
+  }
+});
+
+/**
+ * POST /api/payments/get-resource-download-url
+ *
+ * Server-authoritative endpoint to retrieve the download URL for a paid resource.
+ * Enforces server verification: only returns the asset URL if a verified captured payment exists.
+ */
+router.post("/get-resource-download-url", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    let authenticatedUser = null;
+    if (authHeader) {
+      const { user } = await verifySupabaseToken(authHeader);
+      authenticatedUser = user;
+    }
+
+    const { resourceId, orderId, paymentId } = req.body || {};
+    if (!resourceId) {
+      return res.status(400).json({ success: false, error: "resourceId is required." });
+    }
+
+    const cleanResourceId = String(resourceId).trim();
+    const cleanPaymentId = paymentId ? String(paymentId).trim() : null;
+    const cleanOrderId = orderId ? String(orderId).trim() : null;
+
+    const supabaseServer = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    if (!supabaseServer) {
+      return res.status(503).json({ success: false, error: "Database service unavailable." });
+    }
+
+    // 1. Fetch resource record
+    const isUUID = isValidUUID(cleanResourceId);
+    const { data: resourceRecord, error: rErr } = isUUID
+      ? await supabaseServer.from("resources").select("*").eq("id", cleanResourceId).maybeSingle()
+      : await supabaseServer.from("resources").select("*").eq("slug", cleanResourceId).maybeSingle();
+
+    if (rErr || !resourceRecord) {
+      return res.status(404).json({ success: false, error: "Resource not found." });
+    }
+
+    const isPaid = (resourceRecord.access_type || "free") === "paid" && Number(resourceRecord.price) > 0;
+
+    // If it's a free resource, permit retrieval
+    if (!isPaid) {
+      return res.json({
+        success: true,
+        downloadUrl: resourceRecord.file_url || resourceRecord.external_url || null,
+        externalUrl: resourceRecord.external_url || null,
+        fileUrl: resourceRecord.file_url || null,
+        accessType: "free"
+      });
+    }
+
+    // If paid, verify authorization
+    let isAuthorized = false;
+
+    // Check paymentId against database
+    if (cleanPaymentId) {
+      const { data: pRecord } = await supabaseServer
+        .from("payments")
+        .select("id, status, item_id, item_type")
+        .eq("razorpay_payment_id", cleanPaymentId)
+        .eq("status", "captured")
+        .maybeSingle();
+
+      if (pRecord && pRecord.item_id === resourceRecord.id && pRecord.item_type === "resource") {
+        isAuthorized = true;
+      }
+
+      if (!isAuthorized) {
+        const { data: purRecord } = await supabaseServer
+          .from("resource_purchases")
+          .select("id, status, resource_id")
+          .eq("razorpay_payment_id", cleanPaymentId)
+          .eq("status", "active")
+          .maybeSingle();
+
+        if (purRecord && purRecord.resource_id === resourceRecord.id) {
+          isAuthorized = true;
+        }
+      }
+
+      // Check with Razorpay gateway directly if not in DB yet
+      if (!isAuthorized && cleanPaymentId.startsWith("pay_")) {
+        const razorpay = getRazorpayClient();
+        if (razorpay) {
+          try {
+            const rzpPayment = await razorpay.payments.fetch(cleanPaymentId);
+            if (rzpPayment && rzpPayment.status === "captured") {
+              const expectedAmountInPaise = Math.round(Number(resourceRecord.price) * 100);
+              const matchesOrder = !cleanOrderId || rzpPayment.order_id === cleanOrderId;
+              const matchesAmount = Number(rzpPayment.amount) === expectedAmountInPaise;
+              const matchesCurrency = !resourceRecord.currency || (rzpPayment.currency || "").toUpperCase() === (resourceRecord.currency || "INR").toUpperCase();
+              const paymentNoteResId = rzpPayment.notes?.resourceId || rzpPayment.notes?.resource_id;
+              const matchesResNote = !paymentNoteResId || paymentNoteResId === resourceRecord.id || paymentNoteResId === resourceRecord.slug;
+
+              if (matchesOrder && matchesAmount && matchesCurrency && matchesResNote) {
+                isAuthorized = true;
+              }
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // Check authenticated user
+    if (!isAuthorized && authenticatedUser) {
+      if (checkIsAdmin(authenticatedUser)) {
+        isAuthorized = true;
+      } else {
+        const { data: userPayment } = await supabaseServer
+          .from("payments")
+          .select("id")
+          .eq("user_id", authenticatedUser.id)
+          .eq("item_type", "resource")
+          .eq("item_id", resourceRecord.id)
+          .eq("status", "captured")
+          .maybeSingle();
+
+        if (userPayment) {
+          isAuthorized = true;
+        } else {
+          const { data: userPur } = await supabaseServer
+            .from("resource_purchases")
+            .select("id")
+            .eq("user_id", authenticatedUser.id)
+            .eq("resource_id", resourceRecord.id)
+            .eq("status", "active")
+            .maybeSingle();
+
+          if (userPur) {
+            isAuthorized = true;
+          }
+        }
+      }
+    }
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        error: "Unauthorized: A confirmed payment is required to access this paid asset."
+      });
+    }
+
+    // Generate signed URL if Supabase storage or private asset
+    let finalDownloadUrl = resourceRecord.file_url || resourceRecord.external_url || null;
+
+    // Check if private storage asset exists in bucket
+    if (resourceRecord.slug === "pre-launch-tracking-audit-checklist" || resourceRecord.id === "6867ecdd-2797-40f0-bdc8-ead20600ac6c") {
+      const { data: signedData } = await supabaseServer.storage
+        .from("resources")
+        .createSignedUrl("paid/pre-launch-tracking-audit-checklist.pdf", 3600);
+      if (signedData?.signedUrl) {
+        finalDownloadUrl = signedData.signedUrl;
+      }
+    } else if (finalDownloadUrl && (finalDownloadUrl.includes("/storage/v1/object/") || finalDownloadUrl.startsWith("supabase://resources/"))) {
+      let objectPath = "";
+      if (finalDownloadUrl.startsWith("supabase://resources/")) {
+        objectPath = finalDownloadUrl.replace("supabase://resources/", "");
+      } else {
+        const match = finalDownloadUrl.match(/\/resources\/(.+)$/);
+        if (match && match[1]) {
+          objectPath = decodeURIComponent(match[1].split("?")[0]);
+        }
+      }
+      if (objectPath) {
+        const { data: signedData } = await supabaseServer.storage
+          .from("resources")
+          .createSignedUrl(objectPath, 3600);
+        if (signedData?.signedUrl) {
+          finalDownloadUrl = signedData.signedUrl;
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      downloadUrl: finalDownloadUrl,
+      externalUrl: resourceRecord.external_url || null,
+      fileUrl: finalDownloadUrl,
+      resourceTitle: resourceRecord.title,
+      accessType: "paid"
+    });
+  } catch (err) {
+    console.error("[Get Resource Download URL] Unexpected error:", err);
+    return res.status(500).json({ success: false, error: "Failed to generate authorized download URL." });
   }
 });
 
