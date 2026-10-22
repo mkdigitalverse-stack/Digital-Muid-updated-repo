@@ -545,10 +545,10 @@ export async function fulfillResourcePurchase({
       }
     }
 
-    // 5. Record CRM Lead in public.leads in background
+    // 5. Record CRM Lead in public.crm_leads in background
     if (supabaseServer && (customerEmail || customerName)) {
       try {
-        await supabaseServer.from("leads").insert({
+        await supabaseServer.from("crm_leads").insert({
           name: customerName || "Resource Buyer",
           email: customerEmail || "",
           phone: customerPhone || "",

@@ -133,7 +133,8 @@ interface AppContextType {
     name?: string,
     mobile?: string,
     profession?: string
-  ) => Promise<{ success: boolean; error?: any }>;
+  ) => Promise<{ success: boolean; leadId?: string; error?: any }>;
+  hasUnlockedFreeResource: (resourceId: string) => { isUnlocked: boolean; submissionId?: string };
   resourcePurchases: ResourcePurchase[];
   hasPurchasedResource: (resourceId: string) => boolean;
   purchaseResource: (resource: Resource, paymentId?: string, orderId?: string) => Promise<{ success: boolean; error?: string }>;
@@ -3104,13 +3105,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  const hasUnlockedFreeResource = useCallback((resourceId: string): { isUnlocked: boolean; submissionId?: string } => {
+    if (isAdminAuthenticated) return { isUnlocked: true, submissionId: 'admin_session' };
+    if (currentUser) return { isUnlocked: true, submissionId: `student_${currentUser.id}` };
+    if (typeof window === 'undefined' || !window.localStorage) return { isUnlocked: false };
+    try {
+      const raw = window.localStorage.getItem('digitalmuid_free_unlocked_resources');
+      if (!raw) return { isUnlocked: false };
+      const parsed = JSON.parse(raw);
+      const match = parsed[resourceId] || (resources.find(r => r.slug === resourceId) ? parsed[resources.find(r => r.slug === resourceId)!.id] : null);
+      if (match && match.submissionId) {
+        return { isUnlocked: true, submissionId: match.submissionId };
+      }
+      return { isUnlocked: false };
+    } catch {
+      return { isUnlocked: false };
+    }
+  }, [isAdminAuthenticated, currentUser, resources]);
+
   const recordResourceDownload = async (
     resourceId: string,
     email: string,
     name?: string,
     mobile?: string,
     profession?: string
-  ): Promise<{ success: boolean; error?: any }> => {
+  ): Promise<{ success: boolean; leadId?: string; error?: any }> => {
     try {
       // 1. Optimistic / local state increment
       setResources(prev =>
@@ -3144,6 +3163,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       setLeads(prev => [newLead, ...prev]);
 
+      // Save unlock for returning visitor access without duplicate submissions
+      if (typeof window !== 'undefined' && window.localStorage) {
+        try {
+          const raw = window.localStorage.getItem('digitalmuid_free_unlocked_resources');
+          const map = raw ? JSON.parse(raw) : {};
+          map[resourceId] = {
+            submissionId: newLead.id,
+            timestamp: new Date().toISOString()
+          };
+          if (targetResource?.slug) {
+            map[targetResource.slug] = {
+              submissionId: newLead.id,
+              timestamp: new Date().toISOString()
+            };
+          }
+          window.localStorage.setItem('digitalmuid_free_unlocked_resources', JSON.stringify(map));
+        } catch (e) {
+          console.warn('[AppContext] Could not persist free resource unlock:', e);
+        }
+      }
+
       // 4. Supabase DB persistence for CRM lead
       leadService.insertLead(newLead).catch(err => {
         console.warn('[Supabase Lead Magnet] CRM lead insertion notice:', err);
@@ -3154,8 +3194,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('[Supabase Resources] Download count increment notice:', err);
       });
 
-      notify('Access unlocked! Your download is ready.', 'success');
-      return { success: true };
+      notify('Enquiry received! Your resource is unlocked.', 'success');
+      return { success: true, leadId: newLead.id };
     } catch (err: any) {
       console.error('[AppContext] Error in recordResourceDownload:', err);
       notify('Unable to register download. Please try again.', 'error');
@@ -3763,6 +3803,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         publishResource,
         unpublishResource,
         recordResourceDownload,
+        hasUnlockedFreeResource,
         resourcePurchases,
         hasPurchasedResource,
         purchaseResource,

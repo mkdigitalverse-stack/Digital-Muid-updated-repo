@@ -670,9 +670,14 @@ router.post("/create-resource-order", async (req, res) => {
       }
     }
 
-    // 2. Validate access type & price
-    const accessType = (resourceRecord?.access_type || resourceRecord?.accessType || "free").toLowerCase();
-    const authoritativePrice = Number(resourceRecord?.price) || 0;
+    // 2. Validate access type & price (prefers DB column, gracefully accepts request fallback if legacy DB schema)
+    const accessType = (
+      resourceRecord?.access_type ||
+      resourceRecord?.accessType ||
+      req.body?.accessType ||
+      "free"
+    ).toLowerCase();
+    const authoritativePrice = Number(resourceRecord?.price) || Number(req.body?.price) || 0;
 
     if (accessType !== "paid" || authoritativePrice <= 0) {
       return res.status(400).json({
@@ -719,6 +724,27 @@ router.post("/create-resource-order", async (req, res) => {
         success: false,
         error: "Payment gateway failed to initialize order. Please try again."
       });
+    }
+
+    // Retain lead at checkout initiation: if visitor abandons checkout, their contact info and intent are preserved
+    if (dbClient && (customerDetails?.email || customerDetails?.name)) {
+      try {
+        dbClient.from("crm_leads").insert({
+          name: customerDetails?.name || "Resource Checkout Visitor",
+          email: customerDetails?.email || "",
+          phone: customerDetails?.phone || null,
+          source: "Resource Paid Checkout Initiated",
+          interest: resourceRecord?.title ? `Checkout: ${resourceRecord.title}` : `Resource ID: ${cleanResourceId}`,
+          notes: `Checkout initiated for ₹${authoritativePrice}. Order ID: ${order.id}. Awaiting payment completion.`,
+          status: "New",
+          amount: authoritativePrice,
+          created_at: new Date().toISOString()
+        }).then(({ error }) => {
+          if (error) console.warn("[Create Resource Order] CRM lead capture notice:", error.message);
+        });
+      } catch (leadCatch) {
+        console.warn("[Create Resource Order] Lead capture catch:", leadCatch?.message);
+      }
     }
 
     return res.json({

@@ -20,6 +20,8 @@ import { CourseDetailPage } from './pages/CourseDetailPage';
 import { FrameworksPage } from './pages/FrameworksPage';
 import { FrameworkDetailPage } from './pages/FrameworkDetailPage';
 import { ResourcesPage } from './pages/ResourcesPage';
+import { FreeResourceThankYouPage } from './pages/FreeResourceThankYouPage';
+import { PaidResourceThankYouPage } from './pages/PaidResourceThankYouPage';
 import { SpeakingPage } from './pages/SpeakingPage';
 import { ServicesPage } from './pages/ServicesPage';
 import { GrowthSystemsPage } from './pages/GrowthSystemsPage';
@@ -162,6 +164,12 @@ const MainApp: React.FC = () => {
     if (path.startsWith('/frameworks/')) {
       const slug = path.replace('/frameworks/', '');
       return <FrameworkDetailPage slug={slug} navigate={navigate} />;
+    }
+    if (path === '/resources/thank-you/free') {
+      return <FreeResourceThankYouPage navigate={navigate} />;
+    }
+    if (path === '/resources/thank-you/paid') {
+      return <PaidResourceThankYouPage navigate={navigate} />;
     }
     if (path === '/resources' || path.startsWith('/resources/') || path.startsWith('/downloads/')) {
       const slug = path.startsWith('/resources/') ? path.replace('/resources/', '') : selectedResourceIdForModal;

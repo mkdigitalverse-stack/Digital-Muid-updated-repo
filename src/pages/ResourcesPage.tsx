@@ -6,6 +6,7 @@ import { resourceService } from '../services/resourceService';
 import { paymentService } from '../services/paymentService';
 import { findFrameworksForResource } from '../utils/frameworkRelationships';
 import { loadRazorpayCheckoutScript, getClientRazorpayKeyId } from '../lib/razorpay';
+import { analytics } from '../utils/analytics';
 
 interface ResourcesPageProps {
   navigate: (path: string) => void;
@@ -22,6 +23,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
     resources,
     frameworks,
     recordResourceDownload,
+    hasUnlockedFreeResource,
     hasPurchasedResource,
     purchaseResource,
     notify,
@@ -97,44 +99,20 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
 
     // 2. Either free or already purchased:
     if (isAuthenticatedStudent || hasPurchasedResource(res.id)) {
-      setActiveDownloadResource(res);
-      setIsCompleted(true);
-      setFormError(null);
-      setDownloadError(null);
-      setIsDownloading(true);
-
-      try {
-        recordResourceDownload(
-          res.id,
-          currentUser?.email || email || '',
-          userProfile?.fullName || name || 'Member',
-          userProfile?.phone || mobile || '',
-          userProfile?.title || profession || ''
-        ).catch((err) => {
-          console.warn('[ResourcesPage] Could not auto-record student download:', err);
-        });
-
-        const isEntitled = res.accessType !== 'paid' && res.access_type !== 'paid'
-          ? true
-          : hasPurchasedResource(res.id);
-
-        const deliveryRes = await resourceService.deliverResource(res, { isAuthorized: isEntitled });
-        if (!deliveryRes.success) {
-          setDownloadError(deliveryRes.error || "We're unable to open this resource right now. Please try again.");
-          notify(deliveryRes.error || "Unable to open resource", "error");
-        } else {
-          notify(`Access granted: Delivering ${res.title || res.name || 'resource'}...`, "success");
-        }
-      } catch (err: any) {
-        console.error('[ResourcesPage] Error delivering resource:', err);
-        setDownloadError("We're unable to open this resource right now. Please try again.");
-      } finally {
-        setIsDownloading(false);
+      if (isPaid) {
+        navigate(`/resources/thank-you/paid?resourceId=${encodeURIComponent(res.id)}`);
+        return;
       }
+    }
+
+    // Check if free resource was already unlocked by this visitor to prevent duplicate leads
+    const unlockInfo = hasUnlockedFreeResource(res.id);
+    if (!isPaid && unlockInfo.isUnlocked) {
+      navigate(`/resources/thank-you/free?resourceId=${encodeURIComponent(res.id)}&submissionId=${encodeURIComponent(unlockInfo.submissionId || 'unlocked')}`);
       return;
     }
 
-    // 3. Anonymous visitors accessing free resources:
+    // 3. Lead capture required for free resources:
     setActiveDownloadResource(res);
     setIsCompleted(false);
     setFormError(null);
@@ -159,11 +137,18 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
 
     try {
       // 1. Authoritative server-side Razorpay order creation (strict server price)
-      const orderResult = await paymentService.createResourceOrder(paidModalResource.id, {
-        name: name.trim(),
-        email: email.trim(),
-        phone: mobile.trim()
-      });
+      const orderResult = await paymentService.createResourceOrder(
+        paidModalResource.id,
+        {
+          name: name.trim(),
+          email: email.trim(),
+          phone: mobile.trim()
+        },
+        {
+          accessType: paidModalResource.accessType || paidModalResource.access_type || 'paid',
+          price: paidModalResource.price
+        }
+      );
 
       if (!orderResult.success || !orderResult.orderId) {
         const errMsg = orderResult.error || 'Failed to initialize payment order with server. Please try again.';
@@ -172,6 +157,15 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
         setIsProcessingPayment(false);
         return;
       }
+
+      // Track paid checkout initiated
+      analytics.trackPaidCheckoutInitiated({
+        resourceId: paidModalResource.id,
+        resourceTitle: paidModalResource.title || paidModalResource.name || 'Digital Resource Toolkit',
+        orderId: orderResult.orderId,
+        amount: paidModalResource.price || 0,
+        currency: paidModalResource.currency || 'INR'
+      });
 
       // 2. Load Razorpay Checkout SDK
       const scriptLoaded = await loadRazorpayCheckoutScript();
@@ -224,14 +218,13 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
               return;
             }
 
-            // 4. Verification successful: persist purchase and deliver resource
+            // 4. Verification successful: persist purchase and redirect to paid thank-you page
             await purchaseResource(paidModalResource, response.razorpay_payment_id, response.razorpay_order_id);
             const unlocked = paidModalResource;
             setPaidModalResource(null);
-            setActiveDownloadResource(unlocked);
-            setIsCompleted(true);
-            await resourceService.deliverResource(unlocked, { isAuthorized: true });
+            if (onCloseModal) onCloseModal();
             notify(`Payment verified! Access granted to ${unlocked.title || unlocked.name}.`, 'success');
+            navigate(`/resources/thank-you/paid?resourceId=${encodeURIComponent(unlocked.id)}&orderId=${encodeURIComponent(response.razorpay_order_id)}&paymentId=${encodeURIComponent(response.razorpay_payment_id)}&amount=${encodeURIComponent(unlocked.price || 0)}`);
           } catch (vErr: any) {
             console.error('[ResourcesPage] Error verifying resource payment:', vErr);
             setFormError(vErr?.message || 'Payment verification failed on server. Please contact support.');
@@ -312,14 +305,22 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
 
     try {
       // Record download & register CRM lead
-      await recordResourceDownload(
+      const res = await recordResourceDownload(
         activeDownloadResource.id,
         email.trim(),
         name.trim(),
         mobile.trim(),
         profession.trim()
       );
-      setIsCompleted(true);
+      if (res.success) {
+        const targetRes = activeDownloadResource;
+        setActiveDownloadResource(null);
+        if (onCloseModal) onCloseModal();
+        const submissionId = res.leadId || `lead_${Date.now()}`;
+        navigate(`/resources/thank-you/free?resourceId=${encodeURIComponent(targetRes.id)}&submissionId=${encodeURIComponent(submissionId)}`);
+      } else {
+        setFormError('Unable to register details. Please try again.');
+      }
     } catch (err: any) {
       setFormError(err?.message || 'Unable to register details. Please try again.');
     } finally {

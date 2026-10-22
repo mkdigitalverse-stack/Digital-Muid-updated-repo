@@ -153,5 +153,103 @@ export const analytics = {
       appointment_time: time,
       status: 'confirmed'
     });
+  },
+
+  /**
+   * Dispatched strictly after a visitor's free resource lead enquiry is saved in the database.
+   * Never sends PII (no names, phones, or raw email addresses).
+   */
+  trackFreeResourceLeadConversion: (params: {
+    resourceId: string;
+    resourceTitle: string;
+    submissionId: string;
+    resourceType?: string;
+    sourcePage?: string;
+  }) => {
+    trackEvent('free_resource_lead_conversion', {
+      resource_id: params.resourceId,
+      resource_title: params.resourceTitle,
+      submission_id: params.submissionId,
+      resource_type: params.resourceType || 'lead_magnet',
+      source_page: params.sourcePage || '/resources',
+      conversion_timestamp: new Date().toISOString(),
+      event_id: params.submissionId
+    });
+  },
+
+  /**
+   * Dispatched when an authorized free resource file download is initiated.
+   */
+  trackFreeResourceDownload: (params: {
+    resourceId: string;
+    resourceTitle: string;
+    fileType?: string;
+  }) => {
+    trackEvent('free_resource_download', {
+      resource_id: params.resourceId,
+      resource_title: params.resourceTitle,
+      file_type: params.fileType || 'digital_asset',
+      download_timestamp: new Date().toISOString()
+    });
+  },
+
+  /**
+   * Dispatched when a paid resource checkout/order is created on the server.
+   */
+  trackPaidCheckoutInitiated: (params: {
+    resourceId: string;
+    resourceTitle: string;
+    orderId: string;
+    amount: number;
+    currency?: string;
+  }) => {
+    trackEvent('paid_checkout_initiated', {
+      resource_id: params.resourceId,
+      resource_title: params.resourceTitle,
+      order_id: params.orderId,
+      amount: params.amount,
+      currency: params.currency || 'INR',
+      timestamp: new Date().toISOString()
+    });
+  },
+
+  /**
+   * Dispatched ONLY after cryptographic server-side HMAC payment verification succeeds.
+   * Never sends payment secrets or customer PII.
+   */
+  trackPaidResourcePurchase: (params: {
+    resourceId: string;
+    resourceTitle: string;
+    orderId: string;
+    paymentId: string;
+    amount: number;
+    currency?: string;
+  }) => {
+    trackEvent('paid_resource_purchase_conversion', {
+      resource_id: params.resourceId,
+      resource_title: params.resourceTitle,
+      order_id: params.orderId,
+      payment_id: params.paymentId,
+      amount: params.amount,
+      currency: params.currency || 'INR',
+      conversion_timestamp: new Date().toISOString(),
+      event_id: params.orderId || params.paymentId
+    });
+  },
+
+  /**
+   * Dispatched when an authorized paid resource file download is initiated.
+   */
+  trackPaidResourceDownload: (params: {
+    resourceId: string;
+    resourceTitle: string;
+    orderId?: string;
+  }) => {
+    trackEvent('paid_resource_download', {
+      resource_id: params.resourceId,
+      resource_title: params.resourceTitle,
+      order_id: params.orderId || undefined,
+      download_timestamp: new Date().toISOString()
+    });
   }
 };

@@ -71,7 +71,14 @@ CREATE POLICY "Admin All Resource Purchases"
   USING (public.is_admin())
   WITH CHECK (public.is_admin());
 
--- 6. Ensure all pre-existing resources default to 'free' and 0 price safely
+-- 6. Ensure all pre-existing resources default to 'free' and 0 price safely without overwriting non-null prices
 UPDATE public.resources
-SET access_type = 'free', price = 0.00
-WHERE access_type IS NULL OR price IS NULL;
+SET access_type = 'free'
+WHERE access_type IS NULL;
+
+UPDATE public.resources
+SET price = 0.00
+WHERE price IS NULL;
+
+-- 7. Notify PostgREST to reload schema cache immediately
+NOTIFY pgrst, 'reload schema';

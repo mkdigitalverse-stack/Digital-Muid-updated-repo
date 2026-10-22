@@ -288,11 +288,18 @@ export const paymentService = {
    * Requests server-side Razorpay order creation for a paid digital resource.
    * Price is read strictly server-side from public.resources (authoritative).
    */
-  async createResourceOrder(resourceId: string, customerDetails?: {
-    name?: string;
-    email?: string;
-    phone?: string;
-  }): Promise<CreateResourceOrderResult> {
+  async createResourceOrder(
+    resourceId: string,
+    customerDetails?: {
+      name?: string;
+      email?: string;
+      phone?: string;
+    },
+    pricingHint?: {
+      accessType?: string;
+      price?: number;
+    }
+  ): Promise<CreateResourceOrderResult> {
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json'
@@ -308,7 +315,7 @@ export const paymentService = {
       const response = await fetch('/api/payments/create-resource-order', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ resourceId, customerDetails })
+        body: JSON.stringify({ resourceId, customerDetails, ...pricingHint })
       });
 
       const result: CreateResourceOrderResult = await response.json();

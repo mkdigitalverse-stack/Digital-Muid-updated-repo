@@ -22,6 +22,61 @@ export const mapDbRowToResourcePurchase = (row: any): ResourcePurchase => ({
   purchasedAt: String(row.purchased_at || row.purchasedAt || row.created_at || new Date().toISOString())
 });
 
+const PRICING_OVERRIDES_KEY = 'digitalmuid_resource_pricing_overrides';
+
+export interface ResourcePricingOverride {
+  accessType: 'free' | 'paid';
+  price: number;
+  currency: string;
+}
+
+/**
+ * Reads local pricing overrides for resources when database table schema does not yet include access_type.
+ */
+export const getResourcePricingOverrides = (): Record<string, ResourcePricingOverride> => {
+  if (typeof window === 'undefined' || !window.localStorage) return {};
+  try {
+    const raw = window.localStorage.getItem(PRICING_OVERRIDES_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * Persists local pricing overrides for a resource by ID and slug.
+ */
+export const saveResourcePricingOverride = (
+  id?: string,
+  slug?: string,
+  override?: ResourcePricingOverride
+) => {
+  if (typeof window === 'undefined' || !window.localStorage || !override) return;
+  try {
+    const current = getResourcePricingOverrides();
+    if (id) current[id] = override;
+    if (slug) current[slug] = override;
+    window.localStorage.setItem(PRICING_OVERRIDES_KEY, JSON.stringify(current));
+  } catch (e) {
+    console.warn('[ResourceService] Failed to persist pricing override:', e);
+  }
+};
+
+/**
+ * Identifies if an error is due to a missing column in Supabase schema cache (PGRST204).
+ */
+export const isPgrstMissingColumnError = (err: any): boolean => {
+  if (!err) return false;
+  if (err.code === 'PGRST204') return true;
+  const msg = typeof err.message === 'string' ? err.message.toLowerCase() : '';
+  return msg.includes('column') && (
+    msg.includes('access_type') ||
+    msg.includes('price') ||
+    msg.includes('currency') ||
+    msg.includes('schema cache')
+  );
+};
+
 /**
  * Transforms a Supabase database row from public.resources into an application Resource object.
  */
@@ -37,6 +92,21 @@ export const mapDbRowToResource = (row: any): Resource => {
   const thumbnailUrl = row.thumbnail_url || row.thumbnailUrl || row.coverImage || undefined;
   const title = String(row.title || row.name || '');
   const resourceType = String(row.resource_type || row.resourceType || row.type || 'Guide');
+
+  const localOverrides = getResourcePricingOverrides();
+  const localOverride = (row.id ? localOverrides[row.id] : null) || (row.slug ? localOverrides[row.slug] : null);
+
+  const rawAccessType = row.access_type ?? row.accessType;
+  const resolvedAccessType = (rawAccessType !== undefined && rawAccessType !== null
+    ? String(rawAccessType).toLowerCase()
+    : (localOverride?.accessType || 'free')) as 'free' | 'paid';
+
+  const rawPrice = row.price;
+  const resolvedPrice = typeof rawPrice === 'number'
+    ? rawPrice
+    : (rawPrice !== undefined && rawPrice !== null ? (parseFloat(rawPrice) || 0) : (localOverride?.price ?? 0));
+
+  const resolvedCurrency = row.currency || localOverride?.currency || 'INR';
 
   return {
     id: String(row.id),
@@ -68,10 +138,10 @@ export const mapDbRowToResource = (row: any): Resource => {
     leadCaptureRequired: row.lead_capture_required !== undefined ? Boolean(row.lead_capture_required) : true,
     seoTitle: row.seo_title || row.seoTitle || undefined,
     seoDescription: row.seo_description || row.seoDescription || undefined,
-    accessType: (row.access_type || row.accessType || 'free') as 'free' | 'paid',
-    access_type: (row.access_type || row.accessType || 'free') as 'free' | 'paid',
-    price: typeof row.price === 'number' ? row.price : (parseFloat(row.price || '0') || 0),
-    currency: row.currency || 'INR',
+    accessType: resolvedAccessType === 'paid' ? 'paid' : 'free',
+    access_type: resolvedAccessType === 'paid' ? 'paid' : 'free',
+    price: resolvedAccessType === 'paid' ? Math.max(0, resolvedPrice) : 0,
+    currency: resolvedCurrency,
     createdAt: String(row.created_at || row.createdAt || new Date().toISOString()),
     updatedAt: String(row.updated_at || row.updatedAt || new Date().toISOString())
   };
@@ -327,13 +397,68 @@ export const resourceService = {
         resource_type: payload.resource_type
       });
 
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('resources')
         .insert([payload])
         .select()
         .single();
 
+      if (isPgrstMissingColumnError(error)) {
+        console.warn('[Supabase Resources] public.resources table schema does not include access_type/price yet (PGRST204). Retrying insert without pricing columns and storing pricing locally.');
+        const safePayload = { ...payload };
+        delete safePayload.access_type;
+        delete safePayload.price;
+        delete safePayload.currency;
+
+        const retry = await supabase
+          .from('resources')
+          .insert([safePayload])
+          .select()
+          .single();
+
+        if (retry.error) {
+          if (retry.error.code === 'PGRST116') {
+            return {
+              data: null,
+              error: {
+                code: '403',
+                message: 'Administrator authorization required. Please ensure you are logged in to the admin portal.'
+              }
+            };
+          }
+          console.error('[Supabase Resources] Safe insert retry failed:', retry.error);
+          return { data: null, error: retry.error };
+        }
+
+        const created = mapDbRowToResource(retry.data);
+        const at = (resource.accessType || resource.access_type || 'free').toLowerCase() === 'paid' ? 'paid' : 'free';
+        const pr = typeof resource.price === 'number' ? Math.max(0, resource.price) : 0;
+        const cur = resource.currency || 'INR';
+
+        saveResourcePricingOverride(created.id, created.slug, {
+          accessType: at,
+          price: pr,
+          currency: cur
+        });
+
+        created.accessType = at;
+        created.access_type = at;
+        created.price = pr;
+        created.currency = cur;
+
+        return { data: created, error: null };
+      }
+
       if (error) {
+        if (error.code === 'PGRST116') {
+          return {
+            data: null,
+            error: {
+              code: '403',
+              message: 'Administrator authorization required. Please ensure you are logged in to the admin portal.'
+            }
+          };
+        }
         console.error('[Supabase Resources] Insert error details:', {
           code: error.code,
           message: error.message,
@@ -341,6 +466,17 @@ export const resourceService = {
           hint: error.hint
         });
         return { data: null, error };
+      }
+
+      // If full insert succeeded with pricing columns, also update local override for immediate consistency
+      if (resource.accessType !== undefined || resource.access_type !== undefined || resource.price !== undefined) {
+        const at = (resource.accessType || resource.access_type || 'free').toLowerCase() === 'paid' ? 'paid' : 'free';
+        const pr = typeof resource.price === 'number' ? Math.max(0, resource.price) : 0;
+        saveResourcePricingOverride(data?.id, resource.slug, {
+          accessType: at,
+          price: pr,
+          currency: resource.currency || 'INR'
+        });
       }
 
       const created = mapDbRowToResource(data);
@@ -365,20 +501,88 @@ export const resourceService = {
 
       console.info(`[Supabase Resources] Updating resource record ${id}:`, payload);
 
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('resources')
         .update(payload)
         .eq('id', id)
         .select()
         .single();
 
+      if (isPgrstMissingColumnError(error)) {
+        console.warn(`[Supabase Resources] public.resources table schema does not include access_type/price yet (PGRST204). Retrying update without pricing columns and storing pricing locally.`);
+        const safePayload = { ...payload };
+        delete safePayload.access_type;
+        delete safePayload.price;
+        delete safePayload.currency;
+
+        const retry = await supabase
+          .from('resources')
+          .update(safePayload)
+          .eq('id', id)
+          .select()
+          .single();
+
+        if (retry.error) {
+          if (retry.error.code === 'PGRST116') {
+            return {
+              data: null,
+              error: {
+                code: '403',
+                message: 'Administrator authorization required. Please ensure you are logged in to the admin portal.'
+              }
+            };
+          }
+          console.error(`[Supabase Resources] Safe update retry failed for ${id}:`, retry.error);
+          return { data: null, error: retry.error };
+        }
+
+        const updated = mapDbRowToResource(retry.data);
+        const at = (updates.accessType || updates.access_type || updated.accessType || 'free').toLowerCase() === 'paid' ? 'paid' : 'free';
+        const pr = typeof updates.price === 'number' ? Math.max(0, updates.price) : (updated.price || 0);
+        const cur = updates.currency || updated.currency || 'INR';
+
+        saveResourcePricingOverride(id, updates.slug || updated.slug, {
+          accessType: at,
+          price: pr,
+          currency: cur
+        });
+
+        updated.accessType = at;
+        updated.access_type = at;
+        updated.price = pr;
+        updated.currency = cur;
+
+        console.info(`[Supabase Resources] Successfully updated resource ${id} (with safe schema fallback)`);
+        return { data: updated, error: null };
+      }
+
       if (error) {
+        if (error.code === 'PGRST116') {
+          return {
+            data: null,
+            error: {
+              code: '403',
+              message: 'Administrator authorization required. Please ensure you are logged in to the admin portal.'
+            }
+          };
+        }
         console.error(`[Supabase Resources] Update failed for ${id}:`, {
           code: error.code,
           message: error.message,
           details: error.details
         });
         return { data: null, error };
+      }
+
+      // If full update succeeded, also update local override for immediate consistency
+      if (updates.accessType !== undefined || updates.access_type !== undefined || updates.price !== undefined) {
+        const at = (updates.accessType || updates.access_type || 'free').toLowerCase() === 'paid' ? 'paid' : 'free';
+        const pr = typeof updates.price === 'number' ? Math.max(0, updates.price) : 0;
+        saveResourcePricingOverride(id, updates.slug, {
+          accessType: at,
+          price: pr,
+          currency: updates.currency || 'INR'
+        });
       }
 
       const updated = mapDbRowToResource(data);
