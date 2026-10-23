@@ -3212,21 +3212,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return true;
     }
 
-    // Check if the current user or guest has an active purchase record
-    const hasPurchaseRecord = resourcePurchases.some(
-      p => (p.resourceId === resourceId || p.resource_id === resourceId) &&
-           p.status === 'active' &&
-           (!currentUser || p.userId === currentUser.id || p.user_id === currentUser.id || p.userId === 'guest')
-    );
-    if (hasPurchaseRecord) return true;
+    const BUNDLE_ID = '2d50e5e3-711d-4461-a70d-0ed54dd29f17';
+    const isBundleChild = [
+      '27ef2c04-4d4a-4dbe-a702-d4013b2542b9', // Workbook
+      'fafe5ffc-3323-4761-9d22-50a2588f6326', // Calculator
+      '004d374c-d872-4bfe-bf54-8083504e9174', // Copy frameworks
+      '6867ecdd-2797-40f0-bdc8-ead20600ac6c'  // Checklist
+    ].includes(target.id) || [
+      'meta-ads-campaign-planner-workbook',
+      'the-ad-budget-breat-even-calculate',
+      'the-ad-budget-break-even-calculator',
+      '10-high-converting-meta-ads-copy-frameworks',
+      'pre-launch-tracking-audit-checklist'
+    ].includes(target.slug || '');
 
-    // Check student payments ledger
-    const hasPayment = studentPayments.some(
-      p => (p.itemType === 'resource' || (p as any).itemType === 'resource') &&
-           p.itemId === resourceId &&
-           p.status === 'captured'
-    );
-    return hasPayment;
+    const validIdsToCheck = isBundleChild ? [target.id, BUNDLE_ID] : [target.id];
+
+    // Authenticated user checks
+    if (currentUser) {
+      const hasPurchaseRecord = resourcePurchases.some(
+        p => validIdsToCheck.includes(p.resourceId || p.resource_id || '') &&
+             p.status === 'active' &&
+             (p.userId === currentUser.id || p.user_id === currentUser.id)
+      );
+      if (hasPurchaseRecord) return true;
+
+      const hasPayment = studentPayments.some(
+        p => (p.itemType === 'resource' || (p as any).itemType === 'resource') &&
+             validIdsToCheck.includes(p.itemId) &&
+             p.status === 'captured' &&
+             p.userId === currentUser.id
+      );
+      if (hasPayment) return true;
+    }
+
+    // Guest checkout session checks (strictly requires matching verified transaction key)
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        for (const id of validIdsToCheck) {
+          if (window.sessionStorage.getItem(`verified_guest_purchase_${id}`)) {
+            return true;
+          }
+        }
+      }
+    } catch {}
+
+    return false;
   }, [isAdminAuthenticated, resources, resourcePurchases, currentUser, studentPayments]);
 
   const purchaseResource = async (
@@ -3279,6 +3310,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           createdAt: new Date().toISOString()
         };
         setStudentPayments(prev => [newPaymentRecord, ...prev]);
+      } else if (isPaid && typeof window !== 'undefined' && window.sessionStorage) {
+        try {
+          window.sessionStorage.setItem(`verified_guest_purchase_${resource.id}`, finalPaymentId);
+          if (resource.slug) {
+            window.sessionStorage.setItem(`verified_guest_purchase_${resource.slug}`, finalPaymentId);
+          }
+        } catch {}
       }
 
       // Increment resource download count

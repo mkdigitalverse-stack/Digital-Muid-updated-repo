@@ -57,12 +57,13 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
   const conversionTrackedRef = useRef<boolean>(false);
 
   // Parse query params (paymentId / orderId if redirected from checkout)
-  const [urlParams] = useState<{ orderId: string | null; paymentId: string | null }>(() => {
-    if (typeof window === 'undefined') return { orderId: null, paymentId: null };
+  const [urlParams] = useState<{ orderId: string | null; paymentId: string | null; checkout: boolean }>(() => {
+    if (typeof window === 'undefined') return { orderId: null, paymentId: null, checkout: false };
     const sp = new URLSearchParams(window.location.search);
     return {
       orderId: sp.get('orderId') || sp.get('order_id'),
-      paymentId: sp.get('paymentId') || sp.get('payment_id')
+      paymentId: sp.get('paymentId') || sp.get('payment_id'),
+      checkout: sp.get('checkout') === 'true' || sp.get('buy') === 'true'
     };
   });
 
@@ -113,6 +114,16 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
     verifyAndLoadBundle();
   }, [currentUser, urlParams.orderId, urlParams.paymentId]);
 
+  // If visitor navigated with intent to buy (?checkout=true), open checkout modal
+  useEffect(() => {
+    if (urlParams.checkout && isAuthorized === false && !isLoading) {
+      setCheckoutName(userProfile?.fullName || '');
+      setCheckoutEmail(currentUser?.email || '');
+      setCheckoutPhone(userProfile?.phone || '');
+      setShowCheckoutModal(true);
+    }
+  }, [urlParams.checkout, isAuthorized, isLoading, userProfile, currentUser]);
+
   const handleDownloadFile = async (file: BundleFileItem) => {
     if (!file.downloadUrl) {
       notify('Download URL not ready. Refreshing access...', 'error');
@@ -127,6 +138,26 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
         resourceTitle: file.title,
         orderId: urlParams.orderId || undefined
       });
+
+      // Attempt blob download for seamless direct save, fallback to anchor
+      try {
+        const resp = await fetch(file.downloadUrl, { mode: 'cors' });
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = blobUrl;
+          link.download = file.filename || `${file.slug}.pdf`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+          notify(`Downloaded: ${file.title}`, 'success');
+          return;
+        }
+      } catch {
+        // Fallback to direct link download
+      }
 
       // Secure browser download using verified short-lived signed URL
       const link = document.createElement('a');
@@ -226,9 +257,22 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
               throw new Error(verifyResult.error || 'Cryptographic verification failed.');
             }
 
-            if (bundleResource) {
-              await purchaseResource(bundleResource, response.razorpay_payment_id, response.razorpay_order_id);
-            }
+            const targetBundle = bundleResource || {
+              id: '2d50e5e3-711d-4461-a70d-0ed54dd29f17',
+              slug: 'meta-ads-campaign-planner-bundle',
+              title: 'Meta Ads Campaign Planner Bundle',
+              accessType: 'paid',
+              price: 299,
+              currency: 'INR'
+            } as any;
+            await purchaseResource(targetBundle, response.razorpay_payment_id, response.razorpay_order_id);
+
+            try {
+              if (typeof window !== 'undefined' && window.sessionStorage) {
+                window.sessionStorage.setItem('verified_guest_purchase_2d50e5e3-711d-4461-a70d-0ed54dd29f17', response.razorpay_payment_id);
+                window.sessionStorage.setItem('verified_guest_purchase_meta-ads-campaign-planner-bundle', response.razorpay_payment_id);
+              }
+            } catch {}
 
             setShowCheckoutModal(false);
             notify('Payment verified! Complete bundle unlocked.', 'success');

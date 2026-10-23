@@ -20,6 +20,63 @@ import {
   fulfillResourcePurchase
 } from "./paymentFulfillment.js";
 
+// ==============================================================================
+// AUTHORITATIVE PAID RESOURCES CATALOG & PRICING
+// Guarantees authoritative fail-closed pricing even if DB schema cache lacks columns
+// ==============================================================================
+export const AUTHORITATIVE_PAID_RESOURCES = {
+  // Bundle (All 4 tools)
+  "2d50e5e3-711d-4461-a70d-0ed54dd29f17": { price: 299, accessType: "paid", currency: "INR" },
+  "meta-ads-campaign-planner-bundle": { price: 299, accessType: "paid", currency: "INR" },
+  // Deliverable 1: The Meta Ads Campaign Planner Workbook
+  "27ef2c04-4d4a-4dbe-a702-d4013b2542b9": { price: 129, accessType: "paid", currency: "INR" },
+  "meta-ads-campaign-planner-workbook": { price: 129, accessType: "paid", currency: "INR" },
+  // Deliverable 2: Interactive Ad Budget & Break-Even Calculator
+  "fafe5ffc-3323-4761-9d22-50a2588f6326": { price: 79, accessType: "paid", currency: "INR" },
+  "the-ad-budget-breat-even-calculate": { price: 79, accessType: "paid", currency: "INR" },
+  "the-ad-budget-break-even-calculator": { price: 79, accessType: "paid", currency: "INR" },
+  // Deliverable 3: 10 High-Converting Meta Ads Copy Frameworks
+  "004d374c-d872-4bfe-bf54-8083504e9174": { price: 79, accessType: "paid", currency: "INR" },
+  "10-high-converting-meta-ads-copy-frameworks": { price: 79, accessType: "paid", currency: "INR" },
+  // Deliverable 4: Pre-Launch & Tracking Audit Checklist
+  "6867ecdd-2797-40f0-bdc8-ead20600ac6c": { price: 79, accessType: "paid", currency: "INR" },
+  "pre-launch-tracking-audit-checklist": { price: 79, accessType: "paid", currency: "INR" }
+};
+
+export function getAuthoritativeResourcePricing(idOrSlug, resourceRecord = null, fallbackBody = null) {
+  const clean = String(idOrSlug || "").trim();
+  const known = AUTHORITATIVE_PAID_RESOURCES[clean] ||
+    (resourceRecord?.id && AUTHORITATIVE_PAID_RESOURCES[resourceRecord.id]) ||
+    (resourceRecord?.slug && AUTHORITATIVE_PAID_RESOURCES[resourceRecord.slug]);
+
+  const dbAccessType = resourceRecord?.access_type || resourceRecord?.accessType;
+  const isExplicitlyPaidInDb = dbAccessType && String(dbAccessType).toLowerCase() === "paid" && Number(resourceRecord?.price) > 0;
+
+  if (isExplicitlyPaidInDb) {
+    return {
+      accessType: "paid",
+      price: Number(resourceRecord.price),
+      currency: (resourceRecord.currency || "INR").toUpperCase()
+    };
+  }
+
+  if (known) {
+    return {
+      accessType: "paid",
+      price: known.price,
+      currency: known.currency
+    };
+  }
+
+  const fallbackAccessType = (fallbackBody?.accessType || dbAccessType || "free").toLowerCase();
+  const fallbackPrice = Number(resourceRecord?.price) || Number(fallbackBody?.price) || 0;
+  return {
+    accessType: fallbackAccessType,
+    price: fallbackPrice,
+    currency: (resourceRecord?.currency || fallbackBody?.currency || "INR").toUpperCase()
+  };
+}
+
 const router = express.Router();
 
 /**
@@ -670,24 +727,18 @@ router.post("/create-resource-order", async (req, res) => {
       }
     }
 
-    // 2. Validate access type & price (prefers DB column, gracefully accepts request fallback if legacy DB schema)
-    const accessType = (
-      resourceRecord?.access_type ||
-      resourceRecord?.accessType ||
-      req.body?.accessType ||
-      "free"
-    ).toLowerCase();
-    const authoritativePrice = Number(resourceRecord?.price) || Number(req.body?.price) || 0;
-
-    if (accessType !== "paid" || authoritativePrice <= 0) {
+    // 2. Validate access type & price using authoritative pricing resolver
+    const pricing = getAuthoritativeResourcePricing(cleanResourceId, resourceRecord, req.body);
+    if (pricing.accessType !== "paid" || pricing.price <= 0) {
       return res.status(400).json({
         success: false,
         error: "This resource is free and does not require payment processing."
       });
     }
 
+    const authoritativePrice = pricing.price;
+    const currency = pricing.currency;
     const amountInPaise = Math.round(authoritativePrice * 100);
-    const currency = (resourceRecord?.currency || "INR").toUpperCase();
 
     // 3. Retrieve server Razorpay client
     const razorpay = getRazorpayClient();
@@ -841,8 +892,9 @@ router.post("/verify-resource-payment", async (req, res) => {
       resourceRecord = data;
     }
 
-    const amount = Number(resourceRecord?.price) || 0;
-    const currency = (resourceRecord?.currency || "INR").toUpperCase();
+    const pricing = getAuthoritativeResourcePricing(resourceId.trim(), resourceRecord, req.body);
+    const amount = pricing.price;
+    const currency = pricing.currency;
 
     // 2b. Gateway reconciliation with Razorpay API (order amount & payment status)
     const razorpay = getRazorpayClient();
@@ -996,10 +1048,10 @@ export const BUNDLE_ITEMS = [
     slug: "the-ad-budget-breat-even-calculate",
     title: "Interactive Ad Budget & Break-Even Calculator",
     description: "Unit economics engine, target ROAS forecaster & volume scenario planner.",
-    format: "PDF Protocol & Calculator",
-    fileSize: "1.9 MB",
-    filename: "the-ad-budget-break-even-calculator.pdf",
-    storagePath: "paid/the-ad-budget-break-even-calculator.pdf"
+    format: "Interactive Spreadsheet (.xlsx) & Protocol",
+    fileSize: "29.5 KB",
+    filename: "the-ad-budget-break-even-calculator.xlsx",
+    storagePath: "paid/the-ad-budget-break-even-calculator.xlsx"
   },
   {
     id: "004d374c-d872-4bfe-bf54-8083504e9174",
@@ -1029,7 +1081,10 @@ export function isBundleOrBundleItem(idOrSlug) {
   if (clean === BUNDLE_RESOURCE_ID || clean === BUNDLE_SLUG) {
     return { isBundle: true, isChild: false, item: null };
   }
-  const child = BUNDLE_ITEMS.find((i) => i.id === clean || i.slug === clean);
+  const child = BUNDLE_ITEMS.find(
+    (i) => i.id === clean || i.slug === clean ||
+      (i.slug === "the-ad-budget-breat-even-calculate" && clean === "the-ad-budget-break-even-calculator")
+  );
   if (child) {
     return { isBundle: false, isChild: true, item: child };
   }
@@ -1095,7 +1150,8 @@ router.get("/verify-purchase-status", async (req, res) => {
     }
 
     const resolvedResId = resourceRecord.id;
-    const isFree = (resourceRecord.access_type || "free") !== "paid" || Number(resourceRecord.price) <= 0;
+    const pricing = getAuthoritativeResourcePricing(cleanResourceId, resourceRecord);
+    const isFree = pricing.accessType !== "paid" || pricing.price <= 0;
 
     if (isFree) {
       return res.json({
@@ -1110,8 +1166,8 @@ router.get("/verify-purchase-status", async (req, res) => {
     }
 
     const allowedResourceIds = getAllowedResourceIdsForAuthorization(resourceRecord);
-    const expectedAmountInPaise = Math.round(Number(resourceRecord.price) * 100);
-    const expectedCurrency = (resourceRecord.currency || "INR").toUpperCase();
+    const expectedAmountInPaise = Math.round(pricing.price * 100);
+    const expectedCurrency = pricing.currency;
 
     // 2. Check public.resource_purchases if paymentId is provided
     if (cleanPaymentId) {
@@ -1304,7 +1360,8 @@ router.post("/get-resource-download-url", async (req, res) => {
       return res.status(404).json({ success: false, error: "Resource not found." });
     }
 
-    const isPaid = (resourceRecord.access_type || "free") === "paid" && Number(resourceRecord.price) > 0;
+    const pricing = getAuthoritativeResourcePricing(cleanResourceId, resourceRecord);
+    const isPaid = pricing.accessType === "paid" && pricing.price > 0;
 
     // If it's a free resource, permit retrieval and deliver signed URL or static asset
     if (!isPaid) {
@@ -1440,7 +1497,10 @@ router.post("/get-resource-download-url", async (req, res) => {
     let finalDownloadUrl = null;
 
     // Check if item is in BUNDLE_ITEMS
-    const bundleItem = BUNDLE_ITEMS.find((i) => i.id === resourceRecord.id || i.slug === resourceRecord.slug);
+    const bundleItem = BUNDLE_ITEMS.find(
+      (i) => i.id === resourceRecord.id || i.slug === resourceRecord.slug ||
+        (i.slug === "the-ad-budget-breat-even-calculate" && resourceRecord.slug === "the-ad-budget-break-even-calculator")
+    );
     if (bundleItem) {
       const { data: signedData } = await supabaseServer.storage
         .from("resources")

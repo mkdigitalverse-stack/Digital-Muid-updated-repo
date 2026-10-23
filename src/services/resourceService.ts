@@ -814,8 +814,18 @@ export const resourceService = {
     let errorCode = '';
     let errorMessage = '';
 
-    const safeFilename = `${(resource.slug || resource.title || resource.name || 'resource')
-      .replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+    const isXlsx =
+      Boolean(
+        (rawFileUrl && rawFileUrl.includes('.xlsx')) ||
+        (resource.fileUrl && resource.fileUrl.includes('.xlsx')) ||
+        (resource.format && resource.format.toLowerCase().includes('spreadsheet')) ||
+        (resource.fileType && resource.fileType.toLowerCase().includes('xlsx')) ||
+        (resource.slug && resource.slug.includes('calculator'))
+      );
+
+    const fileExt = isXlsx ? '.xlsx' : '.pdf';
+    const rawName = (resource.slug || resource.title || resource.name || 'resource').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeFilename = rawName.endsWith(fileExt) ? rawName : `${rawName}${fileExt}`;
 
     try {
       // -------------------------------------------------------------

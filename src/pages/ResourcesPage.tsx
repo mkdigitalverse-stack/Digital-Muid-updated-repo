@@ -62,8 +62,17 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
       const res = publishedResources.find((r) => r.id === selectedResourceId || r.slug === selectedResourceId);
       if (res) {
         const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
-        if (isPaid && !hasPurchasedResource(res.id)) {
-          setPaidModalResource(res);
+        if (isPaid) {
+          if (!hasPurchasedResource(res.id)) {
+            setPaidModalResource(res);
+          } else {
+            const isBundle = res.id === '2d50e5e3-711d-4461-a70d-0ed54dd29f17' || res.slug === 'meta-ads-campaign-planner-bundle';
+            if (isBundle) {
+              navigate('/resources/bundle/meta-ads-campaign-planner-bundle');
+            } else {
+              navigate(`/resources/thank-you/paid?resourceId=${encodeURIComponent(res.id)}`);
+            }
+          }
         } else {
           setActiveDownloadResource(res);
           if (currentUser && !isAdminAuthenticated) {
@@ -72,7 +81,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
         }
       }
     }
-  }, [selectedResourceId, publishedResources, currentUser, isAdminAuthenticated, hasPurchasedResource]);
+  }, [selectedResourceId, publishedResources, currentUser, isAdminAuthenticated, hasPurchasedResource, navigate]);
 
   const handleToggleResourceBookmark = async (resourceId: string) => {
     if (!currentUser) {
@@ -86,28 +95,34 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
   const handleDownloadClick = async (res: Resource) => {
     const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
 
-    // 1. Paid resource protection: require payment before granting access
-    if (isPaid && !hasPurchasedResource(res.id)) {
-      setPaidModalResource(res);
-      setName(userProfile?.fullName || '');
-      setEmail(currentUser?.email || '');
-      setMobile(userProfile?.phone || '');
-      setProfession(userProfile?.title || '');
-      setFormError(null);
+    // 1. Paid resources: require verified purchase
+    if (isPaid) {
+      if (!hasPurchasedResource(res.id)) {
+        // Open the paid checkout modal directly for this resource/bundle
+        setPaidModalResource(res);
+        setName(userProfile?.fullName || '');
+        setEmail(currentUser?.email || '');
+        setMobile(userProfile?.phone || '');
+        setProfession(userProfile?.title || '');
+        setFormError(null);
+        return;
+      }
+
+      // If already verified purchased:
+      const isBundle = res.id === '2d50e5e3-711d-4461-a70d-0ed54dd29f17' || res.slug === 'meta-ads-campaign-planner-bundle';
+      if (isBundle) {
+        navigate('/resources/bundle/meta-ads-campaign-planner-bundle');
+        return;
+      }
+      navigate(`/resources/thank-you/paid?resourceId=${encodeURIComponent(res.id)}`);
       return;
     }
 
-    // 2. Either free or already purchased:
-    if (isAuthenticatedStudent || hasPurchasedResource(res.id)) {
-      if (isPaid) {
-        const isBundle = res.id === '2d50e5e3-711d-4461-a70d-0ed54dd29f17' || res.slug === 'meta-ads-campaign-planner-bundle';
-        if (isBundle) {
-          navigate('/resources/bundle/meta-ads-campaign-planner-bundle');
-          return;
-        }
-        navigate(`/resources/thank-you/paid?resourceId=${encodeURIComponent(res.id)}`);
-        return;
-      }
+    // 2. Free resources logic:
+    if (isAuthenticatedStudent) {
+      setActiveDownloadResource(res);
+      setIsCompleted(true);
+      return;
     }
 
     // Check if free resource was already unlocked by this visitor to prevent duplicate leads
