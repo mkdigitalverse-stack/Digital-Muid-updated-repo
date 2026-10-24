@@ -186,7 +186,7 @@ export const TermsPage: React.FC<TermsPageProps> = ({ navigate }) => {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-slate-900">Official Executive Contact:</span>
-                  <span>contact@digitalmuid.com / mkdigitalverse@gmail.com</span>
+                  <span>support@digitalmuid.in / mkdigitalverse@gmail.com</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-slate-900">Operational Hub:</span>

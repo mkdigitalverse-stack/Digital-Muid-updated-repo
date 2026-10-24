@@ -12,7 +12,7 @@ export const mapDbRowToSiteSettings = (row: any): SiteSettings => {
     googleCalendarConnected: row.google_calendar_connected !== undefined ? Boolean(row.google_calendar_connected) : true,
     googleMeetEnabled: row.google_meet_enabled !== undefined ? Boolean(row.google_meet_enabled) : true,
     notificationEmail: row.notification_email || row.notificationEmail || 'mkdigitalverse@gmail.com',
-    phoneContact: row.phone_contact || row.phoneContact || '+91 99066 84898',
+    phoneContact: row.phone_contact || row.phoneContact || '+91 93358 17155',
     locationCity: row.location_city || row.locationCity || 'Bengaluru & Srinagar, India',
     socialLinkedin: row.social_linkedin || row.socialLinkedin || 'https://linkedin.com/in/digitalmuid',
     socialInstagram: row.social_instagram || row.socialInstagram || 'https://instagram.com/digitalmuid',

@@ -214,7 +214,7 @@ export const ContactPage: React.FC<ContactPageProps> = ({ navigate }) => {
             <div className="space-y-2.5">
               <div className="flex items-center gap-3">
                 <Mail className="w-4 h-4 text-[#1877F2]" />
-                <span>Executive Office: contact@digitalmuid.com</span>
+                <span>Executive Office & Support: support@digitalmuid.in</span>
               </div>
               <div className="flex items-center gap-3">
                 <Globe className="w-4 h-4 text-emerald-600" />
