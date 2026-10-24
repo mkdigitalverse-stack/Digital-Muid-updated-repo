@@ -3,6 +3,7 @@ import React from 'react';
 interface MarkdownRendererProps {
   content: string;
   className?: string;
+  dark?: boolean;
 }
 
 /**
@@ -10,8 +11,10 @@ interface MarkdownRendererProps {
  * Supports H1-H4, blockquotes, lists, links, bold, italics, inline code,
  * fenced code blocks, and horizontal dividers without any unsafe innerHTML.
  */
-export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className = '' }) => {
+export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className = '', dark = false }) => {
   if (!content) return null;
+
+  const isDark = dark || className.includes('dark');
 
   // Helper to parse inline styles (bold, italic, inline code, links)
   const parseInline = (text: string): React.ReactNode[] => {
@@ -70,7 +73,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
         );
       } else if (first.type === 'bold') {
         tokens.push(
-          <strong key={`bold-${keyIdx++}`} className="font-bold text-slate-900 dark:text-white">
+          <strong key={`bold-${keyIdx++}`} className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
             {first.match[2]}
           </strong>
         );
@@ -84,7 +87,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
         tokens.push(
           <code
             key={`code-${keyIdx++}`}
-            className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-mono text-xs border border-slate-200 dark:border-slate-700"
+            className={`px-1.5 py-0.5 rounded-md font-mono text-xs border ${isDark ? 'bg-slate-800 text-slate-200 border-slate-700' : 'bg-slate-100 text-slate-800 border-slate-200'}`}
           >
             {first.match[1]}
           </code>
@@ -140,7 +143,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
     // 3. Headings
     if (trimmed.startsWith('#### ')) {
       blocks.push(
-        <h4 key={`h4-${i}`} className="text-base sm:text-lg font-display font-bold text-slate-900 dark:text-white pt-4 pb-1">
+        <h4 key={`h4-${i}`} className={`text-base sm:text-lg font-display font-bold ${isDark ? 'text-white' : 'text-slate-900'} pt-4 pb-1`}>
           {parseInline(trimmed.replace('#### ', ''))}
         </h4>
       );
@@ -150,7 +153,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
 
     if (trimmed.startsWith('### ')) {
       blocks.push(
-        <h3 key={`h3-${i}`} className="text-xl sm:text-2xl font-display font-bold text-slate-900 dark:text-white pt-6 pb-2 border-b border-slate-100 dark:border-slate-800">
+        <h3 key={`h3-${i}`} className={`text-xl sm:text-2xl font-display font-bold ${isDark ? 'text-white border-slate-800' : 'text-slate-900 border-slate-100'} pt-6 pb-2 border-b`}>
           {parseInline(trimmed.replace('### ', ''))}
         </h3>
       );
@@ -160,7 +163,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
 
     if (trimmed.startsWith('## ')) {
       blocks.push(
-        <h2 key={`h2-${i}`} className="text-2xl sm:text-3xl font-display font-bold text-slate-900 dark:text-white pt-8 pb-2.5 border-b border-slate-200 dark:border-slate-800">
+        <h2 key={`h2-${i}`} className={`text-2xl sm:text-3xl font-display font-bold ${isDark ? 'text-white border-slate-800' : 'text-slate-900 border-slate-200'} pt-8 pb-2.5 border-b`}>
           {parseInline(trimmed.replace('## ', ''))}
         </h2>
       );
@@ -170,7 +173,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
 
     if (trimmed.startsWith('# ')) {
       blocks.push(
-        <h1 key={`h1-${i}`} className="text-3xl sm:text-4xl font-display font-bold text-slate-900 dark:text-white pt-8 pb-3">
+        <h1 key={`h1-${i}`} className={`text-3xl sm:text-4xl font-display font-bold ${isDark ? 'text-white' : 'text-slate-900'} pt-8 pb-3`}>
           {parseInline(trimmed.replace('# ', ''))}
         </h1>
       );
@@ -181,7 +184,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
     // 4. Horizontal Divider: --- or ***
     if (trimmed === '---' || trimmed === '***' || trimmed === '___') {
       blocks.push(
-        <hr key={`hr-${i}`} className="my-8 border-t border-slate-200 dark:border-slate-800" />
+        <hr key={`hr-${i}`} className={`my-8 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`} />
       );
       i++;
       continue;
@@ -197,7 +200,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
       blocks.push(
         <blockquote
           key={`quote-${i}`}
-          className="my-5 pl-4 sm:pl-6 py-2 border-l-4 border-[#1877F2] bg-blue-50/50 dark:bg-blue-950/20 rounded-r-xl italic text-slate-700 dark:text-slate-300 text-sm sm:text-base leading-relaxed"
+          className={`my-5 pl-4 sm:pl-6 py-2 border-l-4 border-[#1877F2] ${isDark ? 'bg-blue-950/20 text-slate-300' : 'bg-blue-50/50 text-slate-700'} rounded-r-xl italic text-sm sm:text-base leading-relaxed`}
         >
           {quoteLines.map((ql, qIdx) => (
             <p key={qIdx} className="my-1">
@@ -217,7 +220,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
         i++;
       }
       blocks.push(
-        <ul key={`ul-${i}`} className="my-4 pl-6 list-disc space-y-2 text-slate-700 dark:text-slate-300 text-sm sm:text-base leading-relaxed marker:text-[#1877F2]">
+        <ul key={`ul-${i}`} className={`my-4 pl-6 list-disc space-y-2 ${isDark ? 'text-slate-300' : 'text-slate-700'} text-sm sm:text-base leading-relaxed marker:text-[#1877F2]`}>
           {listItems.map((item, itemIdx) => (
             <li key={itemIdx}>{parseInline(item)}</li>
           ))}
@@ -234,7 +237,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
         i++;
       }
       blocks.push(
-        <ol key={`ol-${i}`} className="my-4 pl-6 list-decimal space-y-2 text-slate-700 dark:text-slate-300 text-sm sm:text-base leading-relaxed marker:font-bold marker:text-[#1877F2]">
+        <ol key={`ol-${i}`} className={`my-4 pl-6 list-decimal space-y-2 ${isDark ? 'text-slate-300' : 'text-slate-700'} text-sm sm:text-base leading-relaxed marker:font-bold marker:text-[#1877F2]`}>
           {listItems.map((item, itemIdx) => (
             <li key={itemIdx}>{parseInline(item)}</li>
           ))}
@@ -263,7 +266,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
     }
 
     blocks.push(
-      <p key={`p-${i}`} className="my-4 text-slate-700 dark:text-slate-300 text-sm sm:text-base leading-relaxed font-interface">
+      <p key={`p-${i}`} className={`my-4 ${isDark ? 'text-slate-300' : 'text-slate-700'} text-sm sm:text-base leading-relaxed font-interface`}>
         {parseInline(paraLines.join(' '))}
       </p>
     );

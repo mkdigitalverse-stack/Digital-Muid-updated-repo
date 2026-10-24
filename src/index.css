@@ -53,16 +53,18 @@
   --state-error: #B42318;
 }
 
-body {
-  font-family: 'Inter', sans-serif;
-  background-color: #F7F9FC;
-  color: #172033;
-  overflow-x: hidden;
-}
+@layer base {
+  body {
+    font-family: 'Inter', sans-serif;
+    background-color: #F7F9FC;
+    color: #172033;
+    overflow-x: hidden;
+  }
 
-h1, h2, h3, h4, h5, h6 {
-  font-family: 'Sora', sans-serif;
-  color: #172033;
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Sora', sans-serif;
+    color: #172033;
+  }
 }
 
 .font-interface {

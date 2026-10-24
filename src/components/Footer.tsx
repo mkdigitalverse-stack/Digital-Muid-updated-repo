@@ -79,7 +79,7 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
                 <Sparkles className="w-3 h-3" />
                 The Digital Muid Brief
               </div>
-              <h3 className="text-2xl sm:text-3xl font-display font-bold text-white tracking-tight">
+              <h3 className="text-2xl sm:text-3xl font-display font-bold text-white !text-white tracking-tight">
                 One practical idea about digital growth, AI, or modern marketing.
               </h3>
               <p className="text-[#CBD5E1]/70 text-sm sm:text-base font-interface font-light">
@@ -187,7 +187,7 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
 
           {/* Group 1: Explore (3 cols) */}
           <div className="lg:col-span-3">
-            <h4 className="font-display font-bold text-white text-xs uppercase tracking-[0.2em] mb-4">
+            <h4 className="font-display font-bold text-white !text-white text-xs uppercase tracking-[0.2em] mb-4">
               Explore
             </h4>
             <ul className="space-y-2.5 text-sm">
@@ -226,7 +226,7 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
 
           {/* Group 2: Services (3 cols) */}
           <div className="lg:col-span-3">
-            <h4 className="font-display font-bold text-white text-xs uppercase tracking-[0.2em] mb-4">
+            <h4 className="font-display font-bold text-white !text-white text-xs uppercase tracking-[0.2em] mb-4">
               Services
             </h4>
             <ul className="space-y-2.5 text-sm">
@@ -286,7 +286,7 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
           {/* Group 3: Courses & Connect (2 cols) */}
           <div className="lg:col-span-2 space-y-6">
             <div>
-              <h4 className="font-display font-bold text-white text-xs uppercase tracking-[0.2em] mb-4">
+              <h4 className="font-display font-bold text-white !text-white text-xs uppercase tracking-[0.2em] mb-4">
                 Education
               </h4>
               <ul className="space-y-2.5 text-sm">
@@ -304,7 +304,7 @@ export const Footer: React.FC<FooterProps> = ({ navigate }) => {
             </div>
 
             <div>
-              <h4 className="font-display font-bold text-white text-xs uppercase tracking-[0.2em] mb-4">
+              <h4 className="font-display font-bold text-white !text-white text-xs uppercase tracking-[0.2em] mb-4">
                 Connect
               </h4>
               <ul className="space-y-2.5 text-sm">

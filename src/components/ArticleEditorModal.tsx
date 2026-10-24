@@ -626,7 +626,7 @@ export const ArticleEditorModal: React.FC<ArticleEditorModalProps> = ({
             {viewMode === 'preview' && (
               <div className="w-full min-h-[350px] max-h-[500px] overflow-y-auto p-6 rounded-2xl bg-slate-950/90 border border-slate-800 text-white">
                 {content.trim() ? (
-                  <MarkdownRenderer content={content} />
+                  <MarkdownRenderer content={content} dark={true} />
                 ) : (
                   <div className="py-12 text-center text-slate-500 text-xs">
                     No content written yet. Switch to "Write" mode to author your essay.
@@ -651,7 +651,7 @@ export const ArticleEditorModal: React.FC<ArticleEditorModalProps> = ({
                 />
                 <div className="w-full min-h-[350px] max-h-[450px] overflow-y-auto p-5 rounded-2xl bg-slate-950/90 border border-slate-800 text-white">
                   {content.trim() ? (
-                    <MarkdownRenderer content={content} />
+                    <MarkdownRenderer content={content} dark={true} />
                   ) : (
                     <div className="py-12 text-center text-slate-500 text-xs">
                       Live markdown preview will appear here as you type.

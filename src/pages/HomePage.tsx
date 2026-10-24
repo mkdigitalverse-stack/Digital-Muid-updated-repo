@@ -137,7 +137,7 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
             </div>
 
             {/* Main Heading H1 */}
-            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-display font-bold tracking-tight text-white leading-[1.12] text-balance max-w-4xl mx-auto">
+            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-display font-bold tracking-tight text-white !text-white leading-[1.12] text-balance max-w-4xl mx-auto">
               Engineered growth systems for scaling businesses &amp; marketing professionals.
             </h1>
 
@@ -261,7 +261,7 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
           <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FF6B00] font-interface">
             DIAGNOSTIC STRATEGY BREAKDOWN
           </span>
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white leading-tight">
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white !text-white leading-tight">
             How we engineer digital growth in 2026.
           </h2>
           <p className="text-sm sm:text-base text-slate-300 font-interface leading-relaxed max-w-2xl mx-auto font-light">
@@ -1297,7 +1297,7 @@ export const HomePage: React.FC<HomePageProps> = ({ navigate }) => {
 
         <div className="max-w-3xl mx-auto text-center space-y-8">
           <div className="space-y-4">
-            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white leading-tight text-balance">
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold tracking-tight text-white !text-white leading-tight text-balance">
               Before you spend another Rupee on ads, check your infrastructure.
             </h2>
             <p className="text-base sm:text-lg text-blue-100 font-interface leading-relaxed max-w-2xl mx-auto font-light">
