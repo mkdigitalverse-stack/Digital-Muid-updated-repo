@@ -17,8 +17,25 @@ async function startServer() {
   const app = express();
   const portArgIndex = process.argv.indexOf("--port");
   const cliPort = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? process.argv[portArgIndex + 1] : null;
-  // AI Studio environment routes reverse-proxy from 8080 to internal port 3000
-  const PORT = parseInt(process.env.TEST_PORT || cliPort || "3000", 10);
+
+  // In AI Studio development container, Nginx reverse-proxies from external 8080 to internal 3000.
+  // In Cloud Run live deployment (ais-pre / live service), the container MUST listen directly
+  // on the port specified by Cloud Run (process.env.PORT, default 8080).
+  const isDevContainer = Boolean(
+    process.env.NGINX_PORT ||
+    process.env.DEFAULT_APP_PORT ||
+    process.env.CONTROL_PLANE_PORT ||
+    process.env.K_SERVICE?.startsWith("ais-dev-")
+  );
+
+  const isProduction = process.env.NODE_ENV === "production" || !isDevContainer;
+
+  // Respect TEST_PORT for local testing; otherwise in dev use 3000, and in Cloud Run use process.env.PORT (8080)
+  const PORT = process.env.TEST_PORT
+    ? parseInt(process.env.TEST_PORT, 10)
+    : (isDevContainer && process.env.NODE_ENV !== "production"
+        ? parseInt(cliPort || "3000", 10)
+        : parseInt(process.env.PORT || cliPort || "8080", 10));
 
   // 1. Mount Razorpay Webhook endpoint with exact raw body handling BEFORE express.json()
   app.post(
@@ -42,8 +59,8 @@ async function startServer() {
   // 3. Configure URL-encoded body parsing
   app.use(express.urlencoded({ extended: true }));
 
-  // 4. Health & Gateway Diagnostics API endpoint (read-only infrastructure check)
-  app.get("/api/health", (_req, res) => {
+  // 4. Health & Gateway Diagnostics API endpoints (read-only infrastructure checks)
+  app.get(["/healthz", "/health", "/api/health"], (_req, res) => {
     res.json({
       status: "ok",
       timestamp: new Date().toISOString(),
@@ -73,7 +90,7 @@ async function startServer() {
   app.use(seoRedirectMiddleware);
 
   // 9. Vite middleware for development / Static fallback for production
-  if (process.env.NODE_ENV !== "production") {
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: false },
       appType: "custom",
@@ -165,7 +182,7 @@ async function startServer() {
   }
 
   const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running on http://0.0.0.0:${PORT} (mode: ${isProduction ? 'production' : 'development'})`);
     if (isRazorpayConfigured()) {
       console.log("[Payment Gateway] Razorpay server credentials detected.");
     } else {

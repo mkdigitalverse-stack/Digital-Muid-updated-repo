@@ -100,6 +100,111 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
     return tokens;
   };
 
+  // Helper to parse H1 inline styles with support for exactly one orange-highlighted word (#F59E0B)
+  const parseH1Inline = (text: string, isDark: boolean): React.ReactNode[] => {
+    // If not dark mode, strip custom highlight markers and use standard inline parser
+    if (!isDark) {
+      const sanitized = text.replace(/(==|::)(.*?)\1/g, '$2');
+      return parseInline(sanitized);
+    }
+
+    const tokens: React.ReactNode[] = [];
+    let remaining = text;
+    let keyIdx = 0;
+    let orangeApplied = false;
+
+    while (remaining.length > 0) {
+      // 1. Highlight syntax: ==word== or ::word::
+      const markMatch = remaining.match(/(==|::)(.*?)\1/);
+      // 2. Bold: **word** or __word__
+      const boldMatch = remaining.match(/(\*\*|__)(.*?)\1/);
+      // 3. Links: [text](url)
+      const linkMatch = remaining.match(/\[(.*?)\]\((https?:\/\/[^\s)]+|\/[^\s)]+)\)/);
+      // 4. Code: `text`
+      const codeMatch = remaining.match(/`([^`]+)`/);
+
+      const matches = [
+        markMatch ? { type: 'mark', match: markMatch, index: markMatch.index! } : null,
+        boldMatch ? { type: 'bold', match: boldMatch, index: boldMatch.index! } : null,
+        linkMatch ? { type: 'link', match: linkMatch, index: linkMatch.index! } : null,
+        codeMatch ? { type: 'code', match: codeMatch, index: codeMatch.index! } : null,
+      ].filter((m): m is { type: string; match: RegExpMatchArray; index: number } => m !== null);
+
+      if (matches.length === 0) {
+        tokens.push(remaining);
+        break;
+      }
+
+      matches.sort((a, b) => a.index - b.index);
+      const first = matches[0];
+
+      if (first.index > 0) {
+        tokens.push(remaining.substring(0, first.index));
+      }
+
+      if (first.type === 'mark') {
+        if (!orangeApplied) {
+          tokens.push(
+            <span key={`h1-mark-${keyIdx++}`} className="text-[#F59E0B] font-bold">
+              {first.match[2]}
+            </span>
+          );
+          orangeApplied = true;
+        } else {
+          // Exactly one word is orange; subsequent marked words render in primary heading color
+          tokens.push(
+            <span key={`h1-mark-${keyIdx++}`} className="font-bold text-blue-400">
+              {first.match[2]}
+            </span>
+          );
+        }
+      } else if (first.type === 'bold') {
+        if (!orangeApplied) {
+          tokens.push(
+            <span key={`h1-bold-${keyIdx++}`} className="text-[#F59E0B] font-bold">
+              {first.match[2]}
+            </span>
+          );
+          orangeApplied = true;
+        } else {
+          tokens.push(
+            <strong key={`h1-bold-${keyIdx++}`} className="font-bold text-blue-200">
+              {first.match[2]}
+            </strong>
+          );
+        }
+      } else if (first.type === 'link') {
+        const linkText = first.match[1];
+        const linkUrl = first.match[2];
+        const isExternal = linkUrl.startsWith('http');
+        tokens.push(
+          <a
+            key={`h1-link-${keyIdx++}`}
+            href={linkUrl}
+            target={isExternal ? '_blank' : undefined}
+            rel={isExternal ? 'noopener noreferrer' : undefined}
+            className="text-blue-300 hover:text-blue-200 underline underline-offset-2 transition-colors"
+          >
+            {linkText || linkUrl}
+          </a>
+        );
+      } else if (first.type === 'code') {
+        tokens.push(
+          <code
+            key={`h1-code-${keyIdx++}`}
+            className="px-1.5 py-0.5 rounded-md font-mono text-xs border bg-slate-800 text-slate-200 border-slate-700"
+          >
+            {first.match[1]}
+          </code>
+        );
+      }
+
+      remaining = remaining.substring(first.index + first.match[0].length);
+    }
+
+    return tokens;
+  };
+
   // Split into block chunks by double newlines or code fences
   const lines = content.split('\n');
   const blocks: React.ReactNode[] = [];
@@ -143,7 +248,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
     // 3. Headings
     if (trimmed.startsWith('#### ')) {
       blocks.push(
-        <h4 key={`h4-${i}`} className={`text-base sm:text-lg font-display font-bold ${isDark ? 'text-white' : 'text-slate-900'} pt-4 pb-1`}>
+        <h4 key={`h4-${i}`} className={`text-base sm:text-lg font-display font-bold ${isDark ? 'text-blue-300' : 'text-slate-900'} pt-4 pb-1`}>
           {parseInline(trimmed.replace('#### ', ''))}
         </h4>
       );
@@ -153,7 +258,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
 
     if (trimmed.startsWith('### ')) {
       blocks.push(
-        <h3 key={`h3-${i}`} className={`text-xl sm:text-2xl font-display font-bold ${isDark ? 'text-white border-slate-800' : 'text-slate-900 border-slate-100'} pt-6 pb-2 border-b`}>
+        <h3 key={`h3-${i}`} className={`text-xl sm:text-2xl font-display font-bold ${isDark ? 'text-blue-300 border-slate-800' : 'text-slate-900 border-slate-100'} pt-6 pb-2 border-b`}>
           {parseInline(trimmed.replace('### ', ''))}
         </h3>
       );
@@ -163,7 +268,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
 
     if (trimmed.startsWith('## ')) {
       blocks.push(
-        <h2 key={`h2-${i}`} className={`text-2xl sm:text-3xl font-display font-bold ${isDark ? 'text-white border-slate-800' : 'text-slate-900 border-slate-200'} pt-8 pb-2.5 border-b`}>
+        <h2 key={`h2-${i}`} className={`text-2xl sm:text-3xl font-display font-bold ${isDark ? 'text-blue-300 border-slate-800' : 'text-slate-900 border-slate-200'} pt-8 pb-2.5 border-b`}>
           {parseInline(trimmed.replace('## ', ''))}
         </h2>
       );
@@ -173,8 +278,8 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
 
     if (trimmed.startsWith('# ')) {
       blocks.push(
-        <h1 key={`h1-${i}`} className={`text-3xl sm:text-4xl font-display font-bold ${isDark ? 'text-white' : 'text-slate-900'} pt-8 pb-3`}>
-          {parseInline(trimmed.replace('# ', ''))}
+        <h1 key={`h1-${i}`} className={`text-3xl sm:text-4xl font-display font-bold ${isDark ? 'text-blue-400' : 'text-slate-900'} pt-8 pb-3`}>
+          {parseH1Inline(trimmed.replace('# ', ''), isDark)}
         </h1>
       );
       i++;
