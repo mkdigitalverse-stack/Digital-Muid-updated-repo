@@ -1,7 +1,8 @@
 import React from 'react';
-import { CheckCircle2, Calendar, Clock, Video, Download, ArrowRight, ShieldCheck, Mail } from 'lucide-react';
+import { CheckCircle2, Calendar, Clock, Video, Download, ArrowRight, ShieldCheck, Mail, FileText } from 'lucide-react';
 import { Booking } from '../types';
 import { useApp } from '../context/AppContext';
+import { generateInvoicePdfBlob } from '../utils/pdfGenerator';
 
 interface ConsultationConfirmationPageProps {
   booking: Booking | null;
@@ -53,6 +54,34 @@ END:VCALENDAR`;
     document.body.removeChild(link);
   };
 
+  const handleDownloadInvoice = () => {
+    try {
+      const blob = generateInvoicePdfBlob({
+        paymentId: currentBooking.paymentId || 'PAY-REF',
+        orderId: (currentBooking as any).razorpay_order_id || null,
+        customerName: currentBooking.customerName,
+        customerEmail: currentBooking.customerEmail,
+        itemTitle: 'Strategic Business Growth & Scaling Consultation',
+        itemType: 'consultation',
+        amount: currentBooking.totalAmount,
+        currency: currentBooking.currency || 'INR',
+        paymentDate: currentBooking.createdAt || new Date().toISOString(),
+        status: 'captured'
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `DigitalMUID-Tax-Invoice-${currentBooking.bookingCode}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (err) {
+      console.error('Invoice download error:', err);
+    }
+  };
+
   return (
     <div id="consultation-confirmation-root" className="pt-28 sm:pt-32 pb-24 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
       {/* Success Badge & Headline */}
@@ -67,8 +96,8 @@ END:VCALENDAR`;
           <h1 className="text-3xl sm:text-5xl font-display font-bold text-slate-900 tracking-tight">
             You're On Muid's Calendar!
           </h1>
-          <p className="text-slate-600 text-sm sm:text-base font-interface max-w-lg mx-auto">
-            A confirmation receipt and Google Calendar invitation have been dispatched to <strong>{currentBooking.customerEmail}</strong>.
+          <p className="text-slate-600 text-sm sm:text-base font-interface max-w-xl mx-auto">
+            Your strategic consultation is confirmed. A transactional confirmation receipt and calendar invitation are dispatched to <strong>{currentBooking.customerEmail}</strong>. You can also download your official calendar invite and tax invoice directly below.
           </p>
         </div>
       </div>
@@ -154,18 +183,25 @@ END:VCALENDAR`;
           </div>
         </div>
 
-        {/* Download Calendar Invite Button */}
-        <div className="flex flex-col sm:flex-row gap-4 pt-2">
+        {/* Action Buttons: Calendar, Invoice, and Return */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
           <button
             onClick={handleDownloadCalendar}
-            className="flex-1 py-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border border-slate-300 shadow-xs"
+            className="py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border border-slate-300 shadow-xs"
           >
-            <Download className="w-4 h-4" />
-            <span>Download .ICS Calendar File</span>
+            <Download className="w-4 h-4 text-[#1877F2]" />
+            <span>Download .ICS File</span>
+          </button>
+          <button
+            onClick={handleDownloadInvoice}
+            className="py-3 px-4 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border border-emerald-300 shadow-xs"
+          >
+            <FileText className="w-4 h-4 text-emerald-600" />
+            <span>Download Tax Invoice (PDF)</span>
           </button>
           <button
             onClick={() => navigate('/')}
-            className="flex-1 py-3.5 rounded-xl bg-[#1877F2] hover:bg-blue-600 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
+            className="py-3 px-4 rounded-xl bg-[#1877F2] hover:bg-blue-600 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
           >
             <span>Return to Homepage</span>
             <ArrowRight className="w-4 h-4" />

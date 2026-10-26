@@ -1,4 +1,9 @@
 import { getSupabaseServerClient, isValidUUID } from "./supabaseServer.js";
+import {
+  sendCourseAccessEmail,
+  sendConsultationConfirmationEmail,
+  sendResourceDeliveryEmail
+} from "./mailerService.js";
 
 /**
  * Calculates the authoritative effective course price according to standard business logic:
@@ -171,6 +176,45 @@ export async function fulfillCourseEnrollment({
       `[Payment Fulfillment] Success: payment_id=${data.payment_id}, enrollment_id=${data.enrollment_id}, user=${userId}, course=${courseId}, already_fulfilled=${data.already_fulfilled}`
     );
 
+    // Asynchronously dispatch course access and authoritative PDF invoice email
+    (async () => {
+      try {
+        let studentEmail = null;
+        let studentName = "Student Member";
+
+        if (supabaseServer) {
+          const [userRes, profileRes] = await Promise.allSettled([
+            supabaseServer.auth.admin.getUserById(userId),
+            supabaseServer.from("profiles").select("full_name").eq("id", userId).maybeSingle()
+          ]);
+
+          if (userRes.status === "fulfilled" && userRes.value?.data?.user?.email) {
+            studentEmail = userRes.value.data.user.email;
+          }
+          if (profileRes.status === "fulfilled" && profileRes.value?.data?.full_name) {
+            studentName = profileRes.value.data.full_name;
+          } else if (userRes.status === "fulfilled" && userRes.value?.data?.user?.user_metadata?.full_name) {
+            studentName = userRes.value.data.user.user_metadata.full_name;
+          }
+        }
+
+        if (studentEmail) {
+          await sendCourseAccessEmail({
+            to: studentEmail,
+            studentName,
+            courseTitle: data.course_title || "Course Masterclass",
+            courseSlug: data.course_slug || "",
+            amount: Number(data.amount) || amount,
+            currency: data.currency || currency,
+            orderId: orderId.trim(),
+            paymentId: paymentId.trim()
+          });
+        }
+      } catch (mailErr) {
+        console.warn("[Payment Fulfillment] Notice dispatching course access email:", mailErr?.message || mailErr);
+      }
+    })();
+
     return {
       success: true,
       fulfilled: true,
@@ -246,6 +290,34 @@ export async function fulfillConsultationPayment({
 
     if (existingPayment || existingBooking) {
       console.log(`[Consultation Fulfillment] Payment ${cleanPaymentId} already processed. Returning existing record.`);
+      // Check in background if email was previously dispatched; if not, send it
+      (async () => {
+        try {
+          const bookingTarget = existingBooking || {};
+          const email = bookingTarget.customer_email;
+          if (email) {
+            await sendConsultationConfirmationEmail({
+              to: email,
+              customerName: bookingTarget.customer_name || "Valued Client",
+              bookingCode: bookingTarget.booking_code || `DM-BK-${cleanPaymentId.slice(-4)}`,
+              bookingDate: bookingTarget.booking_date || "",
+              bookingTime: bookingTarget.booking_time || "",
+              durationMinutes: Number(bookingTarget.duration_minutes) || 30,
+              meetUrl: bookingTarget.meet_url || "https://meet.google.com",
+              primaryChallenge: bookingTarget.primary_challenge || "Business Growth Strategy",
+              amount: Number(bookingTarget.total_amount) || Number(existingPayment?.amount) || 0,
+              currency: bookingTarget.currency || existingPayment?.currency || "INR",
+              baseAmount: Number(bookingTarget.base_amount) || undefined,
+              gstAmount: Number(bookingTarget.gst_amount) || undefined,
+              orderId: cleanOrderId,
+              paymentId: cleanPaymentId
+            });
+          }
+        } catch (mErr) {
+          console.warn("[Consultation Fulfillment] Existing record email dispatch notice:", mErr?.message);
+        }
+      })();
+
       return {
         success: true,
         fulfilled: true,
@@ -389,6 +461,32 @@ export async function fulfillConsultationPayment({
       console.warn("[Consultation Fulfillment] CRM lead record notice:", leadErr?.message);
     }
 
+    // Asynchronously dispatch consultation booking confirmation, calendar invite & invoice email
+    (async () => {
+      try {
+        if (bookingPayload.customer_email) {
+          await sendConsultationConfirmationEmail({
+            to: bookingPayload.customer_email,
+            customerName: bookingPayload.customer_name || "Valued Client",
+            bookingCode,
+            bookingDate: bookingPayload.booking_date,
+            bookingTime: bookingPayload.booking_time,
+            durationMinutes,
+            meetUrl,
+            primaryChallenge: bookingPayload.primary_challenge || "Business Growth Strategy",
+            amount: totalAmount,
+            currency,
+            baseAmount,
+            gstAmount,
+            orderId: cleanOrderId,
+            paymentId: cleanPaymentId
+          });
+        }
+      } catch (mailErr) {
+        console.warn("[Consultation Fulfillment] Notice dispatching consultation email:", mailErr?.message || mailErr);
+      }
+    })();
+
     return {
       success: true,
       fulfilled: true,
@@ -464,6 +562,27 @@ export async function fulfillResourcePurchase({
 
       if (existingPurchase || existingPayment) {
         console.log(`[Resource Fulfillment] Payment ${cleanPaymentId} already processed. Returning existing record.`);
+        // Check in background if delivery email was previously dispatched; if not, send it
+        (async () => {
+          try {
+            const targetEmail = customerEmail || existingPurchase?.customer_email;
+            if (targetEmail) {
+              await sendResourceDeliveryEmail({
+                to: targetEmail,
+                customerName: customerName || "Valued Customer",
+                resourceTitle: resourceTitle || existingPayment?.item_title || "Digital Resource Toolkit",
+                resourceId: cleanResourceId,
+                amount: numericAmount || Number(existingPurchase?.amount) || Number(existingPayment?.amount) || 0,
+                currency: finalCurrency,
+                orderId: cleanOrderId,
+                paymentId: cleanPaymentId
+              });
+            }
+          } catch (mErr) {
+            console.warn("[Resource Fulfillment] Existing record email dispatch notice:", mErr?.message);
+          }
+        })();
+
         return {
           success: true,
           fulfilled: true,
@@ -609,6 +728,26 @@ export async function fulfillResourcePurchase({
         code: "DATABASE_WRITE_FAILED"
       };
     }
+
+    // Asynchronously dispatch resource delivery & receipt email
+    (async () => {
+      try {
+        if (customerEmail) {
+          await sendResourceDeliveryEmail({
+            to: customerEmail,
+            customerName: customerName || "Valued Customer",
+            resourceTitle: resourceTitle || "Digital Resource Toolkit",
+            resourceId: cleanResourceId,
+            amount: numericAmount,
+            currency: finalCurrency,
+            orderId: cleanOrderId,
+            paymentId: cleanPaymentId
+          });
+        }
+      } catch (mailErr) {
+        console.warn("[Resource Fulfillment] Notice dispatching resource email:", mailErr?.message || mailErr);
+      }
+    })();
 
     return {
       success: true,

@@ -6,6 +6,7 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { isRazorpayConfigured, isWebhookConfigured } from "./server/razorpay.js";
 import { isSupabaseServerConfigured } from "./server/supabaseServer.js";
+import { isMailerConfigured } from "./server/mailerService.js";
 import { handleRazorpayWebhook } from "./server/paymentWebhook.js";
 import paymentRoutes from "./server/paymentRoutes.js";
 import webEnquiryRoutes from "./server/webEnquiryRoutes.js";
@@ -68,6 +69,7 @@ async function startServer() {
         razorpayConfigured: isRazorpayConfigured(),
         webhookConfigured: isWebhookConfigured(),
         supabaseServerConfigured: isSupabaseServerConfigured(),
+        emailConfigured: isMailerConfigured(),
       },
     });
   });
