@@ -302,6 +302,12 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
       };
 
       const rzpInstance = new (window as any).Razorpay(options);
+      rzpInstance.on('payment.failed', (resp: any) => {
+        setIsProcessingPayment(false);
+        const failMsg = resp.error?.description || 'Payment was declined or cancelled.';
+        setCheckoutError(failMsg);
+        notify(failMsg, 'error');
+      });
       rzpInstance.open();
     } catch (pErr: any) {
       console.error('[Bundle Checkout Error]:', pErr);
@@ -535,8 +541,8 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
 
       {/* Embedded Razorpay Checkout Modal for Unauthorized Visitors */}
       {showCheckoutModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto overscroll-contain">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 duration-150 max-h-[calc(100dvh-2rem)] overflow-y-auto my-auto relative">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="p-2 bg-orange-50 rounded-lg text-[#FF6B00]">
@@ -548,8 +554,10 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setShowCheckoutModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                aria-label="Close checkout"
+                className="text-slate-400 hover:text-slate-600 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-slate-100 cursor-pointer transition-colors"
               >
                 ✕
               </button>

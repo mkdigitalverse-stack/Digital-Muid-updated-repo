@@ -177,7 +177,12 @@ const MainApp: React.FC = () => {
       return <BundleAccessPage slug={slug} navigate={navigate} />;
     }
     if (path === '/resources' || path.startsWith('/resources/') || path.startsWith('/downloads/')) {
-      const slug = path.startsWith('/resources/') ? path.replace('/resources/', '') : selectedResourceIdForModal;
+      const searchStr = currentPath.includes('?')
+        ? currentPath.slice(currentPath.indexOf('?'))
+        : (typeof window !== 'undefined' ? window.location.search : '');
+      const sp = new URLSearchParams(searchStr);
+      const queryId = sp.get('resourceId') || sp.get('download') || sp.get('id') || sp.get('slug');
+      const slug = path.startsWith('/resources/') ? path.replace('/resources/', '') : (queryId || selectedResourceIdForModal);
       return (
         <ResourcesPage
           navigate={navigate}

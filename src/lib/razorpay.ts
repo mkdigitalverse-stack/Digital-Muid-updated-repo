@@ -25,34 +25,75 @@ export function loadRazorpayCheckoutScript(): Promise<boolean> {
       return;
     }
 
-    if (window.Razorpay) {
+    if (typeof window.Razorpay === 'function') {
       resolve(true);
       return;
     }
 
     const SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
-    const existingScript = document.querySelector(`script[src="${SCRIPT_URL}"]`);
+    const existingScript = document.querySelector(`script[src="${SCRIPT_URL}"]`) as HTMLScriptElement | null;
+
+    let hasResolved = false;
+    const safeResolve = (val: boolean) => {
+      if (!hasResolved) {
+        hasResolved = true;
+        clearInterval(pollTimer);
+        clearTimeout(timeoutTimer);
+        resolve(val);
+      }
+    };
+
+    // Polling mechanism to immediately catch window.Razorpay availability even if load event already fired
+    const pollTimer = setInterval(() => {
+      if (typeof window.Razorpay === 'function') {
+        safeResolve(true);
+      }
+    }, 50);
+
+    // 5-second safety timeout so checkout never hangs
+    const timeoutTimer = setTimeout(() => {
+      if (typeof window.Razorpay === 'function') {
+        safeResolve(true);
+      } else {
+        console.warn('[Razorpay Loader] Timed out waiting for Razorpay Checkout SDK.');
+        safeResolve(false);
+      }
+    }, 5000);
 
     if (existingScript) {
-      if (window.Razorpay) {
-        resolve(true);
-      } else {
-        existingScript.addEventListener('load', () => resolve(true), { once: true });
-        existingScript.addEventListener('error', () => resolve(false), { once: true });
+      if (typeof window.Razorpay === 'function') {
+        safeResolve(true);
+        return;
       }
+
+      existingScript.addEventListener('load', () => {
+        if (typeof window.Razorpay === 'function') {
+          safeResolve(true);
+        }
+      }, { once: true });
+
+      existingScript.addEventListener('error', () => {
+        console.error('[Razorpay Loader] Existing script encountered network error.');
+        safeResolve(false);
+      }, { once: true });
+
       return;
     }
 
     const script = document.createElement('script');
     script.src = SCRIPT_URL;
     script.async = true;
-    script.onload = () => resolve(true);
+    script.onload = () => {
+      if (typeof window.Razorpay === 'function') {
+        safeResolve(true);
+      }
+    };
     script.onerror = () => {
       console.error('[Razorpay Loader] Failed to load Razorpay Checkout SDK script.');
-      resolve(false);
+      safeResolve(false);
     };
 
-    document.body.appendChild(script);
+    document.head.appendChild(script);
   });
 }
 

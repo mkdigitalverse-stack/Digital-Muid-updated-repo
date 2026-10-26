@@ -58,13 +58,23 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
 
   // If passed from parent
   React.useEffect(() => {
-    if (selectedResourceId) {
-      const res = publishedResources.find((r) => r.id === selectedResourceId || r.slug === selectedResourceId);
+    let targetId = selectedResourceId;
+    if (!targetId && typeof window !== 'undefined' && window.location.search) {
+      const searchParams = new URLSearchParams(window.location.search);
+      targetId = searchParams.get('resourceId') || searchParams.get('download') || searchParams.get('id') || searchParams.get('slug');
+    }
+
+    if (targetId) {
+      const res = publishedResources.find((r) => r.id === targetId || r.slug === targetId);
       if (res) {
         const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
         if (isPaid) {
           if (!hasPurchasedResource(res.id)) {
             setPaidModalResource(res);
+            setName(userProfile?.fullName || '');
+            setEmail(currentUser?.email || '');
+            setMobile(userProfile?.phone || '');
+            setProfession(userProfile?.title || '');
           } else {
             const isBundle = res.id === '2d50e5e3-711d-4461-a70d-0ed54dd29f17' || res.slug === 'meta-ads-campaign-planner-bundle';
             if (isBundle) {
@@ -81,7 +91,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
         }
       }
     }
-  }, [selectedResourceId, publishedResources, currentUser, isAdminAuthenticated, hasPurchasedResource, navigate]);
+  }, [selectedResourceId, publishedResources, currentUser, isAdminAuthenticated, hasPurchasedResource, navigate, userProfile]);
 
   const handleToggleResourceBookmark = async (resourceId: string) => {
     if (!currentUser) {
@@ -267,11 +277,16 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
       };
 
       const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', function (resp: any) {
+        setIsProcessingPayment(false);
+        const failMsg = resp.error?.description || 'Payment was declined or cancelled. Please try again or use another payment method.';
+        setFormError(failMsg);
+        notify(failMsg, 'error');
+      });
       rzp.open();
     } catch (err: any) {
       console.error('[ResourcesPage] Error processing resource payment:', err);
       setFormError(err?.message || 'Payment processing failed. Please try again.');
-    } finally {
       setIsProcessingPayment(false);
     }
   };
@@ -636,14 +651,14 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
 
       {/* Email Capture / Direct Download Modal */}
       {activeDownloadResource && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-            <div className="absolute top-5 right-5 flex items-center gap-1.5">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-contain">
+          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl p-5 sm:p-8 space-y-5 sm:space-y-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150 max-h-[calc(100dvh-2rem)] overflow-y-auto my-auto">
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 z-10">
               <button
                 id={`modal-bookmark-btn-${activeDownloadResource.id}`}
                 type="button"
                 onClick={() => handleToggleResourceBookmark(activeDownloadResource.id)}
-                className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
+                className={`p-2 rounded-lg border transition-colors cursor-pointer min-w-[44px] min-h-[44px] flex items-center justify-center ${
                   isBookmarked('resource', activeDownloadResource.id)
                     ? 'bg-orange-50 border-orange-200 text-[#FF6B00]'
                     : 'text-slate-400 hover:text-slate-900 border-transparent hover:border-slate-200'
@@ -653,8 +668,10 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                 <Bookmark className={`w-4 h-4 ${isBookmarked('resource', activeDownloadResource.id) ? 'fill-[#FF6B00]' : ''}`} />
               </button>
               <button
+                type="button"
                 onClick={handleModalClose}
-                className="text-slate-400 hover:text-slate-900 p-1 cursor-pointer"
+                aria-label="Close modal"
+                className="text-slate-400 hover:text-slate-900 p-2 rounded-full hover:bg-slate-100 min-w-[44px] min-h-[44px] flex items-center justify-center cursor-pointer transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -828,14 +845,16 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
 
       {/* Paid Resource Checkout Modal */}
       {paidModalResource && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-contain">
+          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl p-5 sm:p-8 space-y-5 sm:space-y-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150 max-h-[calc(100dvh-2rem)] overflow-y-auto my-auto">
             <button
+              type="button"
               onClick={() => {
                 setPaidModalResource(null);
                 setFormError(null);
               }}
-              className="absolute top-5 right-5 text-slate-400 hover:text-slate-900 p-1 cursor-pointer"
+              aria-label="Close checkout"
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-900 p-2.5 rounded-full hover:bg-slate-100 min-w-[44px] min-h-[44px] flex items-center justify-center cursor-pointer transition-colors z-10"
             >
               <X className="w-5 h-5" />
             </button>
