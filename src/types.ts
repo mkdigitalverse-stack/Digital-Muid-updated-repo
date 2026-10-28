@@ -732,8 +732,20 @@ export interface VerifyResourcePaymentResult {
   alreadyFulfilled?: boolean;
   orderId?: string;
   paymentId?: string;
+  lead_status?: 'saved' | 'already_exists' | 'failed' | 'pending' | 'skipped';
+  lead_id?: string | null;
   error?: string;
 }
+
+export interface RecoverLeadResult {
+  success: boolean;
+  payment_verified?: boolean;
+  lead_status: 'saved' | 'already_exists' | 'failed';
+  lead_id?: string;
+  message?: string;
+  error?: string;
+}
+
 
 
 

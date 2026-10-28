@@ -110,16 +110,54 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
     }
   };
 
+  const BUNDLE_CHECKOUT_STORAGE_KEY = 'dm_checkout_bundle_meta_ads';
+
+  const getSavedBundleCheckoutData = () => {
+    if (typeof window === 'undefined' || !window.sessionStorage) return null;
+    try {
+      const raw = window.sessionStorage.getItem(BUNDLE_CHECKOUT_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const saveSavedBundleCheckoutData = (data: { name: string; email: string; phone: string }) => {
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    try {
+      window.sessionStorage.setItem(BUNDLE_CHECKOUT_STORAGE_KEY, JSON.stringify(data));
+    } catch {}
+  };
+
+  const clearSavedBundleCheckoutData = () => {
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    try {
+      window.sessionStorage.removeItem(BUNDLE_CHECKOUT_STORAGE_KEY);
+    } catch {}
+  };
+
+  // Lock body scroll when checkout modal is open to prevent background dragging & rubber-banding
+  useEffect(() => {
+    if (showCheckoutModal) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [showCheckoutModal]);
+
   useEffect(() => {
     verifyAndLoadBundle();
   }, [currentUser, urlParams.orderId, urlParams.paymentId]);
 
-  // If visitor navigated with intent to buy (?checkout=true), open checkout modal
+  // If visitor navigated with intent to buy (?checkout=true), open checkout modal with restored data
   useEffect(() => {
     if (urlParams.checkout && isAuthorized === false && !isLoading) {
-      setCheckoutName(userProfile?.fullName || '');
-      setCheckoutEmail(currentUser?.email || '');
-      setCheckoutPhone(userProfile?.phone || '');
+      const saved = getSavedBundleCheckoutData();
+      setCheckoutName(saved?.name || userProfile?.fullName || '');
+      setCheckoutEmail(saved?.email || currentUser?.email || '');
+      setCheckoutPhone(saved?.phone || userProfile?.phone || '');
       setShowCheckoutModal(true);
     }
   }, [urlParams.checkout, isAuthorized, isLoading, userProfile, currentUser]);
@@ -179,9 +217,10 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
   };
 
   const handleOpenBuyModal = () => {
-    setCheckoutName(userProfile?.fullName || '');
-    setCheckoutEmail(currentUser?.email || '');
-    setCheckoutPhone(userProfile?.phone || '');
+    const saved = getSavedBundleCheckoutData();
+    setCheckoutName(saved?.name || userProfile?.fullName || '');
+    setCheckoutEmail(saved?.email || currentUser?.email || '');
+    setCheckoutPhone(saved?.phone || userProfile?.phone || '');
     setCheckoutError(null);
     setShowCheckoutModal(true);
   };
@@ -199,6 +238,13 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
 
     setIsProcessingPayment(true);
     setCheckoutError(null);
+
+    // Preserve checkout form state in sessionStorage
+    saveSavedBundleCheckoutData({
+      name: checkoutName.trim(),
+      email: checkoutEmail.trim(),
+      phone: checkoutPhone.trim()
+    });
 
     try {
       const orderResult = await paymentService.createResourceOrder(
@@ -266,6 +312,7 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
               currency: 'INR'
             } as any;
             await purchaseResource(targetBundle, response.razorpay_payment_id, response.razorpay_order_id);
+            clearSavedBundleCheckoutData();
 
             try {
               if (typeof window !== 'undefined' && window.sessionStorage) {
@@ -273,6 +320,22 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
                 window.sessionStorage.setItem('verified_guest_purchase_meta-ads-campaign-planner-bundle', response.razorpay_payment_id);
               }
             } catch {}
+
+            // Decoupled background lead recovery if lead persistence was pending or failed
+            if (verifyResult.lead_status === 'failed' || verifyResult.lead_status === 'pending') {
+              paymentService.recoverLead({
+                orderId: response.razorpay_order_id,
+                paymentId: response.razorpay_payment_id,
+                resourceId: '2d50e5e3-711d-4461-a70d-0ed54dd29f17',
+                customerDetails: {
+                  name: checkoutName.trim(),
+                  email: checkoutEmail.trim(),
+                  phone: checkoutPhone.trim()
+                }
+              }).catch((rErr) => {
+                console.warn('[BundleAccessPage] Notice in background lead sync:', rErr);
+              });
+            }
 
             setShowCheckoutModal(false);
             notify('Payment verified! Complete bundle unlocked.', 'success');
@@ -541,8 +604,8 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
 
       {/* Embedded Razorpay Checkout Modal for Unauthorized Visitors */}
       {showCheckoutModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto overscroll-contain">
-          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 duration-150 max-h-[calc(100dvh-2rem)] overflow-y-auto my-auto relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto overscroll-y-contain touch-pan-y">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 duration-150 relative my-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="p-2 bg-orange-50 rounded-lg text-[#FF6B00]">
@@ -579,7 +642,7 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
                   placeholder="e.g. Alex Morgan"
                   value={checkoutName}
                   onChange={(e) => setCheckoutName(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-hidden focus:border-[#FF6B00] focus:ring-2 focus:ring-[#FF6B00]/20"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-base sm:text-sm focus:outline-hidden focus:border-[#FF6B00] focus:ring-2 focus:ring-[#FF6B00]/20"
                 />
               </div>
 
@@ -591,7 +654,7 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
                   placeholder="alex@company.com"
                   value={checkoutEmail}
                   onChange={(e) => setCheckoutEmail(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-hidden focus:border-[#FF6B00] focus:ring-2 focus:ring-[#FF6B00]/20"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-base sm:text-sm focus:outline-hidden focus:border-[#FF6B00] focus:ring-2 focus:ring-[#FF6B00]/20"
                 />
                 <p className="text-[11px] text-slate-400 mt-1">Receipt & access credentials will be delivered here.</p>
               </div>
@@ -603,7 +666,7 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
                   placeholder="+91 98765 43210"
                   value={checkoutPhone}
                   onChange={(e) => setCheckoutPhone(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-hidden focus:border-[#FF6B00] focus:ring-2 focus:ring-[#FF6B00]/20"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-base sm:text-sm focus:outline-hidden focus:border-[#FF6B00] focus:ring-2 focus:ring-[#FF6B00]/20"
                 />
               </div>
 

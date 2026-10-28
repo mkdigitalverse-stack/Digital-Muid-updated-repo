@@ -101,19 +101,100 @@ export const isSupabaseConfigured = (): boolean => {
   return getSupabaseConfigStatus().isConfigured;
 };
 
+/**
+ * Checks whether client-side database mutations (insert, update, delete) are permitted.
+ * Blocks writes if running in development mode targeting the known production project.
+ */
+export const isClientMutationAllowed = (): boolean => {
+  if (typeof window !== 'undefined' && (window as any).__ENV__?.DEV_MUTATIONS_BLOCKED) {
+    return false;
+  }
+  const isProd = typeof window !== 'undefined' && (window as any).__ENV__?.APP_ENV === 'production';
+  const url = getEnvSupabaseUrl();
+  const isTargetingProduction = Boolean(url && url.includes('kpuxtsworzkueyffjaaz'));
+
+  if (!isProd && isTargetingProduction) {
+    return false;
+  }
+  return true;
+};
+
 const activeUrl = getEnvSupabaseUrl() || UNCONFIGURED_PLACEHOLDER_URL;
 const activeKey = getEnvSupabaseAnonKey() || UNCONFIGURED_PLACEHOLDER_KEY;
 
-/**
- * Singleton Supabase Client instance for client-side operations.
- * Uses public publishable/anon key only. Never expose service_role keys on the frontend.
- */
-export const supabase = createClient(activeUrl, activeKey, {
+const rawSupabase = createClient(activeUrl, activeKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
     storageKey: 'digital_muid_supabase_auth_token'
+  }
+});
+
+function wrapBuilderWithSafety(builder: any): any {
+  return new Proxy(builder, {
+    get(target, prop, receiver) {
+      if (['insert', 'update', 'upsert', 'delete'].includes(String(prop))) {
+        if (!isClientMutationAllowed()) {
+          return () => {
+            console.warn(`[SAFETY GUARD] Client-side mutation '${String(prop)}' blocked in development mode.`);
+            const blockedResult = {
+              data: null,
+              error: {
+                message: '[SAFETY GUARD] Database mutations to production are blocked in development environment.',
+                code: 'DEV_PRODUCTION_MUTATION_BLOCKED',
+                details: 'Configure dedicated staging credentials and ALLOW_STAGING_TEST_WRITES=true.'
+              }
+            };
+            return {
+              then: (resolve: any) => Promise.resolve(blockedResult).then(resolve),
+              select: () => ({
+                then: (resolve: any) => Promise.resolve(blockedResult).then(resolve),
+                single: () => Promise.resolve(blockedResult),
+                maybeSingle: () => Promise.resolve(blockedResult)
+              }),
+              single: () => Promise.resolve(blockedResult),
+              maybeSingle: () => Promise.resolve(blockedResult)
+            };
+          };
+        }
+      }
+      const val = Reflect.get(target, prop, receiver);
+      return typeof val === 'function' ? val.bind(target) : val;
+    }
+  });
+}
+
+/**
+ * Singleton Supabase Client instance with automatic development safety protection.
+ * Permits read queries in development while preventing unintended mutations to production.
+ */
+export const supabase = new Proxy(rawSupabase, {
+  get(target, prop, receiver) {
+    if (prop === 'from') {
+      return (table: string) => {
+        const builder = (target as any).from(table);
+        return wrapBuilderWithSafety(builder);
+      };
+    }
+    if (prop === 'rpc') {
+      return (fnName: string, args?: any) => {
+        const mutatingRpcs = ['issue_student_certificate', 'increment_resource_downloads', 'fulfill_course_enrollment'];
+        if (!isClientMutationAllowed() && mutatingRpcs.includes(fnName)) {
+          console.warn(`[SAFETY GUARD] Client-side RPC mutation '${fnName}' blocked in development mode.`);
+          return Promise.resolve({
+            data: null,
+            error: {
+              message: `[SAFETY GUARD] RPC mutation '${fnName}' to production is blocked in development environment.`,
+              code: 'DEV_PRODUCTION_MUTATION_BLOCKED',
+            }
+          });
+        }
+        return (target as any).rpc(fnName, args);
+      };
+    }
+    const val = Reflect.get(target, prop, receiver);
+    return typeof val === 'function' ? val.bind(target) : val;
   }
 });
 

@@ -1,4 +1,5 @@
 import express from "express";
+import crypto from "crypto";
 import {
   getRazorpayClient,
   getRazorpayKeyId,
@@ -762,6 +763,7 @@ router.post("/create-resource-order", async (req, res) => {
         resourceTitle: (resourceRecord?.title || resourceRecord?.name || "Digital Resource").slice(0, 100),
         customerName: (customerDetails?.name || "").slice(0, 50),
         customerEmail: (customerDetails?.email || "").slice(0, 50),
+        customerPhone: (customerDetails?.phone || "").slice(0, 30),
         userId: authenticatedUser?.id || ""
       }
     };
@@ -780,19 +782,35 @@ router.post("/create-resource-order", async (req, res) => {
     // Retain lead at checkout initiation: if visitor abandons checkout, their contact info and intent are preserved
     if (dbClient && (customerDetails?.email || customerDetails?.name)) {
       try {
-        dbClient.from("crm_leads").insert({
-          name: customerDetails?.name || "Resource Checkout Visitor",
-          email: customerDetails?.email || "",
-          phone: customerDetails?.phone || null,
-          source: "Resource Paid Checkout Initiated",
-          interest: resourceRecord?.title ? `Checkout: ${resourceRecord.title}` : `Resource ID: ${cleanResourceId}`,
-          notes: `Checkout initiated for ₹${authoritativePrice}. Order ID: ${order.id}. Awaiting payment completion.`,
-          status: "New",
-          amount: authoritativePrice,
-          created_at: new Date().toISOString()
-        }).then(({ error }) => {
-          if (error) console.warn("[Create Resource Order] CRM lead capture notice:", error.message);
-        });
+        const leadEmail = (customerDetails?.email || "").trim().toLowerCase();
+        const leadName = customerDetails?.name || "Resource Checkout Visitor";
+        const leadPhone = customerDetails?.phone || null;
+
+        // Check if a lead with this order or email/interest already exists
+        dbClient.from("crm_leads")
+          .select("id")
+          .ilike("notes", `%${order.id}%`)
+          .limit(1)
+          .then(({ data: existingLeads }) => {
+            if (!existingLeads || existingLeads.length === 0) {
+              const initiationLeadId = crypto.randomUUID();
+              dbClient.from("crm_leads").insert({
+                id: initiationLeadId,
+                name: leadName,
+                email: leadEmail,
+                phone: leadPhone,
+                source: "Resource Paid Checkout Initiated",
+                interest: resourceRecord?.title ? `Checkout: ${resourceRecord.title}` : `Resource ID: ${cleanResourceId}`,
+                notes: `Checkout initiated for ₹${authoritativePrice}. Order ID: ${order.id}. Awaiting payment completion.`,
+                status: "New",
+                amount: authoritativePrice,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              }).then(({ error }) => {
+                if (error) console.warn("[Create Resource Order] CRM lead capture notice:", error.message);
+              });
+            }
+          });
       } catch (leadCatch) {
         console.warn("[Create Resource Order] Lead capture catch:", leadCatch?.message);
       }
@@ -1011,6 +1029,8 @@ router.post("/verify-resource-payment", async (req, res) => {
       already_fulfilled: Boolean(fulfillment.already_fulfilled),
       purchase: fulfillment.purchase,
       payment: fulfillment.payment,
+      lead_status: fulfillment.lead_status || 'saved',
+      lead_id: fulfillment.lead_id || null,
       orderId: razorpay_order_id.trim(),
       paymentId: razorpay_payment_id.trim(),
       resourceId: resourceRecord?.id || resourceId.trim()
@@ -1021,6 +1041,200 @@ router.post("/verify-resource-payment", async (req, res) => {
       success: false,
       verified: false,
       error: "An unexpected error occurred during resource payment verification."
+    });
+  }
+});
+
+/**
+ * POST /api/payments/recover-lead
+ *
+ * Dedicated idempotent recovery endpoint for CRM lead synchronization after a verified payment.
+ *
+ * Guarantees:
+ * 1. Checks that the payment was captured and verified in server ledger (resource_purchases/payments) or Razorpay gateway.
+ * 2. Never creates an order or charges the customer again.
+ * 3. Idempotently inserts or recovers the lead in public.crm_leads with server UUID.
+ * 4. Returns clear payment_verified and lead_status indicators.
+ */
+router.post("/recover-lead", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    let authenticatedUser = null;
+    if (authHeader) {
+      const { user } = await verifySupabaseToken(authHeader);
+      authenticatedUser = user;
+    }
+
+    const {
+      orderId,
+      paymentId,
+      resourceId,
+      customerDetails
+    } = req.body || {};
+
+    const cleanOrderId = String(orderId || "").trim();
+    const cleanPaymentId = String(paymentId || "").trim();
+    const cleanResourceId = String(resourceId || "").trim();
+
+    if (!cleanOrderId || !cleanPaymentId || !cleanResourceId) {
+      return res.status(400).json({
+        success: false,
+        payment_verified: false,
+        lead_status: "failed",
+        error: "Missing required parameters (orderId, paymentId, resourceId) for lead recovery."
+      });
+    }
+
+    const dbClient = getSupabaseDbClient(authHeader) || getSupabaseServerClient();
+    const razorpay = getRazorpayClient();
+
+    // 1. Authoritative verification: Ensure the payment actually exists and is captured
+    let paymentVerified = false;
+    let dbPurchase = null;
+
+    if (dbClient) {
+      // Check resource_purchases
+      const { data: purchase } = await dbClient
+        .from("resource_purchases")
+        .select("*")
+        .eq("razorpay_payment_id", cleanPaymentId)
+        .maybeSingle();
+
+      if (purchase) {
+        paymentVerified = true;
+        dbPurchase = purchase;
+      } else {
+        // Check payments ledger
+        const { data: payment } = await dbClient
+          .from("payments")
+          .select("*")
+          .eq("razorpay_payment_id", cleanPaymentId)
+          .eq("status", "captured")
+          .maybeSingle();
+
+        if (payment) {
+          paymentVerified = true;
+        }
+      }
+    }
+
+    // If not verified in database, check authoritative gateway status
+    if (!paymentVerified && razorpay) {
+      try {
+        const rzpPayment = await razorpay.payments.fetch(cleanPaymentId);
+        if (rzpPayment && rzpPayment.status === "captured" && rzpPayment.order_id === cleanOrderId) {
+          paymentVerified = true;
+        }
+      } catch (gatewayErr) {
+        console.warn(`[Lead Recovery] Gateway verification notice: ${gatewayErr?.message}`);
+      }
+    }
+
+    if (!paymentVerified) {
+      return res.status(400).json({
+        success: false,
+        payment_verified: false,
+        lead_status: "failed",
+        error: "Payment could not be verified against ledger records or gateway. Lead recovery rejected."
+      });
+    }
+
+    // 2. Idempotency Check: check if lead already exists in crm_leads for this payment
+    if (dbClient) {
+      const { data: existingLeads } = await dbClient
+        .from("crm_leads")
+        .select("id, status")
+        .ilike("notes", `%${cleanPaymentId}%`)
+        .limit(1);
+
+      if (existingLeads && existingLeads.length > 0) {
+        return res.json({
+          success: true,
+          payment_verified: true,
+          lead_status: "already_exists",
+          lead_id: existingLeads[0].id,
+          message: "CRM lead is already registered and synchronized for this purchase."
+        });
+      }
+    }
+
+    // 3. Resolve authoritative resource pricing & metadata
+    let resourceRecord = null;
+    if (dbClient) {
+      const isUUID = isValidUUID(cleanResourceId);
+      const query = dbClient.from("resources").select("*");
+      const { data } = isUUID
+        ? await query.eq("id", cleanResourceId).maybeSingle()
+        : await query.eq("slug", cleanResourceId).maybeSingle();
+      resourceRecord = data;
+    }
+
+    const pricing = getAuthoritativeResourcePricing(cleanResourceId, resourceRecord, req.body);
+    const authoritativePrice = pricing.price;
+    const resourceTitle = resourceRecord?.title || resourceRecord?.name || "Digital Resource Toolkit";
+
+    // 4. Safely insert lead into public.crm_leads with generated UUID
+    const leadEmail = (customerDetails?.email || authenticatedUser?.email || dbPurchase?.customer_email || "").trim().toLowerCase();
+    const leadName = (customerDetails?.name || authenticatedUser?.user_metadata?.full_name || "Resource Buyer").trim();
+    const leadPhone = (customerDetails?.phone || dbPurchase?.customer_phone || "").trim() || null;
+    const profession = customerDetails?.profession ? String(customerDetails.profession).trim() : "";
+
+    const newLeadId = crypto.randomUUID();
+    const notesContent = profession
+      ? `Paid ₹${authoritativePrice}. Order: ${cleanOrderId}, Payment: ${cleanPaymentId}. Profession: ${profession}. Recovered lead synchronization.`
+      : `Paid ₹${authoritativePrice}. Order: ${cleanOrderId}, Payment: ${cleanPaymentId}. Recovered lead synchronization.`;
+
+    if (dbClient && (leadEmail || leadName)) {
+      const { data: insertedLead, error: insertError } = await dbClient
+        .from("crm_leads")
+        .insert({
+          id: newLeadId,
+          name: leadName || "Resource Buyer",
+          email: leadEmail,
+          phone: leadPhone,
+          source: "Resource Purchase (Paid)",
+          interest: `Purchased: ${resourceTitle}`,
+          notes: notesContent,
+          status: "Converted",
+          amount: authoritativePrice,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .maybeSingle();
+
+      if (insertError) {
+        console.warn("[Lead Recovery] Insert CRM lead notice:", insertError.message);
+        return res.status(500).json({
+          success: false,
+          payment_verified: true,
+          lead_status: "failed",
+          error: "Database error while persisting recovered lead."
+        });
+      }
+
+      return res.json({
+        success: true,
+        payment_verified: true,
+        lead_status: "saved",
+        lead_id: insertedLead?.id || newLeadId,
+        message: "CRM lead successfully recovered and synchronized."
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      payment_verified: true,
+      lead_status: "failed",
+      error: "Insufficient customer information to save lead."
+    });
+  } catch (err) {
+    console.error("[Lead Recovery] Unexpected error:", err);
+    return res.status(500).json({
+      success: false,
+      payment_verified: false,
+      lead_status: "failed",
+      error: "An unexpected error occurred during lead recovery."
     });
   }
 });

@@ -51,6 +51,44 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
+  // Helper functions for safe sessionStorage form preservation
+  const getCheckoutStorageKey = (resId: string) => `dm_checkout_lead_${resId}`;
+
+  const getSavedCheckoutData = (resId: string) => {
+    if (typeof window === 'undefined' || !window.sessionStorage) return null;
+    try {
+      const raw = window.sessionStorage.getItem(getCheckoutStorageKey(resId));
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const saveSavedCheckoutData = (resId: string, data: { name: string; email: string; mobile: string; profession: string }) => {
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    try {
+      window.sessionStorage.setItem(getCheckoutStorageKey(resId), JSON.stringify(data));
+    } catch {}
+  };
+
+  const clearSavedCheckoutData = (resId: string) => {
+    if (typeof window === 'undefined' || !window.sessionStorage) return;
+    try {
+      window.sessionStorage.removeItem(getCheckoutStorageKey(resId));
+    } catch {}
+  };
+
+  // Lock body scroll when any modal is open to eliminate background drag and rubber-banding
+  React.useEffect(() => {
+    if (paidModalResource || activeDownloadResource) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [paidModalResource, activeDownloadResource]);
+
   // Filter published resources for public display
   const publishedResources = resources.filter(
     (r) => r.status === 'published' || !r.status
@@ -70,11 +108,12 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
         const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
         if (isPaid) {
           if (!hasPurchasedResource(res.id)) {
+            const saved = getSavedCheckoutData(res.id);
             setPaidModalResource(res);
-            setName(userProfile?.fullName || '');
-            setEmail(currentUser?.email || '');
-            setMobile(userProfile?.phone || '');
-            setProfession(userProfile?.title || '');
+            setName(saved?.name || userProfile?.fullName || '');
+            setEmail(saved?.email || currentUser?.email || '');
+            setMobile(saved?.mobile || userProfile?.phone || '');
+            setProfession(saved?.profession || userProfile?.title || '');
           } else {
             const isBundle = res.id === '2d50e5e3-711d-4461-a70d-0ed54dd29f17' || res.slug === 'meta-ads-campaign-planner-bundle';
             if (isBundle) {
@@ -108,12 +147,13 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
     // 1. Paid resources: require verified purchase
     if (isPaid) {
       if (!hasPurchasedResource(res.id)) {
-        // Open the paid checkout modal directly for this resource/bundle
+        // Open the paid checkout modal directly for this resource/bundle with restored data
+        const saved = getSavedCheckoutData(res.id);
         setPaidModalResource(res);
-        setName(userProfile?.fullName || '');
-        setEmail(currentUser?.email || '');
-        setMobile(userProfile?.phone || '');
-        setProfession(userProfile?.title || '');
+        setName(saved?.name || userProfile?.fullName || '');
+        setEmail(saved?.email || currentUser?.email || '');
+        setMobile(saved?.mobile || userProfile?.phone || '');
+        setProfession(saved?.profession || userProfile?.title || '');
         setFormError(null);
         return;
       }
@@ -164,6 +204,14 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
 
     setIsProcessingPayment(true);
     setFormError(null);
+
+    // Preserve checkout form state in sessionStorage so data is retained across modal cycles
+    saveSavedCheckoutData(paidModalResource.id, {
+      name: name.trim(),
+      email: email.trim(),
+      mobile: mobile.trim(),
+      profession: profession.trim()
+    });
 
     try {
       // 1. Authoritative server-side Razorpay order creation (strict server price)
@@ -248,12 +296,30 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
               return;
             }
 
-            // 4. Verification successful: persist purchase and redirect to paid thank-you or bundle page
+            // 4. Verification successful: persist purchase, clear temp form storage, and unlock resource
             await purchaseResource(paidModalResource, response.razorpay_payment_id, response.razorpay_order_id);
             const unlocked = paidModalResource;
+            clearSavedCheckoutData(unlocked.id);
             setPaidModalResource(null);
             if (onCloseModal) onCloseModal();
             notify(`Payment verified! Access granted to ${unlocked.title || unlocked.name}.`, 'success');
+
+            // Decoupled background lead recovery: if lead persistence was pending or failed, recover in background without blocking access
+            if (verifyResult.lead_status === 'failed' || verifyResult.lead_status === 'pending') {
+              paymentService.recoverLead({
+                orderId: response.razorpay_order_id,
+                paymentId: response.razorpay_payment_id,
+                resourceId: unlocked.id,
+                customerDetails: {
+                  name: name.trim(),
+                  email: email.trim(),
+                  phone: mobile.trim(),
+                  profession: profession.trim()
+                }
+              }).catch((rErr) => {
+                console.warn('[ResourcesPage] Notice in background lead sync:', rErr);
+              });
+            }
 
             const isBundle = unlocked.id === '2d50e5e3-711d-4461-a70d-0ed54dd29f17' || unlocked.slug === 'meta-ads-campaign-planner-bundle';
             if (isBundle) {
@@ -651,8 +717,8 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
 
       {/* Email Capture / Direct Download Modal */}
       {activeDownloadResource && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-contain">
-          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl p-5 sm:p-8 space-y-5 sm:space-y-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150 max-h-[calc(100dvh-2rem)] overflow-y-auto my-auto">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-y-contain touch-pan-y">
+          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl p-5 sm:p-8 space-y-5 sm:space-y-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-auto">
             <div className="absolute top-4 right-4 flex items-center gap-1.5 z-10">
               <button
                 id={`modal-bookmark-btn-${activeDownloadResource.id}`}
@@ -781,7 +847,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                       placeholder="Aditi Sharma"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      className="w-full mt-1 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs focus:outline-none focus:border-amber-500"
+                      className="w-full mt-1 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-base sm:text-sm focus:outline-none focus:border-amber-500"
                     />
                   </div>
                   <div>
@@ -792,7 +858,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                       placeholder="+91 98765 43210"
                       value={mobile}
                       onChange={(e) => setMobile(e.target.value)}
-                      className="w-full mt-1 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs focus:outline-none focus:border-amber-500"
+                      className="w-full mt-1 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-base sm:text-sm focus:outline-none focus:border-amber-500"
                     />
                   </div>
                 </div>
@@ -806,7 +872,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                       placeholder="aditi@example.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full mt-1 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs focus:outline-none focus:border-amber-500"
+                      className="w-full mt-1 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-base sm:text-sm focus:outline-none focus:border-amber-500"
                     />
                   </div>
                   <div>
@@ -817,7 +883,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                       placeholder="Founder / Growth Lead / Marketer"
                       value={profession}
                       onChange={(e) => setProfession(e.target.value)}
-                      className="w-full mt-1 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs focus:outline-none focus:border-amber-500"
+                      className="w-full mt-1 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-base sm:text-sm focus:outline-none focus:border-amber-500"
                     />
                   </div>
                 </div>
@@ -845,8 +911,8 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
 
       {/* Paid Resource Checkout Modal */}
       {paidModalResource && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-contain">
-          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl p-5 sm:p-8 space-y-5 sm:space-y-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150 max-h-[calc(100dvh-2rem)] overflow-y-auto my-auto">
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-y-contain touch-pan-y">
+          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl p-5 sm:p-8 space-y-5 sm:space-y-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-auto">
             <button
               type="button"
               onClick={() => {
@@ -907,7 +973,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Rahul Sharma"
-                    className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs focus:outline-none focus:border-amber-500"
+                    className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-base sm:text-sm focus:outline-none focus:border-amber-500"
                   />
                 </div>
 
@@ -920,7 +986,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="rahul@company.com"
-                      className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs focus:outline-none focus:border-amber-500"
+                      className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-base sm:text-sm focus:outline-none focus:border-amber-500"
                     />
                   </div>
                   <div>
@@ -930,7 +996,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                       value={mobile}
                       onChange={(e) => setMobile(e.target.value)}
                       placeholder="+91 98765 43210"
-                      className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-xs focus:outline-none focus:border-amber-500"
+                      className="w-full px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-base sm:text-sm focus:outline-none focus:border-amber-500"
                     />
                   </div>
                 </div>

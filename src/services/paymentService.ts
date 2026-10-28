@@ -6,7 +6,8 @@ import {
   CreateConsultationOrderResult,
   VerifyConsultationPaymentResult,
   CreateResourceOrderResult,
-  VerifyResourcePaymentResult
+  VerifyResourcePaymentResult,
+  RecoverLeadResult
 } from '../types';
 
 /**
@@ -366,6 +367,52 @@ export const paymentService = {
         success: false,
         verified: false,
         error: err?.message || 'Network error while verifying resource payment with server.'
+      };
+    }
+  },
+
+  /**
+   * Safe idempotent CRM lead recovery after a verified payment.
+   * Does NOT charge or re-verify payment; only synchronizes missing CRM lead row.
+   */
+  async recoverLead(params: {
+    orderId: string;
+    paymentId: string;
+    resourceId: string;
+    customerDetails?: {
+      name?: string;
+      email?: string;
+      phone?: string;
+      profession?: string;
+    };
+  }): Promise<RecoverLeadResult> {
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+
+      if (isSupabaseConfigured()) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          headers.Authorization = `Bearer ${session.access_token}`;
+        }
+      }
+
+      const response = await fetch('/api/payments/recover-lead', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(params)
+      });
+
+      const result: RecoverLeadResult = await response.json();
+      return result;
+    } catch (err: any) {
+      console.warn('[PaymentService] Notice recovering lead with server:', err);
+      return {
+        success: false,
+        payment_verified: true,
+        lead_status: 'failed',
+        error: err?.message || 'Network error while recovering CRM lead.'
       };
     }
   }

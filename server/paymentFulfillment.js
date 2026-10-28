@@ -1,9 +1,11 @@
+import crypto from "crypto";
 import { getSupabaseServerClient, isValidUUID } from "./supabaseServer.js";
 import {
   sendCourseAccessEmail,
   sendConsultationConfirmationEmail,
   sendResourceDeliveryEmail
 } from "./mailerService.js";
+import { assertSideEffectAllowed } from "./developmentSafetyGate.js";
 
 /**
  * Calculates the authoritative effective course price according to standard business logic:
@@ -63,6 +65,17 @@ export async function fulfillCourseEnrollment({
   paymentId
 }) {
   try {
+    // 0. Development safety check: prevent database mutations in non-production targeting prod
+    const sideEffectCheck = assertSideEffectAllowed("database_mutation");
+    if (!sideEffectCheck.allowed) {
+      return {
+        success: false,
+        fulfilled: false,
+        code: sideEffectCheck.code,
+        error: `CRITICAL SAFETY VIOLATION: Course fulfillment blocked in development: ${sideEffectCheck.reason}`
+      };
+    }
+
     // 1. Parameter validations
     if (!userId || !isValidUUID(userId)) {
       return {
@@ -261,6 +274,17 @@ export async function fulfillConsultationPayment({
   paymentId
 }) {
   try {
+    // 0. Development safety check: prevent database mutations in non-production targeting prod
+    const sideEffectCheck = assertSideEffectAllowed("database_mutation");
+    if (!sideEffectCheck.allowed) {
+      return {
+        success: false,
+        fulfilled: false,
+        code: sideEffectCheck.code,
+        error: `CRITICAL SAFETY VIOLATION: Consultation fulfillment blocked in development: ${sideEffectCheck.reason}`
+      };
+    }
+
     const supabaseServer = getSupabaseServerClient();
     if (!supabaseServer) {
       return {
@@ -539,6 +563,17 @@ export async function fulfillResourcePurchase({
   resourceTitle
 }) {
   try {
+    // 0. Development safety check: prevent database mutations in non-production targeting prod
+    const sideEffectCheck = assertSideEffectAllowed("database_mutation");
+    if (!sideEffectCheck.allowed) {
+      return {
+        success: false,
+        fulfilled: false,
+        code: sideEffectCheck.code,
+        error: `CRITICAL SAFETY VIOLATION: Resource fulfillment blocked in development: ${sideEffectCheck.reason}`
+      };
+    }
+
     const supabaseServer = getSupabaseServerClient();
     const cleanPaymentId = String(paymentId || "").trim();
     const cleanOrderId = String(orderId || "").trim();
@@ -561,34 +596,17 @@ export async function fulfillResourcePurchase({
         .maybeSingle();
 
       if (existingPurchase || existingPayment) {
-        console.log(`[Resource Fulfillment] Payment ${cleanPaymentId} already processed. Returning existing record.`);
-        // Check in background if delivery email was previously dispatched; if not, send it
-        (async () => {
-          try {
-            const targetEmail = customerEmail || existingPurchase?.customer_email;
-            if (targetEmail) {
-              await sendResourceDeliveryEmail({
-                to: targetEmail,
-                customerName: customerName || "Valued Customer",
-                resourceTitle: resourceTitle || existingPayment?.item_title || "Digital Resource Toolkit",
-                resourceId: cleanResourceId,
-                amount: numericAmount || Number(existingPurchase?.amount) || Number(existingPayment?.amount) || 0,
-                currency: finalCurrency,
-                orderId: cleanOrderId,
-                paymentId: cleanPaymentId
-              });
-            }
-          } catch (mErr) {
-            console.warn("[Resource Fulfillment] Existing record email dispatch notice:", mErr?.message);
-          }
-        })();
+        console.log(`[Resource Fulfillment] Payment ${cleanPaymentId} already processed. Returning existing record without duplicate email.`);
 
         return {
           success: true,
           fulfilled: true,
           already_fulfilled: true,
           purchase: existingPurchase || null,
-          payment: existingPayment || null
+          payment: existingPayment || null,
+          lead_status: "already_exists",
+          orderId: cleanOrderId,
+          paymentId: cleanPaymentId
         };
       }
     }
@@ -699,22 +717,55 @@ export async function fulfillResourcePurchase({
       }
     }
 
-    // 5. Record CRM Lead in public.crm_leads as Converted buyer
+    // 5. Record CRM Lead in public.crm_leads as Converted buyer (decoupled, idempotent with valid UUID)
+    let leadStatus = "skipped";
+    let leadId = null;
+
     if (supabaseServer && (customerEmail || customerName)) {
       try {
-        await supabaseServer.from("crm_leads").insert({
-          name: customerName || "Resource Buyer",
-          email: customerEmail || "",
-          phone: customerPhone || null,
-          source: "Resource Purchase (Paid)",
-          interest: resourceTitle ? `Purchased: ${resourceTitle}` : `Resource ID: ${cleanResourceId}`,
-          notes: `Paid ₹${numericAmount}. Order: ${cleanOrderId}, Payment: ${cleanPaymentId}`,
-          status: "Converted",
-          amount: numericAmount,
-          created_at: new Date().toISOString()
-        });
+        const cleanEmail = (customerEmail || "").trim().toLowerCase();
+
+        // Idempotency check: see if a lead was already registered with this payment ID
+        const { data: existingLeads } = await supabaseServer
+          .from("crm_leads")
+          .select("id, status")
+          .ilike("notes", `%${cleanPaymentId}%`)
+          .limit(1);
+
+        if (existingLeads && existingLeads.length > 0) {
+          leadStatus = "already_exists";
+          leadId = existingLeads[0].id;
+        } else {
+          const generatedLeadId = crypto.randomUUID();
+          const { data: insertedLead, error: leadErr } = await supabaseServer
+            .from("crm_leads")
+            .insert({
+              id: generatedLeadId,
+              name: customerName || "Resource Buyer",
+              email: cleanEmail,
+              phone: customerPhone || null,
+              source: "Resource Purchase (Paid)",
+              interest: resourceTitle ? `Purchased: ${resourceTitle}` : `Resource ID: ${cleanResourceId}`,
+              notes: `Paid ₹${numericAmount}. Order: ${cleanOrderId}, Payment: ${cleanPaymentId}`,
+              status: "Converted",
+              amount: numericAmount,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .select()
+            .maybeSingle();
+
+          if (leadErr) {
+            console.warn("[Resource Fulfillment] CRM lead record notice (fulfillment unaffected):", leadErr.message);
+            leadStatus = "failed";
+          } else {
+            leadStatus = "saved";
+            leadId = insertedLead?.id || generatedLeadId;
+          }
+        }
       } catch (leadErr) {
-        console.warn("[Resource Fulfillment] CRM lead record notice:", leadErr?.message);
+        console.warn("[Resource Fulfillment] CRM lead record error caught (fulfillment unaffected):", leadErr?.message);
+        leadStatus = "failed";
       }
     }
 
@@ -765,6 +816,8 @@ export async function fulfillResourcePurchase({
         purchasedAt: new Date().toISOString()
       },
       payment: paymentRecord,
+      lead_status: leadStatus,
+      lead_id: leadId,
       resourceId: cleanResourceId,
       orderId: cleanOrderId,
       paymentId: cleanPaymentId,

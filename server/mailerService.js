@@ -14,6 +14,7 @@ import { Resend } from "resend";
 import { getSupabaseServerClient } from "./supabaseServer.js";
 import { generateAuthoritativeInvoicePdf } from "./invoiceService.js";
 import { generateConsultationIcsBuffer } from "./calendarService.js";
+import { assertSideEffectAllowed } from "./developmentSafetyGate.js";
 
 // In-memory deduplication set to block concurrent duplicate requests (e.g. concurrent webhook + client verify)
 const inMemorySentCache = new Map();
@@ -43,12 +44,20 @@ export function getSenderEmail() {
 
 /**
  * Lazy initializer for Resend client.
+ * Returns null if unconfigured or if running in development without safe staging isolation.
  * @returns {Resend | null}
  */
 function getResendClient() {
   if (!isMailerConfigured()) {
     return null;
   }
+
+  const sideEffectCheck = assertSideEffectAllowed("email_dispatch");
+  if (!sideEffectCheck.allowed) {
+    console.warn(`[SAFETY GUARD] Blocked Resend email dispatch in development: ${sideEffectCheck.code}`);
+    return null;
+  }
+
   try {
     return new Resend(process.env.RESEND_API_KEY.trim());
   } catch (err) {
@@ -127,6 +136,12 @@ async function recordEmailLog({
       timestamp: Date.now(),
       providerMessageId
     });
+  }
+
+  const sideEffectCheck = assertSideEffectAllowed("database_mutation");
+  if (!sideEffectCheck.allowed) {
+    console.warn(`[SAFETY GUARD] Skipped email_logs write in development: ${sideEffectCheck.code}`);
+    return;
   }
 
   const supabase = getSupabaseServerClient();

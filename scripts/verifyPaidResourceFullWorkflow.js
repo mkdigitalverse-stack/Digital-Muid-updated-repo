@@ -1,3 +1,15 @@
+import { enforceStagingSafety } from './safetyGuard.js';
+
+// ==============================================================================
+// FAIL-CLOSED SAFETY GUARD: PRODUCTION REJECTION & ISOLATED STAGING ENFORCEMENT
+// ==============================================================================
+enforceStagingSafety({
+  requireTestRazorpay: true,
+  requireStagingDatabase: true,
+  requireStagingWritesFlag: true
+});
+// ==============================================================================
+
 /**
  * Comprehensive Paid Resource Checkout Workflow Verification
  * Validates the complete 8-stage lifecycle across mobile, tablet portrait, tablet landscape, and desktop.

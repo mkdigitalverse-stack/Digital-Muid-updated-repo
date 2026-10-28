@@ -13,6 +13,45 @@ import webEnquiryRoutes from "./server/webEnquiryRoutes.js";
 import growthAuditRoutes from "./server/growthAuditRoutes.js";
 import { seoRedirectMiddleware } from "./server/seoRedirects.js";
 import { injectSeoIntoHtml } from "./server/htmlSeoInjector.js";
+import {
+  developmentSafetyMiddleware,
+  isProductionEnvironment,
+  evaluateDevelopmentSafety
+} from "./server/developmentSafetyGate.js";
+
+/**
+ * Builds the serialized client environment script for HTML injection.
+ * When running in development mode targeting production, sensitive credentials
+ * are sanitized to prevent browser forms from mutating production data.
+ */
+function buildClientEnvScript(isProd: boolean): string {
+  const safety = evaluateDevelopmentSafety();
+
+  let clientSupabaseUrl = process.env.VITE_SUPABASE_URL || "";
+  let clientAnonKey = process.env.VITE_SUPABASE_ANON_KEY || "";
+  let clientRazorpayKey = process.env.VITE_RAZORPAY_KEY_ID || "";
+
+  if (!isProd && safety.isProductionSupabase) {
+    clientSupabaseUrl = "";
+    clientAnonKey = "";
+  }
+
+  if (!isProd && safety.isLiveRazorpay) {
+    clientRazorpayKey = "";
+  }
+
+  const clientEnv = {
+    VITE_SUPABASE_URL: clientSupabaseUrl,
+    VITE_SUPABASE_ANON_KEY: clientAnonKey,
+    VITE_RAZORPAY_KEY_ID: clientRazorpayKey,
+    APP_ENV: isProd ? "production" : "development",
+    SAFETY_GUARD_ACTIVE: !isProd,
+    DEV_MUTATIONS_BLOCKED: !isProd && (safety.isProductionSupabase || safety.isLiveRazorpay),
+  };
+
+  const serializedEnv = JSON.stringify(clientEnv).replace(/</g, "\\u003c");
+  return `<script>window.__ENV__ = Object.assign(window.__ENV__ || {}, ${serializedEnv});</script>`;
+}
 
 async function startServer() {
   const app = express();
@@ -29,7 +68,7 @@ async function startServer() {
     process.env.K_SERVICE?.startsWith("ais-dev-")
   );
 
-  const isProduction = process.env.NODE_ENV === "production" || !isDevContainer;
+  const isProduction = isProductionEnvironment();
 
   // Respect TEST_PORT for local testing; otherwise in dev use 3000, and in Cloud Run use process.env.PORT (8080)
   const PORT = process.env.TEST_PORT
@@ -37,6 +76,9 @@ async function startServer() {
     : (isDevContainer && process.env.NODE_ENV !== "production"
         ? parseInt(cliPort || "3000", 10)
         : parseInt(process.env.PORT || cliPort || "8080", 10));
+
+  // 0. Mount Development Safety Gate BEFORE any write endpoints, webhooks, or API handlers
+  app.use(developmentSafetyMiddleware);
 
   // 1. Mount Razorpay Webhook endpoint with exact raw body handling BEFORE express.json()
   app.post(
@@ -117,7 +159,13 @@ async function startServer() {
         const templatePath = path.resolve(process.cwd(), "index.html");
         let template = fs.readFileSync(templatePath, "utf-8");
         template = await vite.transformIndexHtml(req.originalUrl || req.url, template);
-        const finalHtml = injectSeoIntoHtml(template, req.path);
+        let finalHtml = injectSeoIntoHtml(template, req.path);
+        const envScript = buildClientEnvScript(false);
+        if (finalHtml.includes("</head>")) {
+          finalHtml = finalHtml.replace("</head>", `${envScript}</head>`);
+        } else {
+          finalHtml = envScript + finalHtml;
+        }
         res.status(200).set({ "Content-Type": "text/html; charset=utf-8" }).end(finalHtml);
       } catch (e) {
         next(e);
@@ -154,16 +202,7 @@ async function startServer() {
           : fs.readFileSync(indexPath, "utf8");
 
         html = injectSeoIntoHtml(html, req.path);
-
-        // Strictly client-safe environment variables - server secrets MUST NEVER be included
-        const clientEnv = {
-          VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL || "",
-          VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY || "",
-          VITE_RAZORPAY_KEY_ID: process.env.VITE_RAZORPAY_KEY_ID || "",
-        };
-
-        const serializedEnv = JSON.stringify(clientEnv).replace(/</g, "\\u003c");
-        const envScript = `<script>window.__ENV__ = Object.assign(window.__ENV__ || {}, ${serializedEnv});</script>`;
+        const envScript = buildClientEnvScript(true);
 
         if (html.includes("</head>")) {
           html = html.replace("</head>", `${envScript}</head>`);

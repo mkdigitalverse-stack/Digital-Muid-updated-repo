@@ -1,3 +1,18 @@
+import { enforceStagingSafety } from "./safetyGuard.js";
+
+// ==============================================================================
+// FAIL-CLOSED SAFETY GUARD: PRODUCTION STORAGE & DATABASE PROTECTION
+// Prevents generation or storage uploads against the production environment.
+// Requires an isolated staging Supabase project and ALLOW_BUNDLE_ASSET_UPLOAD=true.
+// ==============================================================================
+enforceStagingSafety({
+  requireTestRazorpay: false,
+  requireStagingDatabase: true,
+  requireStagingWritesFlag: true,
+  requireBundleUploadFlag: true
+});
+// ==============================================================================
+
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import * as XLSX from "xlsx";
 import fs from "fs";

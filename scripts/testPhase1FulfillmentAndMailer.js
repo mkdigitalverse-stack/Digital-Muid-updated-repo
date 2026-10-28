@@ -1,3 +1,15 @@
+import { enforceStagingSafety } from './safetyGuard.js';
+
+// ==============================================================================
+// FAIL-CLOSED SAFETY GUARD: PRODUCTION REJECTION & ISOLATED STAGING ENFORCEMENT
+// ==============================================================================
+enforceStagingSafety({
+  requireTestRazorpay: true,
+  requireStagingDatabase: true,
+  requireStagingWritesFlag: true
+});
+// ==============================================================================
+
 /**
  * Automated Verification Script for Phase 1:
  * Transactional Email, Invoice Generation, Calendar Invites & Deduplication

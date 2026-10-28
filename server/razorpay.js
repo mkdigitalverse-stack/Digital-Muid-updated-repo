@@ -1,6 +1,8 @@
 import Razorpay from "razorpay";
 import crypto from "crypto";
 
+import { isProductionEnvironment } from "./developmentSafetyGate.js";
+
 /**
  * Cached singleton instance of the Razorpay client.
  */
@@ -35,6 +37,7 @@ export function isWebhookConfigured() {
 /**
  * Lazily retrieves or initializes the Razorpay SDK instance.
  * Returns null if credentials are not configured, preventing startup crashes.
+ * In development or test environments, returns null if configured with live credentials.
  * @returns {Razorpay|null}
  */
 export function getRazorpayClient() {
@@ -42,6 +45,12 @@ export function getRazorpayClient() {
   const key_secret = process.env.RAZORPAY_KEY_SECRET;
 
   if (!key_id || !key_secret) {
+    return null;
+  }
+
+  // Fail-closed development safety guard: live Razorpay orders prohibited in dev/test
+  if (!isProductionEnvironment() && key_id.startsWith("rzp_live_")) {
+    console.error("[SAFETY GUARD] Blocked instantiation of LIVE Razorpay client in development/test environment.");
     return null;
   }
 

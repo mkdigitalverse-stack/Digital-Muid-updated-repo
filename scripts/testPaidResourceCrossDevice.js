@@ -1,3 +1,15 @@
+import { enforceStagingSafety } from './safetyGuard.js';
+
+// ==============================================================================
+// FAIL-CLOSED SAFETY GUARD: PRODUCTION REJECTION & ISOLATED STAGING ENFORCEMENT
+// ==============================================================================
+enforceStagingSafety({
+  requireTestRazorpay: true,
+  requireStagingDatabase: true,
+  requireStagingWritesFlag: true
+});
+// ==============================================================================
+
 /**
  * Paid Resource Checkout Cross-Device Compatibility Verification Suite
  * Tests:

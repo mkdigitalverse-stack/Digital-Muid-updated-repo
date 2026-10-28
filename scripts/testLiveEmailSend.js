@@ -1,3 +1,15 @@
+import { enforceStagingSafety } from './safetyGuard.js';
+
+// ==============================================================================
+// FAIL-CLOSED SAFETY GUARD: PRODUCTION REJECTION & ISOLATED STAGING ENFORCEMENT
+// ==============================================================================
+enforceStagingSafety({
+  requireTestRazorpay: false, // Live email test focuses on email sink/sandbox
+  requireStagingDatabase: true,
+  requireStagingWritesFlag: true
+});
+// ==============================================================================
+
 /**
  * Live Email Delivery Test for Phase 1
  * Sends a real test transaction confirmation to the verified user email (mkdigitalverse@gmail.com).
