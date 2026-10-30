@@ -50,6 +50,17 @@ function sanitizeSupabaseKey(rawKey) {
 let supabaseServerInstance = null;
 
 /**
+ * For testing and mock verification only: allows injecting a mock client without network calls.
+ * @param {any} client
+ */
+export function setMockSupabaseServerClient(client) {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("[SECURITY] Mock client injection is strictly forbidden in production mode.");
+  }
+  supabaseServerInstance = client;
+}
+
+/**
  * Checks whether the privileged Supabase Service Role client can be initialized.
  * @returns {boolean}
  */
@@ -102,6 +113,18 @@ export async function verifySupabaseToken(token) {
     return { user: null, error: new Error("Malformed Bearer token") };
   }
 
+  if (supabaseServerInstance && supabaseServerInstance.auth && typeof supabaseServerInstance.auth.getUser === "function") {
+    try {
+      const { data, error } = await supabaseServerInstance.auth.getUser(cleanToken);
+      if (error || !data?.user) {
+        return { user: null, error: error || new Error("User session invalid or expired") };
+      }
+      return { user: data.user, error: null };
+    } catch (err) {
+      return { user: null, error: err };
+    }
+  }
+
   const url = sanitizeSupabaseUrl(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL);
   const key = sanitizeSupabaseKey(
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
@@ -142,7 +165,7 @@ export function checkIsAdmin(user) {
   const email = (user.email || '').toLowerCase().trim();
   const adminEmails = ['mkdigitalverse@gmail.com', 'admin@digitalmuid.com'];
   if (adminEmails.includes(email)) return true;
-  if (user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin') return true;
+  if (user.app_metadata?.role === 'admin') return true;
   return false;
 }
 

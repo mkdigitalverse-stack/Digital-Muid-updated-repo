@@ -402,7 +402,7 @@ export interface AvailabilityRules {
   maxAdvanceDays: number;
 }
 
-export type BookingStatus = 'confirmed' | 'rescheduled' | 'cancelled' | 'completed';
+export type BookingStatus = 'confirmed' | 'rescheduled' | 'cancelled' | 'completed' | 'reschedule_pending';
 
 export interface Booking {
   id: string;

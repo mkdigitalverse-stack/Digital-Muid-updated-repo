@@ -271,7 +271,10 @@ export async function fulfillConsultationPayment({
   userId,
   bookingDetails,
   orderId,
-  paymentId
+  paymentId,
+  productId,
+  amount,
+  currency
 }) {
   try {
     // 0. Development safety check: prevent database mutations in non-production targeting prod
@@ -297,85 +300,46 @@ export async function fulfillConsultationPayment({
 
     const cleanPaymentId = String(paymentId || "").trim();
     const cleanOrderId = String(orderId || "").trim();
+    const targetProductId = isValidUUID(productId) ? productId : "31bbb9bf-ce10-4da4-a517-dfc673f9b875";
 
-    // 1. Idempotency Check: Look for existing payment record with this razorpay_payment_id
-    const { data: existingPayment } = await supabaseServer
-      .from("payments")
-      .select("*")
-      .eq("razorpay_payment_id", cleanPaymentId)
-      .maybeSingle();
-
-    // Look for existing booking record with this payment_id or razorpay_order_id
-    const { data: existingBooking } = await supabaseServer
-      .from("bookings")
-      .select("*")
-      .or(`payment_id.eq.${cleanPaymentId},razorpay_order_id.eq.${cleanOrderId}`)
-      .maybeSingle();
-
-    if (existingPayment || existingBooking) {
-      console.log(`[Consultation Fulfillment] Payment ${cleanPaymentId} already processed. Returning existing record.`);
-      // Check in background if email was previously dispatched; if not, send it
-      (async () => {
-        try {
-          const bookingTarget = existingBooking || {};
-          const email = bookingTarget.customer_email;
-          if (email) {
-            await sendConsultationConfirmationEmail({
-              to: email,
-              customerName: bookingTarget.customer_name || "Valued Client",
-              bookingCode: bookingTarget.booking_code || `DM-BK-${cleanPaymentId.slice(-4)}`,
-              bookingDate: bookingTarget.booking_date || "",
-              bookingTime: bookingTarget.booking_time || "",
-              durationMinutes: Number(bookingTarget.duration_minutes) || 30,
-              meetUrl: bookingTarget.meet_url || "https://meet.google.com",
-              primaryChallenge: bookingTarget.primary_challenge || "Business Growth Strategy",
-              amount: Number(bookingTarget.total_amount) || Number(existingPayment?.amount) || 0,
-              currency: bookingTarget.currency || existingPayment?.currency || "INR",
-              baseAmount: Number(bookingTarget.base_amount) || undefined,
-              gstAmount: Number(bookingTarget.gst_amount) || undefined,
-              orderId: cleanOrderId,
-              paymentId: cleanPaymentId
-            });
-          }
-        } catch (mErr) {
-          console.warn("[Consultation Fulfillment] Existing record email dispatch notice:", mErr?.message);
-        }
-      })();
-
-      return {
-        success: true,
-        fulfilled: true,
-        already_fulfilled: true,
-        booking: existingBooking || null,
-        payment: existingPayment || null
-      };
-    }
-
-    // 2. Fetch authoritative consultation product to snapshot current price
-    let { data: product } = await supabaseServer
+    // 1. Resolve authoritative product pricing strictly (fail closed if missing/inactive)
+    const { data: product } = await supabaseServer
       .from("consultation_products")
       .select("*")
+      .eq("id", targetProductId)
       .eq("active", true)
-      .limit(1)
       .maybeSingle();
 
     if (!product) {
-      const { data: canonProduct } = await supabaseServer
-        .from("consultation_products")
-        .select("*")
-        .eq("id", "31bbb9bf-ce10-4da4-a517-dfc673f9b875")
-        .maybeSingle();
-      product = canonProduct;
+      return {
+        success: false,
+        fulfilled: false,
+        error: `Consultation product (${targetProductId}) is inactive or not found. Fulfillment rejected.`,
+        code: "PRODUCT_UNAVAILABLE"
+      };
     }
 
     const baseAmount = Number(product?.base_price) || 499;
     const gstRate = Number(product?.gst_rate) || 0.18;
     const gstAmount = Number((baseAmount * gstRate).toFixed(2));
     const totalAmount = Number((baseAmount + gstAmount).toFixed(2));
-    const currency = (product?.currency || "INR").toUpperCase();
+    const effectiveCurrency = String(currency || product?.currency || "").trim().toUpperCase();
+
+    if (!effectiveCurrency || effectiveCurrency !== "INR") {
+      return {
+        success: false,
+        fulfilled: false,
+        error: "Invalid or missing currency: Consultation transactions must be denominated in INR.",
+        code: "INVALID_CURRENCY"
+      };
+    }
+
+    const effectiveAmount = (typeof amount === "number" && !isNaN(amount) && amount > 0)
+      ? Number(amount.toFixed(2))
+      : totalAmount;
     const durationMinutes = Number(product?.duration_minutes) || 30;
 
-    // 3. Resolve user_id: If authenticated student, use userId; else check profiles by email
+    // 2. Resolve user_id: If authenticated student, use userId; else check profiles by email
     let resolvedUserId = isValidUUID(userId) ? userId : null;
     if (!resolvedUserId && bookingDetails?.customerEmail) {
       try {
@@ -390,87 +354,321 @@ export async function fulfillConsultationPayment({
       } catch {}
     }
 
-    // 4. Create confirmed booking in public.bookings
+    // 3. Prepare intake brief payload
     const bookingCode = `DM-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    const randomMeetHash = `${Math.random().toString(36).substring(2, 6)}-${Math.random().toString(36).substring(2, 6)}-${Math.random().toString(36).substring(2, 6)}`;
-    const meetUrl = `https://meet.google.com/${randomMeetHash}`;
+    // Genuine Google Meet URL requires Google Calendar API provisioning. Mark as pending if not provided.
+    const meetUrl = bookingDetails?.meetUrl || "PENDING_CALENDAR_PROVISIONING";
 
-    const bookingPayload = {
-      booking_code: bookingCode,
-      customer_name: String(bookingDetails?.customerName || "").trim(),
-      customer_email: String(bookingDetails?.customerEmail || "").trim(),
-      customer_phone: String(bookingDetails?.customerPhone || "").trim(),
-      business_name: String(bookingDetails?.businessName || "").trim(),
-      primary_challenge: String(bookingDetails?.primaryChallenge || "").trim(),
-      desired_outcome: String(bookingDetails?.desiredOutcome || "").trim(),
+    const intakeDetails = {
+      customerName: String(bookingDetails?.customerName || "").trim(),
+      customerEmail: String(bookingDetails?.customerEmail || "").trim(),
+      customerPhone: String(bookingDetails?.customerPhone || "").trim(),
+      businessName: String(bookingDetails?.businessName || "").trim(),
+      primaryChallenge: String(bookingDetails?.primaryChallenge || "").trim(),
+      desiredOutcome: String(bookingDetails?.desiredOutcome || "").trim(),
       website: bookingDetails?.website ? String(bookingDetails.website).trim() : null,
       linkedin: bookingDetails?.linkedin ? String(bookingDetails.linkedin).trim() : null,
-      booking_date: bookingDetails?.date || "",
-      booking_time: bookingDetails?.time || "",
+      date: bookingDetails?.date || bookingDetails?.bookingDate || "",
+      time: bookingDetails?.time || bookingDetails?.bookingTime || "",
+      booking_code: bookingCode,
+      meet_url: meetUrl,
+      order_total_amount: bookingDetails?.order_total_amount || effectiveAmount.toFixed(2)
+    };
+
+    // 4. ATOMIC DATABASE TRANSACTION VIA RPC
+    // Tries to execute PostgreSQL atomic RPC fulfill_consultation_payment
+    let rpcSuccess = false;
+    let rpcData = null;
+    try {
+      const { data, error: rpcErr } = await supabaseServer.rpc("fulfill_consultation_payment", {
+        p_user_id: resolvedUserId,
+        p_order_id: cleanOrderId,
+        p_payment_id: cleanPaymentId,
+        p_amount: effectiveAmount,
+        p_currency: effectiveCurrency,
+        p_booking_details: intakeDetails,
+        p_product_id: product?.id || "31bbb9bf-ce10-4da4-a517-dfc673f9b875"
+      });
+
+      if (!rpcErr && data && typeof data === "object") {
+        rpcData = data;
+        if (data.success === false) {
+          console.error("[Consultation Fulfillment] Atomic RPC rejected fulfillment:", data.error);
+          return {
+            success: false,
+            fulfilled: false,
+            error: data.error || "Payment fulfillment rejected by database transaction guard."
+          };
+        }
+        rpcSuccess = true;
+      } else if (rpcErr) {
+        // If the RPC failed due to application constraint (not missing function), fail closed
+        if (rpcErr.code && rpcErr.code !== "PGRST202" && rpcErr.code !== "42883") {
+          console.error("[Consultation Fulfillment] Atomic RPC error:", rpcErr.message || rpcErr);
+          return {
+            success: false,
+            fulfilled: false,
+            error: rpcErr.message || "Database transaction error during consultation fulfillment."
+          };
+        }
+        // PGRST202 / 42883: Function not present in active schema yet; proceed to hardened fallback
+        console.warn("[Consultation Fulfillment] fulfill_consultation_payment RPC not found in schema. Utilizing hardened server-side transactional fallback.");
+      }
+    } catch (rpcCallErr) {
+      console.warn("[Consultation Fulfillment] Notice calling RPC, executing hardened fallback:", rpcCallErr?.message);
+    }
+
+    if (rpcSuccess && rpcData) {
+      // Dispatches confirmation email only after verified durable database persistence
+      if (!rpcData.already_fulfilled || rpcData.healed_ledger) {
+        (async () => {
+          try {
+            if (intakeDetails.customerEmail) {
+              await sendConsultationConfirmationEmail({
+                to: intakeDetails.customerEmail,
+                customerName: intakeDetails.customerName || "Valued Client",
+                bookingCode: rpcData.booking?.booking_code || bookingCode,
+                bookingDate: rpcData.booking?.booking_date || intakeDetails.date,
+                bookingTime: rpcData.booking?.booking_time || intakeDetails.time,
+                durationMinutes,
+                meetUrl: rpcData.booking?.meet_url || meetUrl,
+                primaryChallenge: intakeDetails.primaryChallenge || "Business Growth Strategy",
+                amount: totalAmount,
+                currency,
+                baseAmount,
+                gstAmount,
+                orderId: cleanOrderId,
+                paymentId: cleanPaymentId
+              });
+            }
+          } catch (mailErr) {
+            console.warn("[Consultation Fulfillment] Notice dispatching consultation email:", mailErr?.message || mailErr);
+          }
+        })();
+      }
+
+      return {
+        success: true,
+        fulfilled: true,
+        already_fulfilled: Boolean(rpcData.already_fulfilled),
+        healed_ledger: Boolean(rpcData.healed_ledger),
+        booking: rpcData.booking,
+        payment: rpcData.payment,
+        orderId: cleanOrderId,
+        paymentId: cleanPaymentId
+      };
+    }
+
+    // --------------------------------------------------------------------------
+    // 5. HARDENED SERVER-SIDE DUAL-WRITE FALLBACK
+    // Used when RPC is pending migration deployment.
+    // --------------------------------------------------------------------------
+
+    // 5A. Check existing payment and booking records
+    const { data: existingPayment } = await supabaseServer
+      .from("payments")
+      .select("*")
+      .eq("razorpay_payment_id", cleanPaymentId)
+      .maybeSingle();
+
+    const { data: existingBooking } = await supabaseServer
+      .from("bookings")
+      .select("*")
+      .or(`payment_id.eq.${cleanPaymentId},razorpay_order_id.eq.${cleanOrderId}`)
+      .maybeSingle();
+
+    // Security cross-check: Confirm existing payment belongs to the exact same order
+    if (existingPayment && existingPayment.razorpay_order_id !== cleanOrderId) {
+      console.error(`[Consultation Fulfillment] Security rejection: Payment ${cleanPaymentId} belongs to order ${existingPayment.razorpay_order_id}, not ${cleanOrderId}`);
+      return {
+        success: false,
+        fulfilled: false,
+        error: "Security violation: payment ID is associated with a different order."
+      };
+    }
+
+    // 5B. Heal Incomplete State: Booking exists, but Payment Ledger is missing
+    if (existingBooking && !existingPayment) {
+      console.log(`[Consultation Fulfillment] Healing incomplete state: Booking exists for order ${cleanOrderId}, writing missing payment ledger.`);
+      const { data: healedPayment, error: healErr } = await supabaseServer
+        .from("payments")
+        .insert({
+          user_id: resolvedUserId || null,
+          item_type: "consultation",
+          item_id: product?.id || "31bbb9bf-ce10-4da4-a517-dfc673f9b875",
+          item_title: product?.name || "Business Growth & Scaling Consultation",
+          amount: totalAmount,
+          currency,
+          razorpay_order_id: cleanOrderId,
+          razorpay_payment_id: cleanPaymentId,
+          status: "captured",
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (healErr) {
+        console.error("[Consultation Fulfillment] Failed to heal payment ledger record:", healErr);
+      }
+
+      return {
+        success: true,
+        fulfilled: true,
+        already_fulfilled: true,
+        healed_ledger: true,
+        booking: existingBooking,
+        payment: healedPayment || null,
+        orderId: cleanOrderId,
+        paymentId: cleanPaymentId
+      };
+    }
+
+    // 5C. Fully fulfilled already
+    if (existingPayment && existingBooking) {
+      console.log(`[Consultation Fulfillment] Payment ${cleanPaymentId} already processed. Returning existing record without duplicate email.`);
+      return {
+        success: true,
+        fulfilled: true,
+        already_fulfilled: true,
+        booking: existingBooking,
+        payment: existingPayment,
+        orderId: cleanOrderId,
+        paymentId: cleanPaymentId
+      };
+    }
+
+    // 5D. Fresh dual-write
+    const bookingPayload = {
+      booking_code: bookingCode,
+      customer_name: intakeDetails.customerName,
+      customer_email: intakeDetails.customerEmail,
+      customer_phone: intakeDetails.customerPhone,
+      business_name: intakeDetails.businessName,
+      primary_challenge: intakeDetails.primaryChallenge,
+      desired_outcome: intakeDetails.desiredOutcome,
+      website: intakeDetails.website,
+      linkedin: intakeDetails.linkedin,
+      booking_date: intakeDetails.date,
+      booking_time: intakeDetails.time,
       duration_minutes: durationMinutes,
       base_amount: baseAmount,
       gst_rate: gstRate,
       gst_amount: gstAmount,
-      total_amount: totalAmount,
-      currency,
+      total_amount: effectiveAmount,
+      currency: effectiveCurrency,
       payment_id: cleanPaymentId,
       razorpay_order_id: cleanOrderId,
       payment_status: "paid",
-      calendar_event_id: `cal_evt_${Date.now()}`,
+      calendar_event_id: null,
       meet_url: meetUrl,
       status: "confirmed",
-      user_id: resolvedUserId,
+      user_id: resolvedUserId || null,
       notes: "Booked online with verified Razorpay payment.",
       created_at: new Date().toISOString()
     };
 
-    const { data: newBooking, error: bookingError } = await supabaseServer
+    let newBooking = null;
+    const { data: bData, error: bookingError } = await supabaseServer
       .from("bookings")
       .insert(bookingPayload)
       .select()
       .single();
 
     if (bookingError) {
-      console.error("[Consultation Fulfillment] Error inserting booking:", bookingError);
+      // Concurrency race: check if another thread inserted it simultaneously
+      if (bookingError.code === "23505") {
+        const { data: racedBooking } = await supabaseServer
+          .from("bookings")
+          .select("*")
+          .or(`payment_id.eq.${cleanPaymentId},razorpay_order_id.eq.${cleanOrderId}`)
+          .maybeSingle();
+
+        if (racedBooking) {
+          newBooking = racedBooking;
+        } else {
+          // Active slot conflict: time slot taken by concurrent transaction.
+          // Captured funds must never be dropped: persist with status 'reschedule_pending' (fits VARCHAR(20) and bypasses active slot index).
+          const conflictPayload = {
+            ...bookingPayload,
+            status: "reschedule_pending",
+            notes: `Slot conflict: Time slot was taken by concurrent checkout. Payment captured (Razorpay ${cleanPaymentId}). Priority reschedule required.`
+          };
+          const { data: conflictBooking, error: conflictErr } = await supabaseServer
+            .from("bookings")
+            .insert(conflictPayload)
+            .select()
+            .single();
+
+          if (conflictErr) {
+            console.error("[Consultation Fulfillment] Error inserting conflicted booking:", conflictErr);
+            return {
+              success: false,
+              fulfilled: false,
+              error: "This time slot or booking reference conflicts with an existing booking."
+            };
+          }
+          newBooking = conflictBooking;
+        }
+      } else {
+        console.error("[Consultation Fulfillment] Error inserting booking:", bookingError);
+        return {
+          success: false,
+          fulfilled: false,
+          error: bookingError.message || "Failed to record consultation booking."
+        };
+      }
+    } else {
+      newBooking = bData;
+    }
+
+    // Insert Payment Ledger (supports guest user_id = null)
+    let paymentRecord = null;
+    const paymentPayload = {
+      user_id: resolvedUserId || null,
+      item_type: "consultation",
+      item_id: product?.id || "31bbb9bf-ce10-4da4-a517-dfc673f9b875",
+      item_title: product?.name || "Business Growth & Scaling Consultation",
+      amount: effectiveAmount,
+      currency: effectiveCurrency,
+      razorpay_order_id: cleanOrderId,
+      razorpay_payment_id: cleanPaymentId,
+      status: "captured",
+      created_at: new Date().toISOString()
+    };
+
+    const { data: pData, error: paymentError } = await supabaseServer
+      .from("payments")
+      .insert(paymentPayload)
+      .select()
+      .single();
+
+    if (paymentError) {
+      if (paymentError.code === "23505") {
+        const { data: racedPayment } = await supabaseServer
+          .from("payments")
+          .select("*")
+          .eq("razorpay_payment_id", cleanPaymentId)
+          .maybeSingle();
+        paymentRecord = racedPayment;
+      } else {
+        console.warn("[Consultation Fulfillment] Notice inserting payment ledger:", paymentError.message);
+      }
+    } else {
+      paymentRecord = pData;
+    }
+
+    // Verify durable ledger record was persisted
+    if (!newBooking && !paymentRecord) {
       return {
         success: false,
         fulfilled: false,
-        error: bookingError.message || "Failed to record consultation booking."
+        error: "Failed to persist consultation booking records to database ledger."
       };
     }
 
-    // 5. Create payment ledger record in public.payments
-    let paymentRecord = null;
-    if (resolvedUserId) {
-      const paymentPayload = {
-        user_id: resolvedUserId,
-        item_type: "consultation",
-        item_id: product?.id || "31bbb9bf-ce10-4da4-a517-dfc673f9b875",
-        item_title: product?.name || "Business Growth & Scaling Consultation",
-        amount: totalAmount,
-        currency,
-        razorpay_order_id: cleanOrderId,
-        razorpay_payment_id: cleanPaymentId,
-        status: "captured",
-        created_at: new Date().toISOString()
-      };
-
-      const { data: newPayment, error: paymentError } = await supabaseServer
-        .from("payments")
-        .insert(paymentPayload)
-        .select()
-        .single();
-
-      if (paymentError) {
-        console.warn("[Consultation Fulfillment] Notice inserting payment ledger:", paymentError.message);
-      } else {
-        paymentRecord = newPayment;
-      }
-    }
-
-    // 6. Record CRM Lead in public.leads in background
+    // Record CRM Lead in public.crm_leads in background (non-blocking)
     try {
-      await supabaseServer.from("leads").insert({
+      await supabaseServer.from("crm_leads").insert({
         name: bookingPayload.customer_name,
         email: bookingPayload.customer_email,
         phone: bookingPayload.customer_phone,
@@ -485,18 +683,18 @@ export async function fulfillConsultationPayment({
       console.warn("[Consultation Fulfillment] CRM lead record notice:", leadErr?.message);
     }
 
-    // Asynchronously dispatch consultation booking confirmation, calendar invite & invoice email
+    // Asynchronously dispatch confirmation email only after verified durable persistence
     (async () => {
       try {
         if (bookingPayload.customer_email) {
           await sendConsultationConfirmationEmail({
             to: bookingPayload.customer_email,
             customerName: bookingPayload.customer_name || "Valued Client",
-            bookingCode,
-            bookingDate: bookingPayload.booking_date,
-            bookingTime: bookingPayload.booking_time,
+            bookingCode: newBooking?.booking_code || bookingCode,
+            bookingDate: newBooking?.booking_date || bookingPayload.booking_date,
+            bookingTime: newBooking?.booking_time || bookingPayload.booking_time,
             durationMinutes,
-            meetUrl,
+            meetUrl: newBooking?.meet_url || meetUrl,
             primaryChallenge: bookingPayload.primary_challenge || "Business Growth Strategy",
             amount: totalAmount,
             currency,
@@ -516,7 +714,9 @@ export async function fulfillConsultationPayment({
       fulfilled: true,
       already_fulfilled: false,
       booking: newBooking,
-      payment: paymentRecord
+      payment: paymentRecord,
+      orderId: cleanOrderId,
+      paymentId: cleanPaymentId
     };
   } catch (err) {
     console.error("[Consultation Fulfillment] Unexpected error:", err);

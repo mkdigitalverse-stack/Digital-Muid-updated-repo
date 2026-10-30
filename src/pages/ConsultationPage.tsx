@@ -171,10 +171,10 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
   }, [availableSlots, selectedTime]);
 
   // Dynamic Consultation Pricing read strictly from consultationProduct (single source of truth)
-  const basePrice = consultationProduct?.basePrice || 499;
-  const gstRate = consultationProduct?.gstRate || 0.18;
+  const basePrice = Number(consultationProduct?.basePrice) || 499;
+  const gstRate = Number(consultationProduct?.gstRate) || 0.18;
   const gstAmount = Number((basePrice * gstRate).toFixed(2));
-  const totalAmount = Math.round(basePrice + gstAmount);
+  const totalAmount = Number((basePrice + gstAmount).toFixed(2));
 
   const handleIntakeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

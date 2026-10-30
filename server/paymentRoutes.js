@@ -556,6 +556,10 @@ router.post("/create-consultation-order", async (req, res) => {
         productId: product?.id || "31bbb9bf-ce10-4da4-a517-dfc673f9b875",
         customerName: customerName.trim().slice(0, 50),
         customerEmail: customerEmail.trim().slice(0, 50),
+        customerPhone: String(bookingDetails.customerPhone || "").trim().slice(0, 30),
+        businessName: String(bookingDetails.businessName || "").trim().slice(0, 50),
+        primaryChallenge: String(bookingDetails.primaryChallenge || "").trim().slice(0, 80),
+        desiredOutcome: String(bookingDetails.desiredOutcome || "").trim().slice(0, 80),
         bookingDate: String(date).slice(0, 20),
         bookingTime: String(time).slice(0, 20),
         userId: authenticatedUser?.id || ""
@@ -640,21 +644,91 @@ router.post("/verify-consultation-payment", async (req, res) => {
       razorpay_signature.trim()
     );
 
-    if (!isSignatureValid) {
-      console.warn(`[Consultation Verification] Invalid signature rejected for order ${razorpay_order_id}`);
-      return res.status(400).json({
+    // 2. Authoritative Gateway Verification: Validate captured status, amount, and order relationship
+    const razorpay = getRazorpayClient();
+    if (!razorpay) {
+      return res.status(503).json({
         success: false,
-        verified: false,
-        error: "Payment verification failed: Invalid cryptographic signature."
+        verified: true,
+        fulfilled: false,
+        error: "Payment gateway client is unavailable on the server."
       });
     }
 
-    // 2. Atomic fulfillment into public.bookings and public.payments
+    let gatewayPayment = null;
+    let gatewayOrder = null;
+    try {
+      [gatewayPayment, gatewayOrder] = await Promise.all([
+        razorpay.payments.fetch(razorpay_payment_id.trim()),
+        razorpay.orders.fetch(razorpay_order_id.trim())
+      ]);
+    } catch (fetchErr) {
+      console.error("[Consultation Verification] Failed to fetch authoritative gateway records:", fetchErr?.message || fetchErr);
+      return res.status(502).json({
+        success: false,
+        verified: false,
+        error: "Failed to confirm payment status with gateway provider."
+      });
+    }
+
+    if (!gatewayPayment || !gatewayOrder) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: "Gateway payment or order could not be retrieved."
+      });
+    }
+
+    if (gatewayPayment.status !== "captured") {
+      console.warn(`[Consultation Verification] Payment ${razorpay_payment_id} rejected: status is ${gatewayPayment.status}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: `Payment is not in captured status (current status: ${gatewayPayment.status}).`
+      });
+    }
+
+    if (gatewayPayment.order_id !== razorpay_order_id.trim() || gatewayOrder.id !== razorpay_order_id.trim()) {
+      console.warn(`[Consultation Verification] Order ID mismatch: payment order is ${gatewayPayment.order_id}, expected ${razorpay_order_id}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: "Payment is not associated with the provided order ID."
+      });
+    }
+
+    const payCurrency = String(gatewayPayment.currency || "").toUpperCase();
+    const ordCurrency = String(gatewayOrder.currency || "").toUpperCase();
+    if (payCurrency !== "INR" || ordCurrency !== "INR") {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: "Invalid currency: Consultation transactions must be denominated in INR."
+      });
+    }
+
+    const payAmountPaise = Number(gatewayPayment.amount);
+    const ordAmountPaise = Number(gatewayOrder.amount);
+    if (payAmountPaise <= 0 || payAmountPaise !== ordAmountPaise) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: `Payment amount (${payAmountPaise}) does not match order amount (${ordAmountPaise}).`
+      });
+    }
+
+    // 3. Atomic fulfillment into public.bookings and public.payments
     const fulfillment = await fulfillConsultationPayment({
       userId: authenticatedUser?.id || null,
-      bookingDetails: bookingDetails || {},
+      bookingDetails: {
+        ...(bookingDetails || {}),
+        order_total_amount: (payAmountPaise / 100).toFixed(2)
+      },
       orderId: razorpay_order_id.trim(),
-      paymentId: razorpay_payment_id.trim()
+      paymentId: razorpay_payment_id.trim(),
+      amount: payAmountPaise / 100,
+      currency: payCurrency,
+      productId: gatewayOrder.notes?.productId || "31bbb9bf-ce10-4da4-a517-dfc673f9b875"
     });
 
     if (!fulfillment.success) {
@@ -1383,92 +1457,7 @@ router.get("/verify-purchase-status", async (req, res) => {
     const expectedAmountInPaise = Math.round(pricing.price * 100);
     const expectedCurrency = pricing.currency;
 
-    // 2. Check public.resource_purchases if paymentId is provided
-    if (cleanPaymentId) {
-      const { data: purchaseByPayId } = await supabaseServer
-        .from("resource_purchases")
-        .select("*")
-        .eq("razorpay_payment_id", cleanPaymentId)
-        .in("resource_id", allowedResourceIds)
-        .eq("status", "active")
-        .maybeSingle();
-
-      if (purchaseByPayId) {
-        return res.json({
-          success: true,
-          verified: true,
-          resourceId: resolvedResId,
-          orderId: purchaseByPayId.razorpay_order_id,
-          paymentId: purchaseByPayId.razorpay_payment_id,
-          amount: Number(purchaseByPayId.amount) || Number(resourceRecord.price) || 0,
-          currency: purchaseByPayId.currency || expectedCurrency
-        });
-      }
-
-      // Check public.payments by razorpay_payment_id strictly for this resource or parent bundle
-      const { data: paymentRecord } = await supabaseServer
-        .from("payments")
-        .select("*")
-        .eq("razorpay_payment_id", cleanPaymentId)
-        .in("item_id", allowedResourceIds)
-        .eq("item_type", "resource")
-        .eq("status", "captured")
-        .maybeSingle();
-
-      if (paymentRecord) {
-        return res.json({
-          success: true,
-          verified: true,
-          resourceId: resolvedResId,
-          orderId: paymentRecord.razorpay_order_id,
-          paymentId: paymentRecord.razorpay_payment_id,
-          amount: Number(paymentRecord.amount) || Number(resourceRecord.price) || 0,
-          currency: paymentRecord.currency || expectedCurrency
-        });
-      }
-
-      // Gateway reconciliation fallback with strict amount, currency, and resource verification
-      const razorpay = getRazorpayClient();
-      if (razorpay && cleanPaymentId.startsWith("pay_")) {
-        try {
-          const rzpPayment = await razorpay.payments.fetch(cleanPaymentId);
-          if (
-            rzpPayment &&
-            rzpPayment.status === "captured" &&
-            (rzpPayment.currency || "").toUpperCase() === expectedCurrency
-          ) {
-            // Check if amount matches this resource OR bundle price
-            const isDirectMatch = Number(rzpPayment.amount) === expectedAmountInPaise;
-            const isBundleMatch = allowedResourceIds.includes(BUNDLE_RESOURCE_ID) && Number(rzpPayment.amount) === 29900;
-
-            if (isDirectMatch || isBundleMatch) {
-              const orderIdToFetch = rzpPayment.order_id || cleanOrderId;
-              if (orderIdToFetch) {
-                const rzpOrder = await razorpay.orders.fetch(orderIdToFetch);
-                const orderResNote = rzpOrder.notes?.resourceId;
-                const orderMatchesResource = !orderResNote || allowedResourceIds.includes(orderResNote);
-
-                if (orderMatchesResource) {
-                  return res.json({
-                    success: true,
-                    verified: true,
-                    resourceId: resolvedResId,
-                    orderId: rzpOrder.id,
-                    paymentId: rzpPayment.id,
-                    amount: (rzpPayment.amount || 0) / 100,
-                    currency: expectedCurrency
-                  });
-                }
-              }
-            }
-          }
-        } catch (rzpErr) {
-          // invalid payment ID or gateway rejection
-        }
-      }
-    }
-
-    // 3. Check if authenticated user owns the resource or bundle
+    // 2. Check if authenticated user owns the resource or bundle (Checked first to enable authenticated recovery)
     if (authenticatedUser) {
       if (checkIsAdmin(authenticatedUser)) {
         return res.json({
@@ -1483,13 +1472,19 @@ router.get("/verify-purchase-status", async (req, res) => {
 
       const { data: userPurchases } = await supabaseServer
         .from("resource_purchases")
-        .select("*")
+        .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, resource_id")
         .eq("user_id", authenticatedUser.id)
         .in("resource_id", allowedResourceIds)
         .eq("status", "active")
+        .eq("currency", "INR")
+        .gt("amount", 0)
         .maybeSingle();
 
-      if (userPurchases) {
+      if (
+        userPurchases &&
+        String(userPurchases.currency || "").toUpperCase() === "INR" &&
+        Number(userPurchases.amount) > 0
+      ) {
         return res.json({
           success: true,
           verified: true,
@@ -1497,20 +1492,26 @@ router.get("/verify-purchase-status", async (req, res) => {
           orderId: userPurchases.razorpay_order_id,
           paymentId: userPurchases.razorpay_payment_id,
           amount: Number(userPurchases.amount) || Number(resourceRecord?.price) || 0,
-          currency: userPurchases.currency || "INR"
+          currency: "INR"
         });
       }
 
       const { data: userPayment } = await supabaseServer
         .from("payments")
-        .select("*")
+        .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, item_id")
         .eq("user_id", authenticatedUser.id)
         .eq("item_type", "resource")
         .in("item_id", allowedResourceIds)
         .eq("status", "captured")
+        .eq("currency", "INR")
+        .gt("amount", 0)
         .maybeSingle();
 
-      if (userPayment) {
+      if (
+        userPayment &&
+        String(userPayment.currency || "").toUpperCase() === "INR" &&
+        Number(userPayment.amount) > 0
+      ) {
         return res.json({
           success: true,
           verified: true,
@@ -1518,8 +1519,130 @@ router.get("/verify-purchase-status", async (req, res) => {
           orderId: userPayment.razorpay_order_id,
           paymentId: userPayment.razorpay_payment_id,
           amount: Number(userPayment.amount) || Number(resourceRecord?.price) || 0,
-          currency: userPayment.currency || "INR"
+          currency: "INR"
         });
+      }
+    }
+
+    // 3. Guest verification: require both matching identifiers
+    if (cleanPaymentId || cleanOrderId) {
+      if (!cleanPaymentId || !cleanOrderId) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          error: "Both paymentId and orderId are required for guest purchase verification."
+        });
+      }
+
+      // Check public.resource_purchases for matching paymentId AND orderId
+      const { data: purchaseRecord } = await supabaseServer
+        .from("resource_purchases")
+        .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, resource_id")
+        .eq("razorpay_payment_id", cleanPaymentId)
+        .eq("razorpay_order_id", cleanOrderId)
+        .in("resource_id", allowedResourceIds)
+        .eq("status", "active")
+        .eq("currency", "INR")
+        .gt("amount", 0)
+        .maybeSingle();
+
+      if (
+        purchaseRecord &&
+        purchaseRecord.razorpay_order_id === cleanOrderId &&
+        purchaseRecord.razorpay_payment_id === cleanPaymentId &&
+        String(purchaseRecord.currency || "").toUpperCase() === "INR" &&
+        Number(purchaseRecord.amount) > 0
+      ) {
+        return res.json({
+          success: true,
+          verified: true,
+          resourceId: resolvedResId,
+          orderId: cleanOrderId,
+          paymentId: cleanPaymentId,
+          amount: Number(purchaseRecord.amount) || Number(resourceRecord.price) || 0,
+          currency: "INR"
+        });
+      }
+
+      // Check public.payments for matching paymentId AND orderId
+      const { data: paymentRecord } = await supabaseServer
+        .from("payments")
+        .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, item_id, item_type")
+        .eq("razorpay_payment_id", cleanPaymentId)
+        .eq("razorpay_order_id", cleanOrderId)
+        .in("item_id", allowedResourceIds)
+        .eq("item_type", "resource")
+        .eq("status", "captured")
+        .eq("currency", "INR")
+        .gt("amount", 0)
+        .maybeSingle();
+
+      if (
+        paymentRecord &&
+        paymentRecord.razorpay_order_id === cleanOrderId &&
+        paymentRecord.razorpay_payment_id === cleanPaymentId &&
+        String(paymentRecord.currency || "").toUpperCase() === "INR" &&
+        Number(paymentRecord.amount) > 0
+      ) {
+        return res.json({
+          success: true,
+          verified: true,
+          resourceId: resolvedResId,
+          orderId: cleanOrderId,
+          paymentId: cleanPaymentId,
+          amount: Number(paymentRecord.amount) || Number(resourceRecord.price) || 0,
+          currency: "INR"
+        });
+      }
+
+      // Gateway reconciliation fallback with strict amount, currency, and resource verification
+      const razorpay = getRazorpayClient();
+      if (razorpay && cleanPaymentId.startsWith("pay_") && cleanOrderId.startsWith("order_")) {
+        try {
+          const rzpPayment = await razorpay.payments.fetch(cleanPaymentId);
+          if (
+            rzpPayment &&
+            rzpPayment.status === "captured" &&
+            String(rzpPayment.currency || "").toUpperCase() === "INR" &&
+            Number(rzpPayment.amount) > 0 &&
+            rzpPayment.order_id === cleanOrderId
+          ) {
+            const isDirectMatch = Number(rzpPayment.amount) === expectedAmountInPaise;
+            const isBundleMatch = allowedResourceIds.includes(BUNDLE_RESOURCE_ID) && Number(rzpPayment.amount) === 29900;
+
+            if (isDirectMatch || isBundleMatch) {
+              const rzpOrder = await razorpay.orders.fetch(cleanOrderId);
+              if (
+                rzpOrder &&
+                rzpOrder.id === cleanOrderId &&
+                Number(rzpPayment.amount) === Number(rzpOrder.amount) &&
+                String(rzpOrder.currency || "").toUpperCase() === "INR"
+              ) {
+                const orderNotes = rzpOrder.notes || {};
+                const orderItemType = orderNotes.itemType;
+                const orderResId = orderNotes.resourceId || orderNotes.resource_id;
+
+                if (
+                  orderItemType === "resource" &&
+                  orderResId &&
+                  allowedResourceIds.includes(orderResId)
+                ) {
+                  return res.json({
+                    success: true,
+                    verified: true,
+                    resourceId: resolvedResId,
+                    orderId: cleanOrderId,
+                    paymentId: cleanPaymentId,
+                    amount: (rzpPayment.amount || 0) / 100,
+                    currency: "INR"
+                  });
+                }
+              }
+            }
+          }
+        } catch (rzpErr) {
+          // invalid payment ID or gateway rejection
+        }
       }
     }
 
@@ -1604,51 +1727,81 @@ router.post("/get-resource-download-url", async (req, res) => {
     // If paid, verify authorization
     let isAuthorized = false;
 
-    // Check paymentId against database
-    if (cleanPaymentId) {
+    // Check paymentId and orderId against database (strict dual-identifier requirement)
+    if (cleanPaymentId && cleanOrderId) {
       const { data: pRecord } = await supabaseServer
         .from("payments")
-        .select("id, status, item_id, item_type")
+        .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, item_id, item_type")
         .eq("razorpay_payment_id", cleanPaymentId)
+        .eq("razorpay_order_id", cleanOrderId)
         .in("item_id", allowedResourceIds)
         .eq("item_type", "resource")
         .eq("status", "captured")
+        .eq("currency", "INR")
+        .gt("amount", 0)
         .maybeSingle();
 
-      if (pRecord) {
+      if (
+        pRecord &&
+        pRecord.razorpay_order_id === cleanOrderId &&
+        pRecord.razorpay_payment_id === cleanPaymentId &&
+        String(pRecord.currency || "").toUpperCase() === "INR"
+      ) {
         isAuthorized = true;
       }
 
       if (!isAuthorized) {
         const { data: purRecord } = await supabaseServer
           .from("resource_purchases")
-          .select("id, status, resource_id")
+          .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, resource_id")
           .eq("razorpay_payment_id", cleanPaymentId)
+          .eq("razorpay_order_id", cleanOrderId)
           .in("resource_id", allowedResourceIds)
           .eq("status", "active")
+          .eq("currency", "INR")
+          .gt("amount", 0)
           .maybeSingle();
 
-        if (purRecord) {
+        if (
+          purRecord &&
+          purRecord.razorpay_order_id === cleanOrderId &&
+          purRecord.razorpay_payment_id === cleanPaymentId &&
+          String(purRecord.currency || "").toUpperCase() === "INR"
+        ) {
           isAuthorized = true;
         }
       }
 
       // Check with Razorpay gateway directly if not in DB yet
-      if (!isAuthorized && cleanPaymentId.startsWith("pay_")) {
+      if (!isAuthorized && cleanPaymentId.startsWith("pay_") && cleanOrderId.startsWith("order_")) {
         const razorpay = getRazorpayClient();
         if (razorpay) {
           try {
             const rzpPayment = await razorpay.payments.fetch(cleanPaymentId);
-            if (rzpPayment && rzpPayment.status === "captured") {
-              const expectedAmountInPaise = Math.round(Number(resourceRecord.price) * 100);
-              const matchesDirectAmount = Number(rzpPayment.amount) === expectedAmountInPaise;
-              const matchesBundleAmount = allowedResourceIds.includes(BUNDLE_RESOURCE_ID) && Number(rzpPayment.amount) === 29900;
-              const matchesCurrency = !resourceRecord.currency || (rzpPayment.currency || "").toUpperCase() === (resourceRecord.currency || "INR").toUpperCase();
-              const paymentNoteResId = rzpPayment.notes?.resourceId || rzpPayment.notes?.resource_id;
-              const matchesResNote = !paymentNoteResId || allowedResourceIds.includes(paymentNoteResId);
-
-              if ((matchesDirectAmount || matchesBundleAmount) && matchesCurrency && matchesResNote) {
-                isAuthorized = true;
+            if (
+              rzpPayment &&
+              rzpPayment.status === "captured" &&
+              String(rzpPayment.currency || "").toUpperCase() === "INR" &&
+              Number(rzpPayment.amount) > 0 &&
+              rzpPayment.order_id === cleanOrderId
+            ) {
+              const rzpOrder = await razorpay.orders.fetch(cleanOrderId);
+              if (
+                rzpOrder &&
+                rzpOrder.id === cleanOrderId &&
+                Number(rzpPayment.amount) === Number(rzpOrder.amount) &&
+                String(rzpOrder.currency || "").toUpperCase() === "INR"
+              ) {
+                const orderNotes = rzpOrder.notes || {};
+                const orderItemType = orderNotes.itemType;
+                const orderResId = orderNotes.resourceId || orderNotes.resource_id;
+                if (
+                  orderItemType === "resource" &&
+                  orderResId &&
+                  allowedResourceIds.includes(orderResId)
+                ) {
+                  isAuthorized = true;
+                }
               }
             }
           } catch {}
@@ -1663,25 +1816,37 @@ router.post("/get-resource-download-url", async (req, res) => {
       } else {
         const { data: userPayment } = await supabaseServer
           .from("payments")
-          .select("id")
+          .select("id, currency, amount")
           .eq("user_id", authenticatedUser.id)
           .eq("item_type", "resource")
           .in("item_id", allowedResourceIds)
           .eq("status", "captured")
+          .eq("currency", "INR")
+          .gt("amount", 0)
           .maybeSingle();
 
-        if (userPayment) {
+        if (
+          userPayment &&
+          String(userPayment.currency || "").toUpperCase() === "INR" &&
+          Number(userPayment.amount) > 0
+        ) {
           isAuthorized = true;
         } else {
           const { data: userPur } = await supabaseServer
             .from("resource_purchases")
-            .select("id")
+            .select("id, currency, amount")
             .eq("user_id", authenticatedUser.id)
             .in("resource_id", allowedResourceIds)
             .eq("status", "active")
+            .eq("currency", "INR")
+            .gt("amount", 0)
             .maybeSingle();
 
-          if (userPur) {
+          if (
+            userPur &&
+            String(userPur.currency || "").toUpperCase() === "INR" &&
+            Number(userPur.amount) > 0
+          ) {
             isAuthorized = true;
           }
         }

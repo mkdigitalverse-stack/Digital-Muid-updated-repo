@@ -41,9 +41,8 @@ export const authService = {
     const email = user.email.trim().toLowerCase();
     const isEmailAdmin = AUTHORIZED_ADMIN_EMAILS.includes(email);
     const hasAdminAppRole = user.app_metadata?.role === 'admin';
-    const hasAdminUserRole = user.user_metadata?.role === 'admin';
 
-    return isEmailAdmin || hasAdminAppRole || hasAdminUserRole;
+    return isEmailAdmin || hasAdminAppRole;
   },
 
   /**

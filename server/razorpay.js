@@ -65,6 +65,17 @@ export function getRazorpayClient() {
 }
 
 /**
+ * For testing and mock verification only: allows injecting a mock Razorpay client without network calls.
+ * @param {any} client
+ */
+export function setMockRazorpayClient(client) {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("[SECURITY] Mock client injection is strictly forbidden in production mode.");
+  }
+  razorpayInstance = client;
+}
+
+/**
  * Cryptographically verifies a Razorpay webhook signature against the raw request body.
  *
  * @param {string|Buffer} rawBody - The unparsed raw request body
