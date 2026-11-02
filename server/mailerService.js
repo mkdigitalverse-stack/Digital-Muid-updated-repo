@@ -39,7 +39,7 @@ export function getSenderEmail() {
     return explicit;
   }
   // Standard production verified sender format
-  return "DigitalMUID <support@digitalmuid.in>";
+  return "DigitalMuid Support <support@digitalmuid.in>";
 }
 
 /**
@@ -905,3 +905,370 @@ export async function sendResourceDeliveryEmail({
     return { success: false, error: err?.message };
   }
 }
+
+/**
+ * Dispatches a Free Resource Lead Magnet Confirmation Email.
+ *
+ * @param {object} params
+ * @param {string} params.to - Recipient email address
+ * @param {string} [params.customerName] - Recipient name
+ * @param {string} params.resourceTitle - Title of the resource unlocked
+ * @param {string} [params.downloadUrl] - Direct download / thank you link
+ * @param {string} [params.leadId] - Lead ID
+ * @returns {Promise<{ success: boolean, skipped?: boolean, messageId?: string, error?: string }>}
+ */
+export async function sendFreeResourceLeadEmail({
+  to,
+  customerName = "Professional Colleague",
+  resourceTitle,
+  downloadUrl = "https://digitalmuid.in/resources",
+  leadId = ""
+}) {
+  const templateType = "free_resource_lead";
+  const recipient = (to || "").trim();
+
+  if (!recipient || !recipient.includes("@")) {
+    console.warn(`[Mailer Service] Skipped free resource email: Invalid recipient address "${recipient}".`);
+    return { success: false, error: "Invalid recipient email address." };
+  }
+
+  const resend = getResendClient();
+  if (!resend) {
+    console.warn(
+      `[Mailer Service] RESEND_API_KEY is not configured or gated. Free resource email prepared for ${recipient} but delivery skipped.`
+    );
+    await recordEmailLog({
+      paymentId: leadId || `lead_${Date.now()}`,
+      orderId: "free_lead",
+      recipientEmail: recipient,
+      templateType,
+      status: "skipped",
+      errorMessage: "RESEND_API_KEY is not configured or in development guard.",
+      metadata: { resourceTitle, leadId }
+    });
+    return { success: true, skipped: true, reason: "PROVIDER_NOT_CONFIGURED" };
+  }
+
+  const emailHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your Free Resource Access Link</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+          <tr>
+            <td style="background-color: #0b132b; padding: 32px; text-align: left; border-bottom: 3px solid #ff6b00;">
+              <span style="color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">DIGITAL<span style="color: #ff6b00;">MUID</span></span>
+              <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Powered by MK Digitalverse</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 36px 32px;">
+              <div style="display: inline-block; padding: 4px 12px; background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 9999px; color: #1d4ed8; font-size: 12px; font-weight: 700; text-transform: uppercase; margin-bottom: 16px;">
+                Toolkit Unlocked · Direct Access
+              </div>
+              <h1 style="margin: 0 0 16px 0; font-size: 24px; font-weight: 800; color: #0f172a; line-height: 1.3;">
+                Here is your toolkit, ${customerName}!
+              </h1>
+              <p style="margin: 0 0 24px 0; font-size: 15px; line-height: 1.6; color: #475569;">
+                Thank you for requesting <strong>${resourceTitle}</strong>. Your instant access link is ready below.
+              </p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 28px;">
+                <tr>
+                  <td align="center">
+                    <a href="${downloadUrl}" style="display: inline-block; background-color: #ff6b00; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 10px; box-shadow: 0 4px 6px -1px rgba(255, 107, 0, 0.3);">
+                      DOWNLOAD YOUR TOOLKIT NOW &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 0; font-size: 13px; color: #64748b; line-height: 1.6;">
+                If you have any questions or need custom advisory, reply to this email or reach us at <a href="mailto:support@digitalmuid.in" style="color: #ff6b00; text-decoration: none; font-weight: 600;">support@digitalmuid.in</a>.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f1f5f9; padding: 20px 32px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0;">
+              &copy; ${new Date().getFullYear()} DigitalMUID &bull; Powered by MK Digitalverse &bull; All rights reserved.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: getSenderEmail(),
+      to: [recipient],
+      subject: `Your Toolkit: ${resourceTitle} — DigitalMuid Support`,
+      html: emailHtml
+    });
+
+    if (error) {
+      console.error("[Mailer Service] Resend rejected free resource email:", error);
+      return { success: false, error: error.message };
+    }
+
+    await recordEmailLog({
+      paymentId: leadId || `lead_${Date.now()}`,
+      orderId: "free_lead",
+      recipientEmail: recipient,
+      templateType,
+      status: "sent",
+      providerMessageId: data?.id,
+      metadata: { resourceTitle, leadId }
+    });
+
+    return { success: true, messageId: data?.id };
+  } catch (err) {
+    console.error("[Mailer Service] Unexpected exception sending free resource email:", err);
+    return { success: false, error: err?.message };
+  }
+}
+
+/**
+ * Dispatches a Web Project Enquiry Confirmation Email.
+ *
+ * @param {object} params
+ * @param {string} params.to - Recipient email
+ * @param {string} [params.customerName] - Recipient name
+ * @param {string} [params.projectType] - Type of project
+ * @param {string} [params.businessName] - Client business name
+ * @param {string} params.referenceId - Tracking reference code
+ * @returns {Promise<{ success: boolean, skipped?: boolean, messageId?: string, error?: string }>}
+ */
+export async function sendWebEnquiryConfirmationEmail({
+  to,
+  customerName = "Valued Client",
+  projectType = "Website & Digital Platform",
+  businessName = "Your Project",
+  referenceId
+}) {
+  const templateType = "web_enquiry_confirmation";
+  const recipient = (to || "").trim();
+
+  if (!recipient || !recipient.includes("@")) {
+    console.warn(`[Mailer Service] Skipped web enquiry email: Invalid recipient address "${recipient}".`);
+    return { success: false, error: "Invalid recipient email address." };
+  }
+
+  const resend = getResendClient();
+  if (!resend) {
+    console.warn(
+      `[Mailer Service] RESEND_API_KEY is not configured or gated. Web enquiry confirmation skipped for ${recipient}.`
+    );
+    await recordEmailLog({
+      paymentId: referenceId || `enquiry_${Date.now()}`,
+      orderId: referenceId || "web_enquiry",
+      recipientEmail: recipient,
+      templateType,
+      status: "skipped",
+      errorMessage: "RESEND_API_KEY is not configured or in development guard.",
+      metadata: { projectType, businessName, referenceId }
+    });
+    return { success: true, skipped: true, reason: "PROVIDER_NOT_CONFIGURED" };
+  }
+
+  const emailHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>We Received Your Website Project Enquiry</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+          <tr>
+            <td style="background-color: #0b132b; padding: 32px; text-align: left; border-bottom: 3px solid #ff6b00;">
+              <span style="color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">DIGITAL<span style="color: #ff6b00;">MUID</span></span>
+              <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Web Development & Performance Engineering</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 36px 32px;">
+              <div style="display: inline-block; padding: 4px 12px; background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 9999px; color: #047857; font-size: 12px; font-weight: 700; text-transform: uppercase; margin-bottom: 16px;">
+                Enquiry Received · Reference: ${referenceId}
+              </div>
+              <h1 style="margin: 0 0 16px 0; font-size: 24px; font-weight: 800; color: #0f172a; line-height: 1.3;">
+                Thank you, ${customerName}!
+              </h1>
+              <p style="margin: 0 0 20px 0; font-size: 15px; line-height: 1.6; color: #475569;">
+                We have received your project enquiry for <strong>${businessName}</strong> (${projectType}). Our engineering and strategy team is reviewing your requirements and will reach out within 24 business hours.
+              </p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 24px; padding: 16px;">
+                <tr>
+                  <td style="padding: 6px 12px; font-size: 13px; color: #64748b;">Project Scope:</td>
+                  <td style="padding: 6px 12px; font-size: 13px; font-weight: 700; color: #0f172a; text-align: right;">${projectType}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 12px; font-size: 13px; color: #64748b;">Business:</td>
+                  <td style="padding: 6px 12px; font-size: 13px; font-weight: 700; color: #0f172a; text-align: right;">${businessName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 12px; font-size: 13px; color: #64748b;">Tracking Reference:</td>
+                  <td style="padding: 6px 12px; font-size: 12px; font-family: monospace; font-weight: 700; color: #ff6b00; text-align: right;">${referenceId}</td>
+                </tr>
+              </table>
+              <p style="margin: 0; font-size: 13px; color: #64748b; line-height: 1.6;">
+                If you have immediate questions or want to provide additional specification files, reply directly to this email or write to <a href="mailto:support@digitalmuid.in" style="color: #ff6b00; text-decoration: none; font-weight: 600;">support@digitalmuid.in</a>.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f1f5f9; padding: 20px 32px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0;">
+              &copy; ${new Date().getFullYear()} DigitalMUID &bull; Powered by MK Digitalverse &bull; All rights reserved.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: getSenderEmail(),
+      to: [recipient],
+      subject: `Project Enquiry Received: ${referenceId} — DigitalMuid Support`,
+      html: emailHtml
+    });
+
+    if (error) {
+      console.error("[Mailer Service] Resend rejected web enquiry email:", error);
+      return { success: false, error: error.message };
+    }
+
+    await recordEmailLog({
+      paymentId: referenceId,
+      orderId: referenceId,
+      recipientEmail: recipient,
+      templateType,
+      status: "sent",
+      providerMessageId: data?.id,
+      metadata: { projectType, businessName, referenceId }
+    });
+
+    return { success: true, messageId: data?.id };
+  } catch (err) {
+    console.error("[Mailer Service] Unexpected exception sending web enquiry email:", err);
+    return { success: false, error: err?.message };
+  }
+}
+
+/**
+ * Dispatches an Account Welcome Registration Email.
+ *
+ * @param {object} params
+ * @param {string} params.to - New user email
+ * @param {string} [params.customerName] - User display name
+ * @param {string} [params.loginUrl] - Portal login URL
+ * @returns {Promise<{ success: boolean, skipped?: boolean, messageId?: string, error?: string }>}
+ */
+export async function sendWelcomeRegistrationEmail({
+  to,
+  customerName = "Member",
+  loginUrl = "https://digitalmuid.in/login"
+}) {
+  const templateType = "welcome_registration";
+  const recipient = (to || "").trim();
+
+  if (!recipient || !recipient.includes("@")) {
+    console.warn(`[Mailer Service] Skipped welcome email: Invalid recipient address "${recipient}".`);
+    return { success: false, error: "Invalid recipient email address." };
+  }
+
+  const resend = getResendClient();
+  if (!resend) {
+    console.warn(
+      `[Mailer Service] RESEND_API_KEY is not configured or gated. Welcome email skipped for ${recipient}.`
+    );
+    return { success: true, skipped: true, reason: "PROVIDER_NOT_CONFIGURED" };
+  }
+
+  const emailHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to DigitalMUID</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+          <tr>
+            <td style="background-color: #0b132b; padding: 32px; text-align: left; border-bottom: 3px solid #ff6b00;">
+              <span style="color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">DIGITAL<span style="color: #ff6b00;">MUID</span></span>
+              <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Powered by MK Digitalverse</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 36px 32px;">
+              <h1 style="margin: 0 0 16px 0; font-size: 24px; font-weight: 800; color: #0f172a; line-height: 1.3;">
+                Welcome to DigitalMUID, ${customerName}!
+              </h1>
+              <p style="margin: 0 0 24px 0; font-size: 15px; line-height: 1.6; color: #475569;">
+                Your account is ready. Access the academy, track your course progress, explore toolkits, and manage your advisory appointments all from your unified dashboard.
+              </p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 28px;">
+                <tr>
+                  <td align="center">
+                    <a href="${loginUrl}" style="display: inline-block; background-color: #0b132b; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 10px;">
+                      GO TO YOUR DASHBOARD &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 0; font-size: 13px; color: #64748b; line-height: 1.6;">
+                Need help? Contact our support team any time at <a href="mailto:support@digitalmuid.in" style="color: #ff6b00; text-decoration: none; font-weight: 600;">support@digitalmuid.in</a>.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f1f5f9; padding: 20px 32px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0;">
+              &copy; ${new Date().getFullYear()} DigitalMUID &bull; Powered by MK Digitalverse &bull; All rights reserved.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  try {
+    const { data, error } = await resend.emails.send({
+      from: getSenderEmail(),
+      to: [recipient],
+      subject: `Welcome to DigitalMUID — DigitalMuid Support`,
+      html: emailHtml
+    });
+
+    if (error) {
+      console.error("[Mailer Service] Resend rejected welcome email:", error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, messageId: data?.id };
+  } catch (err) {
+    console.error("[Mailer Service] Unexpected exception sending welcome email:", err);
+    return { success: false, error: err?.message };
+  }
+}
+

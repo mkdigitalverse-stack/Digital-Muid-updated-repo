@@ -187,7 +187,12 @@ const MainApp: React.FC = () => {
         <ResourcesPage
           navigate={navigate}
           selectedResourceId={slug}
-          onCloseModal={() => setSelectedResourceIdForModal(null)}
+          onCloseModal={() => {
+            setSelectedResourceIdForModal(null);
+            if (path !== '/resources' || searchStr) {
+              navigate('/resources');
+            }
+          }}
         />
       );
     }

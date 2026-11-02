@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { GraduationCap, Sparkles, Clock, Users, CheckCircle2, ArrowRight, BookOpen, ShieldCheck, Heart } from 'lucide-react';
 import { SEOHead } from '../components/SEOHead';
+import { SafeImage } from '../components/SafeImage';
 
 interface LearnPageProps {
   navigate: (path: string) => void;
@@ -69,16 +70,12 @@ export const LearnPage: React.FC<LearnPageProps> = ({ navigate }) => {
             >
               <div className="space-y-5">
                 <div className="aspect-[16/9] w-full rounded-2xl bg-slate-100 relative overflow-hidden flex items-center justify-center">
-                  {thumbnail ? (
-                    <img
-                      src={thumbnail}
-                      alt={course.title}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                    />
-                  ) : (
-                    <GraduationCap className="w-12 h-12 text-slate-400" />
-                  )}
+                  <SafeImage
+                    src={thumbnail}
+                    alt={course.title}
+                    fallbackType="course"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
                   <div className="absolute top-3 left-3 flex items-center gap-2">
                     <span className="px-2.5 py-1 rounded bg-white/95 backdrop-blur-md text-emerald-700 text-xs font-bold uppercase tracking-wider border border-slate-200 shadow-sm">
                       {course.level}

@@ -76,7 +76,7 @@ export function generateConsultationIcsBuffer({
     `DESCRIPTION:Strategic Consultation with DigitalMUID (Powered by MK Digitalverse)\\n\\nFocus Area: ${primaryChallenge.replace(/\n/g, " ")}\\nClient: ${customerName}\\nBooking Reference: ${bookingCode}\\nGoogle Meet: ${meetUrl}\\nSupport: support@digitalmuid.in`,
     `LOCATION:${meetUrl}`,
     "STATUS:CONFIRMED",
-    `ORGANIZER;CN=DigitalMUID Strategy Team:mailto:support@digitalmuid.in`,
+    `ORGANIZER;CN=DigitalMuid Support:mailto:support@digitalmuid.in`,
     customerEmail ? `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;CN=${customerName}:mailto:${customerEmail}` : "",
     "BEGIN:VALARM",
     "ACTION:DISPLAY",

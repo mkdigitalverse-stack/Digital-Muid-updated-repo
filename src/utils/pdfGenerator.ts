@@ -534,7 +534,7 @@ BT
 /F2 9 Tf
 0.8 0.85 0.9 rg
 45 764 Td
-(https://digitalmuid.com | support@digitalmuid.com) Tj
+(https://digitalmuid.in | support@digitalmuid.in) Tj
 ET
 
 % Receipt Title on Right
@@ -746,7 +746,7 @@ BT
 /F2 9 Tf
 0.2 0.25 0.3 rg
 60 325 Td
-(3. For corporate invoice records, expensing, or queries: support@digitalmuid.com) Tj
+(3. For corporate invoice records, expensing, or queries: support@digitalmuid.in) Tj
 ET
 
 BT

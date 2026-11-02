@@ -7,6 +7,7 @@ import { paymentService } from '../services/paymentService';
 import { findFrameworksForResource } from '../utils/frameworkRelationships';
 import { loadRazorpayCheckoutScript, getClientRazorpayKeyId } from '../lib/razorpay';
 import { analytics } from '../utils/analytics';
+import { SafeImage } from '../components/SafeImage';
 
 interface ResourcesPageProps {
   navigate: (path: string) => void;
@@ -78,6 +79,8 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
     } catch {}
   };
 
+  const [dismissedResourceId, setDismissedResourceId] = useState<string | null>(null);
+
   // Lock body scroll when any modal is open to eliminate background drag and rubber-banding
   React.useEffect(() => {
     if (paidModalResource || activeDownloadResource) {
@@ -89,12 +92,25 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
     }
   }, [paidModalResource, activeDownloadResource]);
 
+  // Keyboard Escape listener to close modals
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (activeDownloadResource || paidModalResource) {
+          handleModalClose();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeDownloadResource, paidModalResource]);
+
   // Filter published resources for public display
   const publishedResources = resources.filter(
     (r) => r.status === 'published' || !r.status
   );
 
-  // If passed from parent
+  // If passed from parent or URL
   React.useEffect(() => {
     let targetId = selectedResourceId;
     if (!targetId && typeof window !== 'undefined' && window.location.search) {
@@ -102,7 +118,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
       targetId = searchParams.get('resourceId') || searchParams.get('download') || searchParams.get('id') || searchParams.get('slug');
     }
 
-    if (targetId) {
+    if (targetId && targetId !== dismissedResourceId) {
       const res = publishedResources.find((r) => r.id === targetId || r.slug === targetId);
       if (res) {
         const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
@@ -130,7 +146,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
         }
       }
     }
-  }, [selectedResourceId, publishedResources, currentUser, isAdminAuthenticated, hasPurchasedResource, navigate, userProfile]);
+  }, [selectedResourceId, publishedResources, currentUser, isAdminAuthenticated, hasPurchasedResource, navigate, userProfile, dismissedResourceId]);
 
   const handleToggleResourceBookmark = async (resourceId: string) => {
     if (!currentUser) {
@@ -142,6 +158,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
   };
 
   const handleDownloadClick = async (res: Resource) => {
+    setDismissedResourceId(null);
     const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
 
     // 1. Paid resources: require verified purchase
@@ -358,11 +375,26 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
   };
 
   const handleModalClose = () => {
+    const closedId = activeDownloadResource?.id || activeDownloadResource?.slug || paidModalResource?.id || paidModalResource?.slug || selectedResourceId;
+    if (closedId) {
+      setDismissedResourceId(closedId);
+    }
     setActiveDownloadResource(null);
+    setPaidModalResource(null);
     setIsCompleted(false);
     setFormError(null);
     setDownloadError(null);
-    if (onCloseModal) onCloseModal();
+
+    // Cleanly restore browser URL without whole-page refresh
+    if (typeof window !== 'undefined') {
+      if (window.location.search || window.location.pathname.startsWith('/resources/')) {
+        window.history.replaceState({}, '', '/resources');
+      }
+    }
+
+    if (onCloseModal) {
+      onCloseModal();
+    }
   };
 
   const handleTriggerDownload = async () => {
@@ -535,11 +567,11 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                   {/* Optional Card Cover Thumbnail */}
                   {thumb && (
                     <div className="relative rounded-2xl overflow-hidden aspect-video bg-slate-100 border border-slate-100">
-                      <img
+                      <SafeImage
                         src={thumb}
                         alt={resTitle}
+                        fallbackType="resource"
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        referrerPolicy="no-referrer"
                       />
                       {isFeatured && (
                         <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-black/80 text-amber-300 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 shadow-md">
@@ -717,8 +749,18 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
 
       {/* Email Capture / Direct Download Modal */}
       {activeDownloadResource && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-y-contain touch-pan-y">
-          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl p-5 sm:p-8 space-y-5 sm:space-y-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-auto">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              handleModalClose();
+            }
+          }}
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-y-contain touch-pan-y"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl p-5 sm:p-8 space-y-5 sm:space-y-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-auto"
+          >
             <div className="absolute top-4 right-4 flex items-center gap-1.5 z-10">
               <button
                 id={`modal-bookmark-btn-${activeDownloadResource.id}`}
@@ -735,7 +777,11 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
               </button>
               <button
                 type="button"
-                onClick={handleModalClose}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleModalClose();
+                }}
                 aria-label="Close modal"
                 className="text-slate-400 hover:text-slate-900 p-2 rounded-full hover:bg-slate-100 min-w-[44px] min-h-[44px] flex items-center justify-center cursor-pointer transition-colors"
               >
@@ -893,7 +939,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                   <span>Direct instant download. Zero spam.</span>
                 </div>
 
-                <div className="pt-2">
+                <div className="pt-2 space-y-2">
                   <button
                     type="submit"
                     disabled={isSubmittingLead}
@@ -901,6 +947,13 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                   >
                     <Download className="w-4 h-4" />
                     <span>{isSubmittingLead ? 'Unlocking Resource...' : 'Unlock & Access Resource'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleModalClose}
+                    className="w-full py-2.5 rounded-xl bg-transparent hover:bg-slate-100 text-slate-600 hover:text-slate-900 font-semibold text-xs transition-colors flex items-center justify-center cursor-pointer"
+                  >
+                    Cancel and return to resources
                   </button>
                 </div>
               </form>
@@ -911,13 +964,28 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
 
       {/* Paid Resource Checkout Modal */}
       {paidModalResource && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-y-contain touch-pan-y">
-          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl p-5 sm:p-8 space-y-5 sm:space-y-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-auto">
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setPaidModalResource(null);
+              setFormError(null);
+              window.history.replaceState({}, '', '/resources');
+            }
+          }}
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto overscroll-y-contain touch-pan-y"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg bg-white border border-slate-200 rounded-3xl p-5 sm:p-8 space-y-5 sm:space-y-6 relative shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-auto"
+          >
             <button
               type="button"
-              onClick={() => {
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 setPaidModalResource(null);
                 setFormError(null);
+                window.history.replaceState({}, '', '/resources');
               }}
               aria-label="Close checkout"
               className="absolute top-4 right-4 text-slate-400 hover:text-slate-900 p-2.5 rounded-full hover:bg-slate-100 min-w-[44px] min-h-[44px] flex items-center justify-center cursor-pointer transition-colors z-10"
@@ -1002,7 +1070,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                 </div>
               </div>
 
-              <div className="pt-2">
+              <div className="pt-2 space-y-2">
                 <button
                   type="submit"
                   disabled={isProcessingPayment}
@@ -1020,6 +1088,17 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                     </>
                   )}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaidModalResource(null);
+                    setFormError(null);
+                    window.history.replaceState({}, '', '/resources');
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-transparent hover:bg-slate-100 text-slate-600 hover:text-slate-900 font-semibold text-xs transition-colors flex items-center justify-center cursor-pointer"
+                >
+                  Cancel and return to resources
+                </button>
                 <div className="flex items-center justify-center gap-2 mt-2 text-[10px] text-slate-400">
                   <ShieldCheck className="w-3 h-3 text-slate-400" />
                   <span>Secure 256-bit encrypted transaction • Recorded in student ledger</span>
@@ -1032,3 +1111,5 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
     </div>
   );
 };
+
+export default ResourcesPage;

@@ -50,12 +50,15 @@ function getRouteHandler(path, method) {
 
 const verifyPurchaseStatusHandler = getRouteHandler("/verify-purchase-status", "GET");
 const getResourceDownloadUrlHandler = getRouteHandler("/get-resource-download-url", "POST");
+const getBundleFilesHandler = getRouteHandler("/bundle-files", "GET");
+const postBundleFilesHandler = getRouteHandler("/get-bundle-files", "POST");
 
-function createMockExpress(query = {}, body = {}, headers = {}) {
+function createMockExpress(query = {}, body = {}, headers = {}, method = "GET") {
   let statusCode = 200;
   let jsonResponse = null;
 
   const req = {
+    method,
     query,
     body,
     headers
@@ -880,9 +883,523 @@ async function runTests() {
   }
 
   // -----------------------------------------------------------------------------
-  // TEST GROUP 10: Production Protection on Test-Only Injection Hooks
+  // TEST GROUP 10: Meta Ads Campaign Planner Bundle Download Security (GET & POST)
   // -----------------------------------------------------------------------------
-  console.log("\n[Test Group 10] Production Environment Guard on Test Hooks");
+  console.log("\n[Test Group 10] Meta Ads Campaign Planner Bundle Download Security (GET & POST)");
+  {
+    const BUNDLE_ID = "2d50e5e3-711d-4461-a70d-0ed54dd29f17";
+    const BUNDLE_SLUG = "meta-ads-campaign-planner-bundle";
+
+    const bundleDb = {
+      resources: [
+        {
+          id: BUNDLE_ID,
+          slug: BUNDLE_SLUG,
+          title: "Meta Ads Campaign Planner Bundle",
+          access_type: "paid",
+          price: 299,
+          currency: "INR"
+        }
+      ],
+      resource_purchases: [
+        // Scenario 15: Valid historical ₹299 purchase
+        {
+          id: "pur-bundle-hist-299",
+          resource_id: BUNDLE_ID,
+          razorpay_payment_id: "pay_bundle_hist_299",
+          razorpay_order_id: "order_bundle_hist_299",
+          status: "active",
+          currency: "INR",
+          amount: 299
+        },
+        // Scenario 16: Valid historical ₹1 testing purchase
+        {
+          id: "pur-bundle-test-1inr",
+          resource_id: BUNDLE_ID,
+          razorpay_payment_id: "pay_bundle_test_1inr",
+          razorpay_order_id: "order_bundle_test_1inr",
+          status: "active",
+          currency: "INR",
+          amount: 1
+        },
+        // Scenario 11: Inactive purchase (refunded)
+        {
+          id: "pur-bundle-refunded",
+          resource_id: BUNDLE_ID,
+          razorpay_payment_id: "pay_bundle_refunded",
+          razorpay_order_id: "order_bundle_refunded",
+          status: "refunded",
+          currency: "INR",
+          amount: 299
+        },
+        // Scenario 7: Non-INR currency
+        {
+          id: "pur-bundle-usd",
+          resource_id: BUNDLE_ID,
+          razorpay_payment_id: "pay_bundle_usd",
+          razorpay_order_id: "order_bundle_usd",
+          status: "active",
+          currency: "USD",
+          amount: 299
+        },
+        // Scenario 8: Zero amount
+        {
+          id: "pur-bundle-zero",
+          resource_id: BUNDLE_ID,
+          razorpay_payment_id: "pay_bundle_zero",
+          razorpay_order_id: "order_bundle_zero",
+          status: "active",
+          currency: "INR",
+          amount: 0
+        },
+        // Scenario 9: Negative amount
+        {
+          id: "pur-bundle-neg",
+          resource_id: BUNDLE_ID,
+          razorpay_payment_id: "pay_bundle_neg",
+          razorpay_order_id: "order_bundle_neg",
+          status: "active",
+          currency: "INR",
+          amount: -100
+        },
+        // Scenario 6: Payment from another resource (workbook)
+        {
+          id: "pur-other-workbook",
+          resource_id: "27ef2c04-4d4a-4dbe-a702-d4013b2542b9",
+          razorpay_payment_id: "pay_other_workbook",
+          razorpay_order_id: "order_other_workbook",
+          status: "active",
+          currency: "INR",
+          amount: 129
+        },
+        // Scenario 17: Authenticated legitimate owner purchase
+        {
+          id: "pur-auth-owner",
+          user_id: "usr-bundle-owner-777",
+          resource_id: BUNDLE_ID,
+          razorpay_payment_id: "pay_bundle_auth_777",
+          razorpay_order_id: "order_bundle_auth_777",
+          status: "active",
+          currency: "INR",
+          amount: 299
+        }
+      ],
+      payments: [
+        // Scenario 3: Valid payments record (both IDs matching)
+        {
+          id: "pmt-bundle-valid-dual",
+          item_id: BUNDLE_ID,
+          item_type: "resource",
+          razorpay_payment_id: "pay_bundle_pmt_dual",
+          razorpay_order_id: "order_bundle_pmt_dual",
+          status: "captured",
+          currency: "INR",
+          amount: 299
+        },
+        // Scenario 10: Uncaptured payment (status: failed)
+        {
+          id: "pmt-bundle-failed",
+          item_id: BUNDLE_ID,
+          item_type: "resource",
+          razorpay_payment_id: "pay_bundle_failed_001",
+          razorpay_order_id: "order_bundle_failed_001",
+          status: "failed",
+          currency: "INR",
+          amount: 299
+        }
+      ]
+    };
+
+    const bundleAuthUsers = {
+      "token-owner": {
+        id: "usr-bundle-owner-777",
+        email: "owner@digitalmuid.com",
+        app_metadata: {},
+        user_metadata: {}
+      },
+      "token-unauth": {
+        id: "usr-bundle-unauth-888",
+        email: "unauth@digitalmuid.com",
+        app_metadata: {},
+        user_metadata: {}
+      },
+      "token-admin-email": {
+        id: "usr-admin-allowlist",
+        email: "admin@digitalmuid.com",
+        app_metadata: {},
+        user_metadata: {}
+      },
+      "token-admin-meta": {
+        id: "usr-admin-meta",
+        email: "custom-admin@digitalmuid.com",
+        app_metadata: { role: "admin" },
+        user_metadata: {}
+      }
+    };
+
+    setMockSupabaseServerClient(createMockSupabase(bundleDb, bundleAuthUsers));
+
+    async function callBundle(method, { query = {}, body = {}, headers = {} }) {
+      const handler = method === "GET" ? getBundleFilesHandler : postBundleFilesHandler;
+      const { req, res } = createMockExpress(query, body, headers, method);
+      await handler(req, res);
+      return res;
+    }
+
+    // 1. Scenario 1: Payment ID only (no order ID) -> 403 Forbidden
+    const getScen1 = await callBundle("GET", { query: { paymentId: "pay_bundle_hist_299" } });
+    assert(getScen1.getStatusCode() === 403, "Scenario 1 (GET): Payment ID only returns HTTP 403");
+    assert(getScen1.getBody().authorized === false, "Scenario 1 (GET): authorized=false when orderId missing");
+    const postScen1 = await callBundle("POST", { body: { paymentId: "pay_bundle_hist_299" } });
+    assert(postScen1.getStatusCode() === 403, "Scenario 1 (POST): Payment ID only returns HTTP 403");
+    assert(postScen1.getBody().authorized === false, "Scenario 1 (POST): authorized=false when orderId missing");
+
+    // 2. Scenario 2: Order ID only (no payment ID) -> 403 Forbidden
+    const getScen2 = await callBundle("GET", { query: { orderId: "order_bundle_hist_299" } });
+    assert(getScen2.getStatusCode() === 403, "Scenario 2 (GET): Order ID only returns HTTP 403");
+    assert(getScen2.getBody().authorized === false, "Scenario 2 (GET): authorized=false when paymentId missing");
+    const postScen2 = await callBundle("POST", { body: { orderId: "order_bundle_hist_299" } });
+    assert(postScen2.getStatusCode() === 403, "Scenario 2 (POST): Order ID only returns HTTP 403");
+    assert(postScen2.getBody().authorized === false, "Scenario 2 (POST): authorized=false when paymentId missing");
+
+    // 3. Scenario 3: Both IDs correct (matching payments table record) -> 200 OK with 4 files
+    const getScen3 = await callBundle("GET", {
+      query: { paymentId: "pay_bundle_pmt_dual", orderId: "order_bundle_pmt_dual" }
+    });
+    assert(getScen3.getStatusCode() === 200, "Scenario 3 (GET): Both IDs correct returns HTTP 200");
+    assert(getScen3.getBody().authorized === true, "Scenario 3 (GET): authorized=true for matching pair");
+    assert(Array.isArray(getScen3.getBody().files) && getScen3.getBody().files.length === 4, "Scenario 3 (GET): Exactly 4 files delivered");
+    const postScen3 = await callBundle("POST", {
+      body: { paymentId: "pay_bundle_pmt_dual", orderId: "order_bundle_pmt_dual" }
+    });
+    assert(postScen3.getStatusCode() === 200, "Scenario 3 (POST): Both IDs correct returns HTTP 200");
+    assert(postScen3.getBody().authorized === true, "Scenario 3 (POST): authorized=true for matching pair");
+    assert(Array.isArray(postScen3.getBody().files) && postScen3.getBody().files.length === 4, "Scenario 3 (POST): Exactly 4 files delivered");
+
+    // 4. Scenario 4: Correct payment ID with wrong order ID -> 403 Forbidden
+    const getScen4 = await callBundle("GET", {
+      query: { paymentId: "pay_bundle_pmt_dual", orderId: "order_wrong_mismatch" }
+    });
+    assert(getScen4.getStatusCode() === 403, "Scenario 4 (GET): Mismatched order ID returns HTTP 403");
+    assert(getScen4.getBody().authorized === false, "Scenario 4 (GET): authorized=false on mismatched order ID");
+    const postScen4 = await callBundle("POST", {
+      body: { paymentId: "pay_bundle_pmt_dual", orderId: "order_wrong_mismatch" }
+    });
+    assert(postScen4.getStatusCode() === 403, "Scenario 4 (POST): Mismatched order ID returns HTTP 403");
+    assert(postScen4.getBody().authorized === false, "Scenario 4 (POST): authorized=false on mismatched order ID");
+
+    // 5. Scenario 5: Correct order ID with wrong payment ID -> 403 Forbidden
+    const getScen5 = await callBundle("GET", {
+      query: { paymentId: "pay_wrong_mismatch", orderId: "order_bundle_pmt_dual" }
+    });
+    assert(getScen5.getStatusCode() === 403, "Scenario 5 (GET): Mismatched payment ID returns HTTP 403");
+    assert(getScen5.getBody().authorized === false, "Scenario 5 (GET): authorized=false on mismatched payment ID");
+    const postScen5 = await callBundle("POST", {
+      body: { paymentId: "pay_wrong_mismatch", orderId: "order_bundle_pmt_dual" }
+    });
+    assert(postScen5.getStatusCode() === 403, "Scenario 5 (POST): Mismatched payment ID returns HTTP 403");
+    assert(postScen5.getBody().authorized === false, "Scenario 5 (POST): authorized=false on mismatched payment ID");
+
+    // 6. Scenario 6: Payment from another resource (workbook) -> 403 Forbidden
+    const getScen6 = await callBundle("GET", {
+      query: { paymentId: "pay_other_workbook", orderId: "order_other_workbook" }
+    });
+    assert(getScen6.getStatusCode() === 403, "Scenario 6 (GET): Cross-resource purchase returns HTTP 403");
+    const postScen6 = await callBundle("POST", {
+      body: { paymentId: "pay_other_workbook", orderId: "order_other_workbook" }
+    });
+    assert(postScen6.getStatusCode() === 403, "Scenario 6 (POST): Cross-resource purchase returns HTTP 403");
+
+    // 7. Scenario 7: Non-INR currency -> 403 Forbidden
+    const getScen7 = await callBundle("GET", {
+      query: { paymentId: "pay_bundle_usd", orderId: "order_bundle_usd" }
+    });
+    assert(getScen7.getStatusCode() === 403, "Scenario 7 (GET): Non-INR payment returns HTTP 403");
+    const postScen7 = await callBundle("POST", {
+      body: { paymentId: "pay_bundle_usd", orderId: "order_bundle_usd" }
+    });
+    assert(postScen7.getStatusCode() === 403, "Scenario 7 (POST): Non-INR payment returns HTTP 403");
+
+    // 8. Scenario 8: Zero amount payment -> 403 Forbidden
+    const getScen8 = await callBundle("GET", {
+      query: { paymentId: "pay_bundle_zero", orderId: "order_bundle_zero" }
+    });
+    assert(getScen8.getStatusCode() === 403, "Scenario 8 (GET): Zero amount payment returns HTTP 403");
+    const postScen8 = await callBundle("POST", {
+      body: { paymentId: "pay_bundle_zero", orderId: "order_bundle_zero" }
+    });
+    assert(postScen8.getStatusCode() === 403, "Scenario 8 (POST): Zero amount payment returns HTTP 403");
+
+    // 9. Scenario 9: Negative amount payment -> 403 Forbidden
+    const getScen9 = await callBundle("GET", {
+      query: { paymentId: "pay_bundle_neg", orderId: "order_bundle_neg" }
+    });
+    assert(getScen9.getStatusCode() === 403, "Scenario 9 (GET): Negative amount payment returns HTTP 403");
+    const postScen9 = await callBundle("POST", {
+      body: { paymentId: "pay_bundle_neg", orderId: "order_bundle_neg" }
+    });
+    assert(postScen9.getStatusCode() === 403, "Scenario 9 (POST): Negative amount payment returns HTTP 403");
+
+    // 10. Scenario 10: Uncaptured payment (failed status) -> 403 Forbidden
+    const getScen10 = await callBundle("GET", {
+      query: { paymentId: "pay_bundle_failed_001", orderId: "order_bundle_failed_001" }
+    });
+    assert(getScen10.getStatusCode() === 403, "Scenario 10 (GET): Uncaptured payment returns HTTP 403");
+    const postScen10 = await callBundle("POST", {
+      body: { paymentId: "pay_bundle_failed_001", orderId: "order_bundle_failed_001" }
+    });
+    assert(postScen10.getStatusCode() === 403, "Scenario 10 (POST): Uncaptured payment returns HTTP 403");
+
+    // 11. Scenario 11: Inactive purchase in resource_purchases (refunded) -> 403 Forbidden
+    const getScen11 = await callBundle("GET", {
+      query: { paymentId: "pay_bundle_refunded", orderId: "order_bundle_refunded" }
+    });
+    assert(getScen11.getStatusCode() === 403, "Scenario 11 (GET): Refunded purchase returns HTTP 403");
+    const postScen11 = await callBundle("POST", {
+      body: { paymentId: "pay_bundle_refunded", orderId: "order_bundle_refunded" }
+    });
+    assert(postScen11.getStatusCode() === 403, "Scenario 11 (POST): Refunded purchase returns HTTP 403");
+
+    // Scenarios 12-14: Gateway Fallback Verification
+    // Configure mock test keys so getRazorpayClient() instantiates
+    process.env.RAZORPAY_KEY_ID = "rzp_test_bundle_mock";
+    process.env.RAZORPAY_KEY_SECRET = "mock_bundle_secret";
+
+    // 12. Scenario 12: Missing gateway order -> 403 Forbidden
+    setMockRazorpayClient({
+      payments: {
+        async fetch(id) {
+          return {
+            id,
+            status: "captured",
+            currency: "INR",
+            amount: 29900,
+            order_id: "order_missing_gw_order",
+            notes: { resourceId: BUNDLE_ID }
+          };
+        }
+      },
+      orders: {
+        async fetch() {
+          throw new Error("Order not found on gateway");
+        }
+      }
+    });
+    const getScen12 = await callBundle("GET", {
+      query: { paymentId: "pay_gw_missing_order", orderId: "order_missing_gw_order" }
+    });
+    assert(getScen12.getStatusCode() === 403, "Scenario 12 (GET): Missing gateway order returns HTTP 403");
+    const postScen12 = await callBundle("POST", {
+      body: { paymentId: "pay_gw_missing_order", orderId: "order_missing_gw_order" }
+    });
+    assert(postScen12.getStatusCode() === 403, "Scenario 12 (POST): Missing gateway order returns HTTP 403");
+
+    // 13. Scenario 13: Gateway payment/order amount mismatch -> 403 Forbidden
+    setMockRazorpayClient({
+      payments: {
+        async fetch(id) {
+          return {
+            id,
+            status: "captured",
+            currency: "INR",
+            amount: 29900,
+            order_id: "order_mismatch_gw_amount",
+            notes: { resourceId: BUNDLE_ID }
+          };
+        }
+      },
+      orders: {
+        async fetch(id) {
+          return {
+            id,
+            status: "paid",
+            currency: "INR",
+            amount: 10000, // Mismatched amount
+            notes: { resourceId: BUNDLE_ID }
+          };
+        }
+      }
+    });
+    const getScen13 = await callBundle("GET", {
+      query: { paymentId: "pay_gw_mismatch_amt", orderId: "order_mismatch_gw_amount" }
+    });
+    assert(getScen13.getStatusCode() === 403, "Scenario 13 (GET): Gateway amount mismatch returns HTTP 403");
+    const postScen13 = await callBundle("POST", {
+      body: { paymentId: "pay_gw_mismatch_amt", orderId: "order_mismatch_gw_amount" }
+    });
+    assert(postScen13.getStatusCode() === 403, "Scenario 13 (POST): Gateway amount mismatch returns HTTP 403");
+
+    // 14. Scenario 14: Missing / mismatched bundle identity metadata on gateway -> 403 Forbidden
+    setMockRazorpayClient({
+      payments: {
+        async fetch(id) {
+          return {
+            id,
+            status: "captured",
+            currency: "INR",
+            amount: 29900,
+            order_id: "order_other_resource_notes",
+            notes: { resourceId: "unrelated-resource-id" }
+          };
+        }
+      },
+      orders: {
+        async fetch(id) {
+          return {
+            id,
+            status: "paid",
+            currency: "INR",
+            amount: 29900,
+            notes: { resourceId: "unrelated-resource-id" }
+          };
+        }
+      }
+    });
+    const getScen14 = await callBundle("GET", {
+      query: { paymentId: "pay_gw_wrong_notes", orderId: "order_other_resource_notes" }
+    });
+    assert(getScen14.getStatusCode() === 403, "Scenario 14 (GET): Mismatched bundle notes on gateway returns HTTP 403");
+    const postScen14 = await callBundle("POST", {
+      body: { paymentId: "pay_gw_wrong_notes", orderId: "order_other_resource_notes" }
+    });
+    assert(postScen14.getStatusCode() === 403, "Scenario 14 (POST): Mismatched bundle notes on gateway returns HTTP 403");
+
+    // Gateway fallback success verification (valid bundle notes & matching amounts)
+    setMockRazorpayClient({
+      payments: {
+        async fetch(id) {
+          return {
+            id,
+            status: "captured",
+            currency: "INR",
+            amount: 29900,
+            order_id: "order_gw_valid_fallback",
+            notes: { resourceId: BUNDLE_ID }
+          };
+        }
+      },
+      orders: {
+        async fetch(id) {
+          return {
+            id,
+            status: "paid",
+            currency: "INR",
+            amount: 29900,
+            notes: { resourceId: BUNDLE_ID }
+          };
+        }
+      }
+    });
+    const getGwValid = await callBundle("GET", {
+      query: { paymentId: "pay_gw_valid_fallback", orderId: "order_gw_valid_fallback" }
+    });
+    assert(getGwValid.getStatusCode() === 200, "Gateway Fallback (GET): Valid gateway payment & order unlocks bundle (HTTP 200)");
+    assert(getGwValid.getBody().files.length === 4, "Gateway Fallback (GET): Delivers all 4 bundle files");
+
+    // 15. Scenario 15: Valid historical ₹299 purchase -> 200 OK (4 files)
+    const getScen15 = await callBundle("GET", {
+      query: { paymentId: "pay_bundle_hist_299", orderId: "order_bundle_hist_299" }
+    });
+    assert(getScen15.getStatusCode() === 200, "Scenario 15 (GET): Historical ₹299 purchase returns HTTP 200");
+    assert(getScen15.getBody().authorized === true, "Scenario 15 (GET): authorized=true for historical ₹299");
+    assert(getScen15.getBody().files.length === 4, "Scenario 15 (GET): Exactly 4 files delivered");
+    const postScen15 = await callBundle("POST", {
+      body: { paymentId: "pay_bundle_hist_299", orderId: "order_bundle_hist_299" }
+    });
+    assert(postScen15.getStatusCode() === 200, "Scenario 15 (POST): Historical ₹299 purchase returns HTTP 200");
+    assert(postScen15.getBody().authorized === true, "Scenario 15 (POST): authorized=true for historical ₹299");
+    assert(postScen15.getBody().files.length === 4, "Scenario 15 (POST): Exactly 4 files delivered");
+
+    // 16. Scenario 16: Valid historical ₹1 testing purchase -> 200 OK (4 files)
+    const getScen16 = await callBundle("GET", {
+      query: { paymentId: "pay_bundle_test_1inr", orderId: "order_bundle_test_1inr" }
+    });
+    assert(getScen16.getStatusCode() === 200, "Scenario 16 (GET): Historical ₹1 testing purchase returns HTTP 200");
+    assert(getScen16.getBody().authorized === true, "Scenario 16 (GET): authorized=true for historical ₹1");
+    assert(getScen16.getBody().files.length === 4, "Scenario 16 (GET): Exactly 4 files delivered for ₹1 purchase");
+    const postScen16 = await callBundle("POST", {
+      body: { paymentId: "pay_bundle_test_1inr", orderId: "order_bundle_test_1inr" }
+    });
+    assert(postScen16.getStatusCode() === 200, "Scenario 16 (POST): Historical ₹1 testing purchase returns HTTP 200");
+    assert(postScen16.getBody().authorized === true, "Scenario 16 (POST): authorized=true for historical ₹1");
+    assert(postScen16.getBody().files.length === 4, "Scenario 16 (POST): Exactly 4 files delivered for ₹1 purchase");
+
+    // 17. Scenario 17: Authenticated legitimate owner -> 200 OK (4 files)
+    const getScen17 = await callBundle("GET", {
+      headers: { authorization: "Bearer token-owner" }
+    });
+    assert(getScen17.getStatusCode() === 200, "Scenario 17 (GET): Authenticated owner returns HTTP 200");
+    assert(getScen17.getBody().authorized === true, "Scenario 17 (GET): Authenticated owner authorized=true");
+    assert(getScen17.getBody().files.length === 4, "Scenario 17 (GET): Exactly 4 files delivered to owner");
+    const postScen17 = await callBundle("POST", {
+      headers: { authorization: "Bearer token-owner" }
+    });
+    assert(postScen17.getStatusCode() === 200, "Scenario 17 (POST): Authenticated owner returns HTTP 200");
+    assert(postScen17.getBody().authorized === true, "Scenario 17 (POST): Authenticated owner authorized=true");
+    assert(postScen17.getBody().files.length === 4, "Scenario 17 (POST): Exactly 4 files delivered to owner");
+
+    // 18. Scenario 18: Authenticated unauthorized user -> 403 Forbidden
+    const getScen18 = await callBundle("GET", {
+      headers: { authorization: "Bearer token-unauth" }
+    });
+    assert(getScen18.getStatusCode() === 403, "Scenario 18 (GET): Authenticated non-buyer returns HTTP 403");
+    assert(getScen18.getBody().authorized === false, "Scenario 18 (GET): Non-buyer authorized=false");
+    const postScen18 = await callBundle("POST", {
+      headers: { authorization: "Bearer token-unauth" }
+    });
+    assert(postScen18.getStatusCode() === 403, "Scenario 18 (POST): Authenticated non-buyer returns HTTP 403");
+    assert(postScen18.getBody().authorized === false, "Scenario 18 (POST): Non-buyer authorized=false");
+
+    // 19. Scenario 19: Admin authorization (both allowlist email and app_metadata role) -> 200 OK (4 files)
+    const getAdminEmail = await callBundle("GET", {
+      headers: { authorization: "Bearer token-admin-email" }
+    });
+    assert(getAdminEmail.getStatusCode() === 200, "Scenario 19 (GET): Allowlist email admin returns HTTP 200");
+    assert(getAdminEmail.getBody().authorized === true, "Scenario 19 (GET): Allowlist admin authorized=true");
+    assert(getAdminEmail.getBody().files.length === 4, "Scenario 19 (GET): Admin receives 4 files");
+
+    const postAdminMeta = await callBundle("POST", {
+      headers: { authorization: "Bearer token-admin-meta" }
+    });
+    assert(postAdminMeta.getStatusCode() === 200, "Scenario 19 (POST): app_metadata.role admin returns HTTP 200");
+    assert(postAdminMeta.getBody().authorized === true, "Scenario 19 (POST): app_metadata admin authorized=true");
+    assert(postAdminMeta.getBody().files.length === 4, "Scenario 19 (POST): app_metadata admin receives 4 files");
+
+    // 20. Scenario 20: Exactly 4 intended bundle assets returned with complete deliverable details
+    const finalBundleRes = await callBundle("GET", {
+      query: { paymentId: "pay_bundle_hist_299", orderId: "order_bundle_hist_299" }
+    });
+    assert(finalBundleRes.getStatusCode() === 200, "Scenario 20: Delivery response is HTTP 200");
+    const files = finalBundleRes.getBody().files;
+    assert(Array.isArray(files) && files.length === 4, "Scenario 20: Exactly 4 bundle assets returned");
+
+    const expectedSlugs = [
+      "meta-ads-campaign-planner-workbook",
+      "the-ad-budget-breat-even-calculate",
+      "10-high-converting-meta-ads-copy-frameworks",
+      "pre-launch-tracking-audit-checklist"
+    ];
+
+    for (const slug of expectedSlugs) {
+      const file = files.find(f => f.slug === slug);
+      assert(Boolean(file), `Scenario 20: Asset with slug '${slug}' exists in response`);
+      assert(Boolean(file.title), `Scenario 20: Asset '${slug}' has non-empty title`);
+      assert(Boolean(file.format), `Scenario 20: Asset '${slug}' has format metadata`);
+      assert(Boolean(file.filename), `Scenario 20: Asset '${slug}' has filename`);
+      assert(Boolean(file.fileSize), `Scenario 20: Asset '${slug}' has fileSize metadata`);
+      assert(typeof file.downloadUrl === "string" && file.downloadUrl.startsWith("https://"), `Scenario 20: Asset '${slug}' has valid signed downloadUrl`);
+    }
+
+    // Clean up mock razorpay client and env vars
+    setMockRazorpayClient(null);
+    delete process.env.RAZORPAY_KEY_ID;
+    delete process.env.RAZORPAY_KEY_SECRET;
+  }
+
+  // -----------------------------------------------------------------------------
+  // TEST GROUP 11: Production Protection on Test-Only Injection Hooks
+  // -----------------------------------------------------------------------------
+  console.log("\n[Test Group 11] Production Environment Guard on Test Hooks");
   {
     const originalNodeEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = "production";
@@ -918,9 +1435,9 @@ async function runTests() {
   }
 
   // -----------------------------------------------------------------------------
-  // TEST GROUP 11: Live / Remote Tests (Explicitly Not Run)
+  // TEST GROUP 12: Live / Remote Tests (Explicitly Not Run)
   // -----------------------------------------------------------------------------
-  console.log("\n[Test Group 11] Remote / Live Infrastructure Tests (Prohibited in Local Mode)");
+  console.log("\n[Test Group 12] Remote / Live Infrastructure Tests (Prohibited in Local Mode)");
   {
     markNotRun(
       "Live Supabase PostgreSQL RLS Execution",

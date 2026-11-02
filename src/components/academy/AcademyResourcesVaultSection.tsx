@@ -2,6 +2,7 @@ import React from 'react';
 import { useApp } from '../../context/AppContext';
 import { Download, FileText, FileSpreadsheet, Cpu, ArrowRight, ShieldCheck, Lock, Sparkles, FolderDown } from 'lucide-react';
 import { Resource } from '../../types';
+import { SafeImage } from '../SafeImage';
 
 interface AcademyResourcesVaultSectionProps {
   navigate: (path: string) => void;
@@ -102,11 +103,11 @@ export const AcademyResourcesVaultSection: React.FC<AcademyResourcesVaultSection
                   {/* Thumbnail / Header */}
                   {res.thumbnailUrl || res.coverImage ? (
                     <div className="aspect-[16/9] w-full rounded-2xl overflow-hidden bg-slate-900 border border-slate-200 relative">
-                      <img
+                      <SafeImage
                         src={res.thumbnailUrl || res.coverImage}
                         alt={res.title || res.name || 'Resource toolkit'}
+                        fallbackType="resource"
                         className="w-full h-full object-cover"
-                        loading="lazy"
                       />
                       <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
                         <span className="text-[10px] font-mono font-bold uppercase tracking-wider bg-black/70 backdrop-blur-xs text-white px-2 py-0.5 rounded border border-white/10">

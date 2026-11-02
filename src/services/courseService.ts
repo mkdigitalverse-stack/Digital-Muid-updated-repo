@@ -2,6 +2,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { Course, CourseModule, CourseLesson, CourseLessonMedia, CourseEnrollment, PlaybackAuthorization } from '../types';
 import { slugify } from './articleService';
 import { INITIAL_COURSES } from '../data/initialData';
+import { normalizeThumbnailUrl } from '../utils/thumbnailUtils';
 
 /**
  * Normalizes course curriculum from JSONB or array payload into structured CourseModule objects.
@@ -131,9 +132,9 @@ export const mapDbRowToCourse = (row: any): Course => {
     offerExpiresAt: rawOfferExpires ? String(rawOfferExpires) : undefined,
     offer_expires_at: rawOfferExpires ? String(rawOfferExpires) : undefined,
     currency: String(row.currency || 'INR'),
-    thumbnail: String(row.thumbnail || 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=800&q=80'),
-    coverImage: row.cover_image || row.coverImage || undefined,
-    cover_image: row.cover_image || row.coverImage || undefined,
+    thumbnail: normalizeThumbnailUrl(row.thumbnail || row.thumbnailUrl || row.coverImage, 'course'),
+    coverImage: row.cover_image || row.coverImage ? normalizeThumbnailUrl(row.cover_image || row.coverImage, 'course') : undefined,
+    cover_image: row.cover_image || row.coverImage ? normalizeThumbnailUrl(row.cover_image || row.coverImage, 'course') : undefined,
     instructor: String(row.instructor || 'Digital Muid'),
     instructorTitle: row.instructor_title || row.instructorTitle || undefined,
     instructor_title: row.instructor_title || row.instructorTitle || undefined,

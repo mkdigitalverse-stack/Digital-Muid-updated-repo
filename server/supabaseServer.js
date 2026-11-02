@@ -77,6 +77,10 @@ export function isSupabaseServerConfigured() {
  * @returns {import('@supabase/supabase-js').SupabaseClient|null}
  */
 export function getSupabaseServerClient() {
+  if (supabaseServerInstance) {
+    return supabaseServerInstance;
+  }
+
   const url = sanitizeSupabaseUrl(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL);
   const serviceRoleKey = sanitizeSupabaseKey(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -84,14 +88,12 @@ export function getSupabaseServerClient() {
     return null;
   }
 
-  if (!supabaseServerInstance) {
-    supabaseServerInstance = createClient(url, serviceRoleKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    });
-  }
+  supabaseServerInstance = createClient(url, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
 
   return supabaseServerInstance;
 }

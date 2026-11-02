@@ -5,6 +5,7 @@ import {
   checkIsAdmin,
   isValidUUID
 } from "./supabaseServer.js";
+import { sendWebEnquiryConfirmationEmail } from "./mailerService.js";
 
 const router = express.Router();
 
@@ -178,6 +179,17 @@ router.post("/submit", async (req, res) => {
         error: "Failed to record your enquiry in the database. Please try again."
       });
     }
+
+    // Asynchronously dispatch confirmation email from DigitalMuid Support (non-blocking)
+    sendWebEnquiryConfirmationEmail({
+      to: cleanEmail,
+      customerName: cleanName,
+      projectType: cleanProjectType || "Website & Digital Platform",
+      businessName: cleanBusiness,
+      referenceId
+    }).catch((emailErr) => {
+      console.warn("[Web Enquiry] Background confirmation email notice:", emailErr?.message || emailErr);
+    });
 
     return res.json({
       success: true,

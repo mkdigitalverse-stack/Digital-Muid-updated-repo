@@ -28,6 +28,7 @@ import { courseService, normalizeCourseCurriculum } from '../services/courseServ
 import { paymentService } from '../services/paymentService';
 import { loadRazorpayCheckoutScript, getClientRazorpayKeyId } from '../lib/razorpay';
 import { isSupabaseConfigured } from '../lib/supabase';
+import { SafeImage } from '../components/SafeImage';
 
 interface CourseDetailPageProps {
   slug: string;
@@ -491,19 +492,13 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({ slug, naviga
 
         {/* Right Sticky Enrollment Card */}
         <div className="lg:col-span-5 p-7 rounded-3xl bg-white border border-slate-200 shadow-lg space-y-6">
-          <div className="aspect-[16/9] w-full rounded-2xl overflow-hidden bg-slate-100">
-            {thumbnail ? (
-              <img
-                src={thumbnail}
-                alt={course.title}
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-slate-400">
-                <GraduationCap className="w-12 h-12" />
-              </div>
-            )}
+          <div className="aspect-[16/9] w-full rounded-2xl overflow-hidden bg-slate-100 flex items-center justify-center">
+            <SafeImage
+              src={thumbnail}
+              alt={course.title}
+              fallbackType="course"
+              className="w-full h-full object-cover"
+            />
           </div>
 
           <div className="space-y-1">

@@ -2,6 +2,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { Resource, ResourcePurchase } from '../types';
 import { slugify } from './articleService';
 import { generateResourcePdfBlob } from '../utils/pdfGenerator';
+import { normalizeThumbnailUrl } from '../utils/thumbnailUtils';
 
 /**
  * Transforms a raw row from public.resource_purchases into a domain ResourcePurchase object.
@@ -109,7 +110,8 @@ export const mapDbRowToResource = (row: any): Resource => {
   const rawExternalUrl = row.external_url || row.externalUrl || undefined;
   const fileUrl = isPaid && !allowExplicitUrls ? undefined : rawFileUrl;
   const externalUrl = isPaid && !allowExplicitUrls ? undefined : rawExternalUrl;
-  const thumbnailUrl = row.thumbnail_url || row.thumbnailUrl || row.coverImage || undefined;
+  const rawThumbnailUrl = row.thumbnail_url || row.thumbnailUrl || row.coverImage || undefined;
+  const thumbnailUrl = rawThumbnailUrl ? normalizeThumbnailUrl(rawThumbnailUrl, 'resource') : undefined;
   const title = String(row.title || row.name || '');
   const resourceType = String(row.resource_type || row.resourceType || row.type || 'Guide');
 

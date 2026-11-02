@@ -1954,53 +1954,105 @@ async function handleBundleFilesRequest(req, res) {
 
     let isAuthorized = false;
 
-    // Check paymentId against database
-    if (cleanPaymentId) {
+    // Strict dual-identifier guest payment verification: require BOTH paymentId AND orderId
+    if (cleanPaymentId && cleanOrderId) {
+      // 1. Check payments table with dual identifiers and integrity constraints
       const { data: pRecord } = await supabaseServer
         .from("payments")
-        .select("id, status, item_id, item_type")
+        .select("id, status, item_id, item_type, razorpay_payment_id, razorpay_order_id, currency, amount")
         .eq("razorpay_payment_id", cleanPaymentId)
+        .eq("razorpay_order_id", cleanOrderId)
         .eq("item_id", BUNDLE_RESOURCE_ID)
         .eq("item_type", "resource")
         .eq("status", "captured")
+        .eq("currency", "INR")
+        .gt("amount", 0)
         .maybeSingle();
 
-      if (pRecord) {
+      if (
+        pRecord &&
+        pRecord.razorpay_payment_id === cleanPaymentId &&
+        pRecord.razorpay_order_id === cleanOrderId &&
+        pRecord.item_id === BUNDLE_RESOURCE_ID &&
+        pRecord.item_type === "resource" &&
+        pRecord.status === "captured" &&
+        String(pRecord.currency || "").toUpperCase() === "INR" &&
+        Number(pRecord.amount) > 0
+      ) {
         isAuthorized = true;
       }
 
+      // 2. Check resource_purchases table with dual identifiers and integrity constraints
       if (!isAuthorized) {
         const { data: purRecord } = await supabaseServer
           .from("resource_purchases")
-          .select("id, status, resource_id")
+          .select("id, status, resource_id, razorpay_payment_id, razorpay_order_id, currency, amount")
           .eq("razorpay_payment_id", cleanPaymentId)
+          .eq("razorpay_order_id", cleanOrderId)
           .eq("resource_id", BUNDLE_RESOURCE_ID)
           .eq("status", "active")
+          .eq("currency", "INR")
+          .gt("amount", 0)
           .maybeSingle();
 
-        if (purRecord) {
+        if (
+          purRecord &&
+          purRecord.razorpay_payment_id === cleanPaymentId &&
+          purRecord.razorpay_order_id === cleanOrderId &&
+          purRecord.resource_id === BUNDLE_RESOURCE_ID &&
+          purRecord.status === "active" &&
+          String(purRecord.currency || "").toUpperCase() === "INR" &&
+          Number(purRecord.amount) > 0
+        ) {
           isAuthorized = true;
         }
       }
 
-      // Check with Razorpay gateway directly if not in DB yet
-      if (!isAuthorized && cleanPaymentId.startsWith("pay_")) {
+      // 3. Fallback: Query Razorpay gateway directly if webhook fulfillment is delayed
+      if (!isAuthorized && cleanPaymentId.startsWith("pay_") && cleanOrderId.startsWith("order_")) {
         const razorpay = getRazorpayClient();
         if (razorpay) {
           try {
-            const rzpPayment = await razorpay.payments.fetch(cleanPaymentId);
-            if (rzpPayment && rzpPayment.status === "captured") {
-              const matchesAmount = Number(rzpPayment.amount) === 29900;
-              const matchesCurrency = (rzpPayment.currency || "").toUpperCase() === "INR";
-              const matchesOrder = !cleanOrderId || rzpPayment.order_id === cleanOrderId;
-              const paymentNoteResId = rzpPayment.notes?.resourceId || rzpPayment.notes?.resource_id;
-              const matchesNote = !paymentNoteResId || paymentNoteResId === BUNDLE_RESOURCE_ID || paymentNoteResId === BUNDLE_SLUG;
+            const [rzpPayment, rzpOrder] = await Promise.all([
+              razorpay.payments.fetch(cleanPaymentId),
+              razorpay.orders.fetch(cleanOrderId)
+            ]);
 
-              if (matchesAmount && matchesCurrency && matchesOrder && matchesNote) {
+            if (rzpPayment && rzpOrder) {
+              const paymentCaptured = rzpPayment.status === "captured";
+              const paymentOrderMatches = rzpPayment.order_id === cleanOrderId;
+              const orderIdMatches = rzpOrder.id === cleanOrderId;
+              const paymentCurrencyMatches = (rzpPayment.currency || "").toUpperCase() === "INR";
+              const orderCurrencyMatches = (rzpOrder.currency || "").toUpperCase() === "INR";
+              const positivePaymentAmount = Number(rzpPayment.amount) > 0;
+              const amountsMatch = Number(rzpPayment.amount) === Number(rzpOrder.amount);
+
+              const orderNotes = rzpOrder.notes || {};
+              const paymentNotes = rzpPayment.notes || {};
+              const noteResourceId =
+                orderNotes.resourceId ||
+                orderNotes.resource_id ||
+                paymentNotes.resourceId ||
+                paymentNotes.resource_id;
+              const matchesBundleIdentity =
+                noteResourceId === BUNDLE_RESOURCE_ID || noteResourceId === BUNDLE_SLUG;
+
+              if (
+                paymentCaptured &&
+                paymentOrderMatches &&
+                orderIdMatches &&
+                paymentCurrencyMatches &&
+                orderCurrencyMatches &&
+                positivePaymentAmount &&
+                amountsMatch &&
+                matchesBundleIdentity
+              ) {
                 isAuthorized = true;
               }
             }
-          } catch {}
+          } catch (gatewayErr) {
+            console.error("[Bundle Files] Gateway fallback verification failed:", gatewayErr?.message || gatewayErr);
+          }
         }
       }
     }
