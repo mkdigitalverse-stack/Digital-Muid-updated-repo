@@ -1740,7 +1740,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { success: false, error: errorMsg };
       }
 
-      const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/admin` : undefined;
+      const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/login` : undefined;
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo: redirectUrl
       });
