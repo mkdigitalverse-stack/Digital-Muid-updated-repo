@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 
 interface AuthPageProps {
-  initialMode?: 'login' | 'register';
+  initialMode?: 'login' | 'register' | 'reset';
   navigate: (path: string) => void;
 }
 
@@ -35,10 +35,18 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navig
     studentRegister,
     studentLogout,
     requestPasswordReset,
+    updatePassword,
+    isPasswordRecovery,
+    clearPasswordRecovery,
     adminLogout
   } = useApp();
 
-  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>(initialMode);
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot' | 'reset'>(() => {
+    if (typeof window !== 'undefined' && window.location.hash.includes('type=recovery')) {
+      return 'reset';
+    }
+    return initialMode;
+  });
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -49,15 +57,17 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navig
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Sync mode if initialMode prop changes
+  // Sync mode if initialMode prop changes or if recovery event triggers
   useEffect(() => {
-    if (initialMode) {
+    if (isPasswordRecovery || (typeof window !== 'undefined' && window.location.hash.includes('type=recovery')) || initialMode === 'reset') {
+      setMode('reset');
+    } else if (initialMode) {
       setMode(initialMode);
     }
-  }, [initialMode]);
+  }, [initialMode, isPasswordRecovery]);
 
   // Clear messages on mode switch
-  const handleSwitchMode = (targetMode: 'login' | 'register' | 'forgot') => {
+  const handleSwitchMode = (targetMode: 'login' | 'register' | 'forgot' | 'reset') => {
     setMode(targetMode);
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -67,6 +77,40 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navig
     e.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
+
+    // Dedicated Password Reset Workflow (Triggered via Recovery Link)
+    if (mode === 'reset') {
+      if (!password) {
+        setErrorMessage('Please enter your new password.');
+        return;
+      }
+      if (password.length < 8) {
+        setErrorMessage('Password must be at least 8 characters long for security.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setErrorMessage('Passwords do not match. Please verify and re-type.');
+        return;
+      }
+
+      setIsSubmitting(true);
+      try {
+        const res = await updatePassword(password);
+        if (res.success) {
+          setSuccessMessage('Your password has been changed successfully! You may now proceed.');
+          setPassword('');
+          setConfirmPassword('');
+          clearPasswordRecovery();
+        } else {
+          setErrorMessage(res.error || 'Failed to update password. Your recovery link may be invalid or expired.');
+        }
+      } catch (err: any) {
+        setErrorMessage(err?.message || 'An unexpected error occurred while resetting your password.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
 
     // Validation
     const cleanEmail = email.trim().toLowerCase();
@@ -179,7 +223,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navig
   }
 
   // 2. Authenticated State View (Student or Admin Session Active)
-  if (currentUser) {
+  // Only display the logged-in account overview when NOT in password recovery or reset mode
+  if (currentUser && !isPasswordRecovery && mode !== 'reset') {
     const displayName = userProfile?.fullName || currentUser.user_metadata?.full_name || currentUser.user_metadata?.name || 'Member';
     const initials = displayName
       .split(' ')
@@ -347,22 +392,38 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navig
         {/* Brand Header */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#0F172A] text-white mx-auto shadow-md border border-slate-800">
-            <GraduationCap className="w-6 h-6 text-[#FF6B00]" />
+            {mode === 'reset' ? (
+              <Lock className="w-6 h-6 text-[#FF6B00]" />
+            ) : (
+              <GraduationCap className="w-6 h-6 text-[#FF6B00]" />
+            )}
           </div>
           <h1 className="text-2xl font-bold text-slate-900 font-display tracking-tight">
             {mode === 'login' && 'Student & Member Sign In'}
             {mode === 'register' && 'Create Student Account'}
             {mode === 'forgot' && 'Reset Password'}
+            {mode === 'reset' && 'Set New Password'}
           </h1>
           <p className="text-xs text-slate-500 font-medium">
             {mode === 'login' && 'Access your enrolled courses and verified learning assets.'}
             {mode === 'register' && 'Join Digital Muid to unlock high-leverage frameworks and courses.'}
             {mode === 'forgot' && 'Enter your email to receive password recovery instructions.'}
+            {mode === 'reset' && 'Choose a secure password for your account (minimum 8 characters).'}
           </p>
         </div>
 
+        {/* Account indicator for recovery session */}
+        {mode === 'reset' && currentUser?.email && (
+          <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl flex items-center justify-between text-xs">
+            <span className="text-slate-500 font-medium">Account:</span>
+            <span className="font-mono text-slate-800 font-semibold truncate max-w-[220px]">
+              {currentUser.email}
+            </span>
+          </div>
+        )}
+
         {/* Tab Switcher (Login vs Register) */}
-        {mode !== 'forgot' && (
+        {mode !== 'forgot' && mode !== 'reset' && (
           <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-2xl border border-slate-200/60">
             <button
               type="button"
@@ -398,133 +459,161 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navig
         )}
 
         {successMessage && (
-          <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-start gap-3 text-emerald-800 text-xs animate-in fade-in">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-            <div className="leading-relaxed font-medium">{successMessage}</div>
+          <div className="space-y-3 animate-in fade-in">
+            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-start gap-3 text-emerald-800 text-xs">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="leading-relaxed font-medium">{successMessage}</div>
+            </div>
+            {mode === 'reset' && (
+              <button
+                type="button"
+                onClick={() => navigate('/dashboard')}
+                className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+              >
+                <LayoutDashboard className="w-4 h-4" />
+                <span>Continue to Dashboard</span>
+              </button>
+            )}
           </div>
         )}
 
         {/* Form */}
-        <form onSubmit={handleAuthSubmit} className="space-y-4">
-          {mode === 'register' && (
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 font-interface">
-                Full Name
-              </label>
-              <div className="relative">
-                <UserIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  required
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="e.g. Aditi Sharma"
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF6B00] focus:border-transparent transition-all"
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 font-interface">
-              Email Address
-            </label>
-            <div className="relative">
-              <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@company.com"
-                className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF6B00] focus:border-transparent transition-all"
-              />
-            </div>
-          </div>
-
-          {mode !== 'forgot' && (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
+        {(!successMessage || mode !== 'reset') && (
+          <form onSubmit={handleAuthSubmit} className="space-y-4">
+            {mode === 'register' && (
+              <div className="space-y-1.5">
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 font-interface">
-                  Password
+                  Full Name
                 </label>
-                {mode === 'login' && (
+                <div className="relative">
+                  <UserIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="e.g. Aditi Sharma"
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF6B00] focus:border-transparent transition-all"
+                  />
+                </div>
+              </div>
+            )}
+
+            {mode !== 'reset' && (
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 font-interface">
+                  Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@company.com"
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF6B00] focus:border-transparent transition-all"
+                  />
+                </div>
+              </div>
+            )}
+
+            {mode !== 'forgot' && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 font-interface">
+                    {mode === 'reset' ? 'New Password' : 'Password'}
+                  </label>
+                  {mode === 'login' && (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchMode('forgot')}
+                      className="text-[11px] text-[#FF6B00] hover:underline font-medium cursor-pointer"
+                    >
+                      Forgot Password?
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder={mode === 'reset' ? 'Minimum 8 characters' : '••••••••'}
+                    className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF6B00] focus:border-transparent transition-all"
+                  />
                   <button
                     type="button"
-                    onClick={() => handleSwitchMode('forgot')}
-                    className="text-[11px] text-[#FF6B00] hover:underline font-medium cursor-pointer"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
                   >
-                    Forgot Password?
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
-                )}
+                </div>
               </div>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF6B00] focus:border-transparent transition-all"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {mode === 'register' && (
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 font-interface">
-                Confirm Password
-              </label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF6B00] focus:border-transparent transition-all"
-                />
-              </div>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full py-3.5 px-6 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-slate-900/10 active:scale-[0.99] disabled:opacity-60"
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-[#FF6B00]" />
-                <span>Processing Request...</span>
-              </>
-            ) : (
-              <>
-                <span>
-                  {mode === 'login' && 'Sign In to Student Account'}
-                  {mode === 'register' && 'Complete Student Registration'}
-                  {mode === 'forgot' && 'Send Password Reset Link'}
-                </span>
-                <ArrowRight className="w-4 h-4 text-[#FF6B00]" />
-              </>
             )}
-          </button>
-        </form>
+
+            {(mode === 'register' || mode === 'reset') && (
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 font-interface">
+                  {mode === 'reset' ? 'Confirm New Password' : 'Confirm Password'}
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder={mode === 'reset' ? 'Re-enter new password' : '••••••••'}
+                    className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#FF6B00] focus:border-transparent transition-all"
+                  />
+                </div>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full py-3.5 px-6 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl text-xs font-bold uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-slate-900/10 active:scale-[0.99] disabled:opacity-60"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-[#FF6B00]" />
+                  <span>Processing Request...</span>
+                </>
+              ) : (
+                <>
+                  <span>
+                    {mode === 'login' && 'Sign In to Student Account'}
+                    {mode === 'register' && 'Complete Student Registration'}
+                    {mode === 'forgot' && 'Send Password Reset Link'}
+                    {mode === 'reset' && 'Update & Save New Password'}
+                  </span>
+                  <ArrowRight className="w-4 h-4 text-[#FF6B00]" />
+                </>
+              )}
+            </button>
+          </form>
+        )}
 
         {/* Footer info / Back button */}
         <div className="pt-2 text-center text-xs text-slate-500">
-          {mode === 'forgot' ? (
+          {mode === 'reset' ? (
+            <button
+              type="button"
+              onClick={() => {
+                clearPasswordRecovery();
+                handleSwitchMode('login');
+              }}
+              className="text-[#FF6B00] hover:underline font-bold cursor-pointer inline-flex items-center gap-1"
+            >
+              ← Back to Sign In
+            </button>
+          ) : mode === 'forgot' ? (
             <button
               type="button"
               onClick={() => handleSwitchMode('login')}

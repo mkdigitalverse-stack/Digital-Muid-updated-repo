@@ -237,6 +237,8 @@ interface AppContextType {
   refreshUserProfile: () => Promise<void>;
   updateStudentProfile: (updates: Partial<UserProfile>) => Promise<{ success: boolean; error?: string }>;
   updatePassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  isPasswordRecovery: boolean;
+  clearPasswordRecovery: () => void;
 
   // Student Course Enrollments & Learning Progress (Phase 2A)
   studentEnrollments: StudentEnrollmentWithCourse[];
@@ -432,6 +434,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [adminSession, setAdminSession] = useState<Session | null>(null);
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(false);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash || '';
+      return hash.includes('type=recovery');
+    }
+    return false;
+  });
+
+  const clearPasswordRecovery = useCallback(() => {
+    setIsPasswordRecovery(false);
+    if (typeof window !== 'undefined' && window.location.hash.includes('type=recovery')) {
+      try {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      } catch {}
+    }
+  }, []);
 
   // Student Course Enrollments & Learning Progress (Phase 2A)
   const [studentEnrollments, setStudentEnrollments] = useState<StudentEnrollmentWithCourse[]>([]);
@@ -1106,8 +1124,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     // 3. Listen for auth state changes across tabs/sessions
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return;
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsPasswordRecovery(true);
+      }
       await handleSessionResolution(session);
       if (isMounted) setIsAuthLoading(false);
     });
@@ -1607,6 +1628,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const res = await authService.updatePassword(newPassword);
       if (res.success) {
+        clearPasswordRecovery();
         notify('Password updated successfully.', 'success');
         return { success: true };
       }
@@ -3904,6 +3926,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refreshUserProfile,
         updateStudentProfile,
         updatePassword,
+        isPasswordRecovery,
+        clearPasswordRecovery,
         studentEnrollments,
         isEnrollmentsLoading,
         enrollmentsError,

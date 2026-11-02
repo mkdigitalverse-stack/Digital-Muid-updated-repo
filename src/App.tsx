@@ -260,8 +260,8 @@ const MainApp: React.FC = () => {
     if (path === '/terms' || path === '/terms-of-service' || path === '/terms-and-conditions') {
       return <TermsPage navigate={navigate} />;
     }
-    if (path === '/login' || path === '/signin') {
-      return <AuthPage initialMode="login" navigate={navigate} />;
+    if (path === '/login' || path === '/signin' || path === '/reset-password' || path === '/reset') {
+      return <AuthPage initialMode={path === '/reset-password' || path === '/reset' ? 'reset' : 'login'} navigate={navigate} />;
     }
     if (path === '/register' || path === '/signup') {
       return <AuthPage initialMode="register" navigate={navigate} />;
