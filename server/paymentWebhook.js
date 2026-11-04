@@ -261,13 +261,18 @@ export async function handleRazorpayWebhook(req, res) {
             paymentId &&
             orderId
           ) {
+            const studentEmail = String(allNotes.customerEmail || paymentEntity?.email || "").trim() || null;
+            const studentName = String(allNotes.customerName || "").trim() || null;
+
             fulfillmentOutcome = await fulfillCourseEnrollment({
               userId,
               courseId,
               amount: amountInRupees,
               currency,
               orderId,
-              paymentId
+              paymentId,
+              studentEmail,
+              studentName
             });
 
             console.log(

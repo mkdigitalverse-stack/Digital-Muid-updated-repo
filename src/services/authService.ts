@@ -99,6 +99,25 @@ export const authService = {
           fullName: cleanName
         });
 
+        // Asynchronously dispatch official welcome email via server mailer
+        try {
+          const accessToken = data.session?.access_token;
+          fetch('/api/auth/send-welcome', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+            },
+            body: JSON.stringify({
+              userId: data.user.id,
+              email: cleanEmail,
+              fullName: cleanName
+            })
+          }).catch((mailErr) => {
+            console.warn('[Auth Service] Welcome email dispatch notice:', mailErr?.message || mailErr);
+          });
+        } catch {}
+
         const isAdmin = await this.checkIsAdmin(data.user);
 
         return {

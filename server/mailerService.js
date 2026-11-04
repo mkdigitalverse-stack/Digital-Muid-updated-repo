@@ -73,7 +73,7 @@ function getResendClient() {
  * @param {string} templateType
  * @returns {Promise<boolean>}
  */
-async function hasAlreadySent(paymentId, templateType) {
+export async function hasAlreadySent(paymentId, templateType) {
   if (!paymentId) return false;
 
   const cacheKey = `${paymentId}_${templateType}`;
@@ -1191,11 +1191,27 @@ export async function sendWelcomeRegistrationEmail({
     return { success: false, error: "Invalid recipient email address." };
   }
 
+  const trackingKey = `welcome_${recipient.toLowerCase()}`;
+
+  // Idempotency check: prevent duplicate welcome emails
+  if (await hasAlreadySent(trackingKey, templateType)) {
+    console.log(`[Mailer Service] Deduplicated: Welcome email already sent to ${recipient}.`);
+    return { success: true, skipped: true, reason: "ALREADY_SENT" };
+  }
+
   const resend = getResendClient();
   if (!resend) {
     console.warn(
       `[Mailer Service] RESEND_API_KEY is not configured or gated. Welcome email skipped for ${recipient}.`
     );
+    await recordEmailLog({
+      paymentId: trackingKey,
+      recipientEmail: recipient,
+      templateType,
+      status: "skipped",
+      errorMessage: "RESEND_API_KEY is not configured or gated on the server.",
+      metadata: { customerName }
+    });
     return { success: true, skipped: true, reason: "PROVIDER_NOT_CONFIGURED" };
   }
 
@@ -1262,12 +1278,38 @@ export async function sendWelcomeRegistrationEmail({
 
     if (error) {
       console.error("[Mailer Service] Resend rejected welcome email:", error);
+      await recordEmailLog({
+        paymentId: trackingKey,
+        recipientEmail: recipient,
+        templateType,
+        status: "failed",
+        errorMessage: error.message || JSON.stringify(error),
+        metadata: { customerName }
+      });
       return { success: false, error: error.message };
     }
+
+    console.log(`[Mailer Service] Welcome registration email dispatched to ${recipient} (id: ${data?.id})`);
+    await recordEmailLog({
+      paymentId: trackingKey,
+      recipientEmail: recipient,
+      templateType,
+      status: "sent",
+      providerMessageId: data?.id,
+      metadata: { customerName }
+    });
 
     return { success: true, messageId: data?.id };
   } catch (err) {
     console.error("[Mailer Service] Unexpected exception sending welcome email:", err);
+    await recordEmailLog({
+      paymentId: trackingKey,
+      recipientEmail: recipient,
+      templateType,
+      status: "failed",
+      errorMessage: err?.message || "Unexpected exception during send.",
+      metadata: { customerName }
+    });
     return { success: false, error: err?.message };
   }
 }

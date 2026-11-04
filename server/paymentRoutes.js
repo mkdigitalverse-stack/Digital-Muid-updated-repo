@@ -20,6 +20,7 @@ import {
   fulfillConsultationPayment,
   fulfillResourcePurchase
 } from "./paymentFulfillment.js";
+import { generateAuthoritativeInvoicePdf } from "./invoiceService.js";
 
 // ==============================================================================
 // AUTHORITATIVE PAID RESOURCES CATALOG & PRICING
@@ -234,7 +235,9 @@ router.post("/create-course-order", async (req, res) => {
       notes: {
         courseId: course.id,
         userId: user.id,
-        courseTitle: (course.title || "Course Masterclass").slice(0, 100)
+        courseTitle: (course.title || "Course Masterclass").slice(0, 100),
+        customerEmail: (user.email || "").slice(0, 100),
+        customerName: (user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "Student Member").slice(0, 100)
       }
     };
 
@@ -405,6 +408,9 @@ router.post("/verify-course-payment", async (req, res) => {
 
     const { effectivePrice, currency } = calculateAuthoritativeCoursePrice(course);
 
+    const studentEmail = (user.email || "").trim() || null;
+    const studentName = (user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "Student Member").trim();
+
     // 6. Execute atomic server-side fulfillment RPC (Phase 2K-E)
     const fulfillment = await fulfillCourseEnrollment({
       userId: user.id,
@@ -412,7 +418,9 @@ router.post("/verify-course-payment", async (req, res) => {
       amount: effectivePrice,
       currency,
       orderId: razorpay_order_id.trim(),
-      paymentId: razorpay_payment_id.trim()
+      paymentId: razorpay_payment_id.trim(),
+      studentEmail,
+      studentName
     });
 
     if (fulfillment.fulfilled) {
@@ -2248,6 +2256,166 @@ router.post("/admin/update-consultation-pricing", async (req, res) => {
   } catch (err) {
     console.error("[Admin Consultation Pricing] Unexpected error:", err);
     return res.status(500).json({ success: false, error: "Internal server error updating consultation product." });
+  }
+});
+
+/**
+ * GET /api/payments/invoice/:paymentId
+ * Generates and streams an authoritative PDF tax invoice/receipt for a verified payment.
+ * Security & Authorization:
+ * - Requires authentication via Bearer token (verifySupabaseToken).
+ * - Verified owner (matching user_id or email) or verified Administrator can access.
+ * - Non-owners receive 403 Forbidden.
+ * - Unauthenticated requests receive 401 Unauthorized.
+ */
+router.get("/invoice/:paymentId", async (req, res) => {
+  try {
+    const rawPaymentId = String(req.params.paymentId || "").trim();
+    if (!rawPaymentId) {
+      return res.status(400).json({ success: false, error: "Payment reference is required." });
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ success: false, error: "Authentication required to download tax invoice." });
+    }
+
+    const { user, error: authError } = await verifySupabaseToken(authHeader);
+    if (authError || !user) {
+      return res.status(401).json({ success: false, error: "Invalid or expired session. Please sign in again." });
+    }
+
+    const isAdmin = checkIsAdmin(user);
+    const supabaseServer = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    if (!supabaseServer) {
+      return res.status(503).json({ success: false, error: "Database service is currently unavailable." });
+    }
+
+    // 1. Locate record across payments, bookings, and resource_purchases
+    let paymentRecord = null;
+    let bookingRecord = null;
+    let resourceRecord = null;
+
+    // A. Check payments table
+    try {
+      const { data } = await supabaseServer
+        .from("payments")
+        .select("*")
+        .or(`razorpay_payment_id.eq.${rawPaymentId},id.eq.${rawPaymentId}`)
+        .maybeSingle();
+      if (data) paymentRecord = data;
+    } catch {}
+
+    // B. Check bookings table
+    try {
+      const { data } = await supabaseServer
+        .from("bookings")
+        .select("*")
+        .or(`payment_id.eq.${rawPaymentId},razorpay_order_id.eq.${rawPaymentId},id.eq.${rawPaymentId}`)
+        .maybeSingle();
+      if (data) bookingRecord = data;
+    } catch {}
+
+    // C. Check resource_purchases table
+    try {
+      const { data } = await supabaseServer
+        .from("resource_purchases")
+        .select("*")
+        .or(`razorpay_payment_id.eq.${rawPaymentId},id.eq.${rawPaymentId}`)
+        .maybeSingle();
+      if (data) resourceRecord = data;
+    } catch {}
+
+    // If not found in database, check gateway if Razorpay is configured
+    let rzpPayment = null;
+    if (!paymentRecord && !bookingRecord && !resourceRecord && rawPaymentId.startsWith("pay_")) {
+      const razorpay = getRazorpayClient();
+      if (razorpay) {
+        try {
+          rzpPayment = await razorpay.payments.fetch(rawPaymentId);
+        } catch {}
+      }
+    }
+
+    if (!paymentRecord && !bookingRecord && !resourceRecord && !rzpPayment) {
+      return res.status(404).json({ success: false, error: "Invoice transaction not found." });
+    }
+
+    // 2. Authorization check: Owner or Admin
+    const userEmail = (user.email || "").toLowerCase().trim();
+    const userId = user.id;
+
+    let isAuthorized = isAdmin;
+
+    if (!isAuthorized) {
+      // Check user_id matching
+      if (paymentRecord?.user_id && paymentRecord.user_id === userId) isAuthorized = true;
+      if (bookingRecord?.user_id && bookingRecord.user_id === userId) isAuthorized = true;
+      if (resourceRecord?.user_id && resourceRecord.user_id === userId) isAuthorized = true;
+
+      // Check email matching
+      if (userEmail) {
+        if (bookingRecord?.customer_email && bookingRecord.customer_email.toLowerCase().trim() === userEmail) {
+          isAuthorized = true;
+        }
+        if (resourceRecord?.customer_email && resourceRecord.customer_email.toLowerCase().trim() === userEmail) {
+          isAuthorized = true;
+        }
+        if (rzpPayment?.email && rzpPayment.email.toLowerCase().trim() === userEmail) {
+          isAuthorized = true;
+        }
+        if (rzpPayment?.notes?.userId && rzpPayment.notes.userId === userId) {
+          isAuthorized = true;
+        }
+      }
+    }
+
+    if (!isAuthorized) {
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: You are not authorized to access this invoice."
+      });
+    }
+
+    // 3. Assemble invoice details
+    const cleanPayId = paymentRecord?.razorpay_payment_id || bookingRecord?.payment_id || resourceRecord?.razorpay_payment_id || (rzpPayment?.id || rawPaymentId);
+    const cleanOrderId = paymentRecord?.razorpay_order_id || bookingRecord?.razorpay_order_id || resourceRecord?.razorpay_order_id || (rzpPayment?.order_id || "N/A");
+    const customerName = bookingRecord?.customer_name || user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "Valued Member";
+    const customerEmail = bookingRecord?.customer_email || resourceRecord?.customer_email || rzpPayment?.email || user.email || "";
+    const customerPhone = bookingRecord?.customer_phone || rzpPayment?.contact || "";
+    const itemTitle = paymentRecord?.item_title || (bookingRecord ? "Business Growth & Scaling Consultation" : (resourceRecord ? "Digital Resource Toolkit / Asset" : "Course Masterclass"));
+    const itemType = paymentRecord?.item_type || (bookingRecord ? "consultation" : (resourceRecord ? "resource" : "course"));
+    const amount = Number(paymentRecord?.amount || bookingRecord?.total_amount || resourceRecord?.amount || (rzpPayment?.amount ? rzpPayment.amount / 100 : 0));
+    const currency = (paymentRecord?.currency || bookingRecord?.currency || resourceRecord?.currency || rzpPayment?.currency || "INR").toUpperCase();
+    const baseAmount = bookingRecord?.base_amount ? Number(bookingRecord.base_amount) : undefined;
+    const gstAmount = bookingRecord?.gst_amount ? Number(bookingRecord.gst_amount) : undefined;
+    const paymentDate = paymentRecord?.created_at || bookingRecord?.created_at || resourceRecord?.created_at || new Date().toISOString();
+
+    const pdfBuffer = generateAuthoritativeInvoicePdf({
+      paymentId: cleanPayId,
+      orderId: cleanOrderId,
+      customerName,
+      customerEmail,
+      customerPhone,
+      itemTitle,
+      itemType,
+      amount,
+      currency,
+      baseAmount,
+      gstAmount,
+      paymentDate
+    });
+
+    const fileSuffix = cleanPayId.replace(/[^a-zA-Z0-9]/g, "").slice(-8) || "receipt";
+    const filename = `DigitalMUID-Invoice-${fileSuffix}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.end(pdfBuffer);
+  } catch (err) {
+    console.error("[Invoice Endpoint] Error generating invoice:", err);
+    return res.status(500).json({ success: false, error: "Internal server error generating tax invoice." });
   }
 });
 

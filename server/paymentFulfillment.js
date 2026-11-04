@@ -3,7 +3,8 @@ import { getSupabaseServerClient, isValidUUID } from "./supabaseServer.js";
 import {
   sendCourseAccessEmail,
   sendConsultationConfirmationEmail,
-  sendResourceDeliveryEmail
+  sendResourceDeliveryEmail,
+  hasAlreadySent
 } from "./mailerService.js";
 import { assertSideEffectAllowed } from "./developmentSafetyGate.js";
 
@@ -62,7 +63,9 @@ export async function fulfillCourseEnrollment({
   amount,
   currency,
   orderId,
-  paymentId
+  paymentId,
+  studentEmail: directStudentEmail = null,
+  studentName: directStudentName = null
 }) {
   try {
     // 0. Development safety check: prevent database mutations in non-production targeting prod
@@ -192,10 +195,21 @@ export async function fulfillCourseEnrollment({
     // Asynchronously dispatch course access and authoritative PDF invoice email
     (async () => {
       try {
-        let studentEmail = null;
-        let studentName = "Student Member";
+        const cleanPaymentId = paymentId.trim();
+        // Check if already sent to prevent duplicate email dispatches
+        if (await hasAlreadySent(cleanPaymentId, "course_access")) {
+          console.log(`[Payment Fulfillment] Course confirmation email already sent for payment ${cleanPaymentId}, skipping.`);
+          return;
+        }
 
-        if (supabaseServer) {
+        let studentEmail = directStudentEmail && typeof directStudentEmail === "string" && directStudentEmail.includes("@")
+          ? directStudentEmail.trim().toLowerCase()
+          : null;
+        let studentName = directStudentName && typeof directStudentName === "string" && directStudentName.trim()
+          ? directStudentName.trim()
+          : "Student Member";
+
+        if (!studentEmail && supabaseServer) {
           const [userRes, profileRes] = await Promise.allSettled([
             supabaseServer.auth.admin.getUserById(userId),
             supabaseServer.from("profiles").select("full_name").eq("id", userId).maybeSingle()
@@ -204,10 +218,12 @@ export async function fulfillCourseEnrollment({
           if (userRes.status === "fulfilled" && userRes.value?.data?.user?.email) {
             studentEmail = userRes.value.data.user.email;
           }
-          if (profileRes.status === "fulfilled" && profileRes.value?.data?.full_name) {
-            studentName = profileRes.value.data.full_name;
-          } else if (userRes.status === "fulfilled" && userRes.value?.data?.user?.user_metadata?.full_name) {
-            studentName = userRes.value.data.user.user_metadata.full_name;
+          if (studentName === "Student Member") {
+            if (profileRes.status === "fulfilled" && profileRes.value?.data?.full_name) {
+              studentName = profileRes.value.data.full_name;
+            } else if (userRes.status === "fulfilled" && userRes.value?.data?.user?.user_metadata?.full_name) {
+              studentName = userRes.value.data.user.user_metadata.full_name;
+            }
           }
         }
 
@@ -220,8 +236,10 @@ export async function fulfillCourseEnrollment({
             amount: Number(data.amount) || amount,
             currency: data.currency || currency,
             orderId: orderId.trim(),
-            paymentId: paymentId.trim()
+            paymentId: cleanPaymentId
           });
+        } else {
+          console.warn(`[Payment Fulfillment] Could not resolve student email for user ${userId}; course access email skipped.`);
         }
       } catch (mailErr) {
         console.warn("[Payment Fulfillment] Notice dispatching course access email:", mailErr?.message || mailErr);
@@ -419,33 +437,36 @@ export async function fulfillConsultationPayment({
     }
 
     if (rpcSuccess && rpcData) {
-      // Dispatches confirmation email only after verified durable database persistence
-      if (!rpcData.already_fulfilled || rpcData.healed_ledger) {
-        (async () => {
-          try {
-            if (intakeDetails.customerEmail) {
-              await sendConsultationConfirmationEmail({
-                to: intakeDetails.customerEmail,
-                customerName: intakeDetails.customerName || "Valued Client",
-                bookingCode: rpcData.booking?.booking_code || bookingCode,
-                bookingDate: rpcData.booking?.booking_date || intakeDetails.date,
-                bookingTime: rpcData.booking?.booking_time || intakeDetails.time,
-                durationMinutes,
-                meetUrl: rpcData.booking?.meet_url || meetUrl,
-                primaryChallenge: intakeDetails.primaryChallenge || "Business Growth Strategy",
-                amount: totalAmount,
-                currency,
-                baseAmount,
-                gstAmount,
-                orderId: cleanOrderId,
-                paymentId: cleanPaymentId
-              });
-            }
-          } catch (mailErr) {
-            console.warn("[Consultation Fulfillment] Notice dispatching consultation email:", mailErr?.message || mailErr);
+      // Dispatches confirmation email if not already sent, even if booking was previously recorded
+      (async () => {
+        try {
+          if (await hasAlreadySent(cleanPaymentId, "consultation_confirmation")) {
+            console.log(`[Consultation Fulfillment] Consultation confirmation already sent for ${cleanPaymentId}, skipping.`);
+            return;
           }
-        })();
-      }
+
+          if (intakeDetails.customerEmail) {
+            await sendConsultationConfirmationEmail({
+              to: intakeDetails.customerEmail,
+              customerName: intakeDetails.customerName || "Valued Client",
+              bookingCode: rpcData.booking?.booking_code || bookingCode,
+              bookingDate: rpcData.booking?.booking_date || intakeDetails.date,
+              bookingTime: rpcData.booking?.booking_time || intakeDetails.time,
+              durationMinutes,
+              meetUrl: rpcData.booking?.meet_url || meetUrl,
+              primaryChallenge: intakeDetails.primaryChallenge || "Business Growth Strategy",
+              amount: totalAmount,
+              currency,
+              baseAmount,
+              gstAmount,
+              orderId: cleanOrderId,
+              paymentId: cleanPaymentId
+            });
+          }
+        } catch (mailErr) {
+          console.warn("[Consultation Fulfillment] Notice dispatching consultation email:", mailErr?.message || mailErr);
+        }
+      })();
 
       return {
         success: true,
@@ -511,6 +532,35 @@ export async function fulfillConsultationPayment({
         console.error("[Consultation Fulfillment] Failed to heal payment ledger record:", healErr);
       }
 
+      // Safe retry of email if previously skipped or failed
+      (async () => {
+        try {
+          if (!await hasAlreadySent(cleanPaymentId, "consultation_confirmation")) {
+            const emailToUse = existingBooking.customer_email || intakeDetails.customerEmail;
+            if (emailToUse) {
+              await sendConsultationConfirmationEmail({
+                to: emailToUse,
+                customerName: existingBooking.customer_name || intakeDetails.customerName || "Valued Client",
+                bookingCode: existingBooking.booking_code || bookingCode,
+                bookingDate: existingBooking.booking_date || intakeDetails.date,
+                bookingTime: existingBooking.booking_time || intakeDetails.time,
+                durationMinutes,
+                meetUrl: existingBooking.meet_url || meetUrl,
+                primaryChallenge: existingBooking.primary_challenge || intakeDetails.primaryChallenge || "Business Growth Strategy",
+                amount: totalAmount,
+                currency,
+                baseAmount,
+                gstAmount,
+                orderId: cleanOrderId,
+                paymentId: cleanPaymentId
+              });
+            }
+          }
+        } catch (mailErr) {
+          console.warn("[Consultation Fulfillment] Notice dispatching consultation email in heal branch:", mailErr?.message || mailErr);
+        }
+      })();
+
       return {
         success: true,
         fulfilled: true,
@@ -525,7 +575,38 @@ export async function fulfillConsultationPayment({
 
     // 5C. Fully fulfilled already
     if (existingPayment && existingBooking) {
-      console.log(`[Consultation Fulfillment] Payment ${cleanPaymentId} already processed. Returning existing record without duplicate email.`);
+      // Safe retry of confirmation email if payment & booking exist but confirmation email was not sent yet
+      (async () => {
+        try {
+          if (!await hasAlreadySent(cleanPaymentId, "consultation_confirmation")) {
+            console.log(`[Consultation Fulfillment] Booking and payment exist for ${cleanPaymentId}, but email was not sent yet. Dispatching confirmation email.`);
+            const emailToUse = existingBooking.customer_email || intakeDetails.customerEmail;
+            if (emailToUse) {
+              await sendConsultationConfirmationEmail({
+                to: emailToUse,
+                customerName: existingBooking.customer_name || intakeDetails.customerName || "Valued Client",
+                bookingCode: existingBooking.booking_code || bookingCode,
+                bookingDate: existingBooking.booking_date || intakeDetails.date,
+                bookingTime: existingBooking.booking_time || intakeDetails.time,
+                durationMinutes,
+                meetUrl: existingBooking.meet_url || meetUrl,
+                primaryChallenge: existingBooking.primary_challenge || intakeDetails.primaryChallenge || "Business Growth Strategy",
+                amount: totalAmount,
+                currency,
+                baseAmount,
+                gstAmount,
+                orderId: cleanOrderId,
+                paymentId: cleanPaymentId
+              });
+            }
+          } else {
+            console.log(`[Consultation Fulfillment] Payment ${cleanPaymentId} already processed and email already sent. Skipping duplicate email.`);
+          }
+        } catch (mailErr) {
+          console.warn("[Consultation Fulfillment] Notice dispatching consultation email in existing branch:", mailErr?.message || mailErr);
+        }
+      })();
+
       return {
         success: true,
         fulfilled: true,
@@ -686,6 +767,11 @@ export async function fulfillConsultationPayment({
     // Asynchronously dispatch confirmation email only after verified durable persistence
     (async () => {
       try {
+        if (await hasAlreadySent(cleanPaymentId, "consultation_confirmation")) {
+          console.log(`[Consultation Fulfillment] Consultation confirmation already sent for ${cleanPaymentId}, skipping.`);
+          return;
+        }
+
         if (bookingPayload.customer_email) {
           await sendConsultationConfirmationEmail({
             to: bookingPayload.customer_email,
