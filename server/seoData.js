@@ -571,16 +571,89 @@ export const SEO_DATA = {
   '/about': {
     path: '/about',
     canonicalUrl: 'https://digitalmuid.in/about',
-    title: 'About Digital Muid — Growth Strategist & AI Educator',
-    description: 'Learn about Digital Muid, background in performance marketing, AI operational frameworks, speaking, and helping brands achieve meaningful scale.',
-    ogTitle: 'About Digital Muid — Growth Strategist & AI Educator',
-    ogDescription: 'Founder, growth strategist, and educator helping modern businesses build lasting digital authority.',
+    title: 'About Digital Muid | Performance Growth Strategist & Systems Architect',
+    description: 'Learn how Muid Khan (Digital Muid) engineers predictable client acquisition systems using custom React/Node.js web architecture, Meta Ads, and AI automation.',
+    ogTitle: 'About Digital Muid | Performance Growth Strategist & Systems Architect',
+    ogDescription: 'Learn how Muid Khan (Digital Muid) engineers predictable client acquisition systems using custom React/Node.js web architecture, Meta Ads, and AI automation.',
     ogType: 'profile',
     schema: {
       '@context': 'https://schema.org',
-      '@type': 'Person',
-      name: 'Digital Muid',
-      url: 'https://digitalmuid.in/about'
+      '@graph': [
+        {
+          '@type': 'Person',
+          '@id': 'https://digitalmuid.in/#person',
+          name: 'Muid Khan',
+          alternateName: 'Digital Muid',
+          url: 'https://digitalmuid.in',
+          jobTitle: 'Performance Growth Strategist & Systems Architect',
+          description: 'Specialist in custom React and Node.js web architecture, performance marketing, and automated conversion funnels.'
+        },
+        {
+          '@type': 'Organization',
+          '@id': 'https://digitalmuid.in/#organization',
+          name: 'Digital Muid',
+          url: 'https://digitalmuid.in',
+          founder: {
+            '@id': 'https://digitalmuid.in/#person'
+          },
+          subOrganization: [
+            {
+              '@type': 'Organization',
+              name: 'MK Digitalverse'
+            },
+            {
+              '@type': 'EducationalOrganization',
+              name: 'MK Digitalverse Academy'
+            }
+          ]
+        },
+        {
+          '@type': 'FAQPage',
+          '@id': 'https://digitalmuid.in/about#faq',
+          mainEntity: [
+            {
+              '@type': 'Question',
+              name: 'What exactly does Digital Muid do, and how is it different from a digital marketing agency?',
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: 'Digital Muid operates as a growth consultancy and systems architecture partner led by Muid Khan, unifying performance marketing (Meta Ads), custom React/Node.js web development, and automated lead triage workflows into a cohesive acquisition system.'
+              }
+            },
+            {
+              '@type': 'Question',
+              name: 'Why do you build custom-coded websites using React and Node.js instead of CMS platforms like WordPress?',
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: 'Custom code in React and Node.js eliminates plugin bloat and slow load times, providing sub-second page performance, superior data security, and seamless API integrations with CRM and triage systems that maximize conversion rates.'
+              }
+            },
+            {
+              '@type': 'Question',
+              name: 'What industries and business stages do you work with?',
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: 'We primarily partner with established service businesses, healthcare and aesthetic clinics (such as dental and dermatology practices), high-ticket B2B consultants, and direct-to-consumer brands looking to scale lead generation while managing CAC.'
+              }
+            },
+            {
+              '@type': 'Question',
+              name: 'How do Digital Muid, MK Digitalverse Academy, and MK Digitalverse work together?',
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: 'Digital Muid provides strategic consulting and funnel architecture, MK Digitalverse delivers enterprise technology and agency execution globally, and MK Digitalverse Academy trains operators in real-world performance marketing and automation mechanics.'
+              }
+            },
+            {
+              '@type': 'Question',
+              name: 'How does the engagement process work when working with Digital Muid?',
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: 'Engagements start with a comprehensive Growth Diagnostic Session to identify funnel bottlenecks and cost-per-acquisition leakages, followed by the deployment of custom web infrastructure, targeted Meta Ads campaigns, and automated follow-up workflows.'
+              }
+            }
+          ]
+        }
+      ]
     }
   },
 
