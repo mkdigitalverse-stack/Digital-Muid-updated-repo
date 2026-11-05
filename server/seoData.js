@@ -353,37 +353,89 @@ export const SEO_DATA = {
     `
   },
 
-  '/business-growth-consultation': {
-    path: '/business-growth-consultation',
-    canonicalUrl: 'https://digitalmuid.in/business-growth-consultation',
-    title: '1-on-1 Business Growth Consultation | DigitalMUID',
-    description: 'Book a 1-on-1 strategic growth consultation with Digital Muid. Tailored advisory on AI automation, digital transformation, CAC/LTV scaling, and revenue architecture.',
-    ogTitle: '1-on-1 Business Growth Consultation | DigitalMUID',
-    ogDescription: 'Strategic advisory for founders and leaders. Unlock bottlenecks in acquisition, AI workflows, and digital operations.',
+  '/book-consultation': {
+    path: '/book-consultation',
+    canonicalUrl: 'https://digitalmuid.in/book-consultation',
+    title: 'Book a 1:1 Growth Diagnostic Consultation | Digital Muid',
+    description: 'Reserve a private Growth Diagnostic Session with Muid Khan. Identify pipeline leaks, eliminate wasted ad spend, and receive an engineered acquisition blueprint.',
+    ogTitle: 'Book a 1:1 Growth Diagnostic Consultation | Digital Muid',
+    ogDescription: 'Reserve a private Growth Diagnostic Session with Muid Khan. Identify pipeline leaks, eliminate wasted ad spend, and receive an engineered acquisition blueprint.',
     ogType: 'website',
     schema: {
       '@context': 'https://schema.org',
       '@graph': [
         {
           '@type': 'Service',
-          '@id': 'https://digitalmuid.in/business-growth-consultation#service',
-          name: '1-on-1 Strategic Business Growth Consultation',
+          '@id': 'https://digitalmuid.in/book-consultation#service',
+          name: '1:1 Growth Diagnostic Consultation',
           serviceType: 'Executive Strategy & Digital Advisory',
           provider: {
             '@type': 'Person',
-            name: 'Digital Muid',
+            name: 'Muid Khan',
             jobTitle: 'Growth Strategist & AI Transformation Consultant',
             url: 'https://digitalmuid.in/about'
           },
-          description: 'A focused, confidential 1-on-1 strategic deep dive diagnosing growth bottlenecks, customer acquisition economics, AI workflow implementation, and revenue architecture.',
+          description: 'Reserve a private Growth Diagnostic Session with Muid Khan. Identify pipeline leaks, eliminate wasted ad spend, and receive an engineered acquisition blueprint.',
           areaServed: 'Worldwide'
         },
         {
           '@type': 'WebPage',
-          '@id': 'https://digitalmuid.in/business-growth-consultation#webpage',
-          url: 'https://digitalmuid.in/business-growth-consultation',
-          name: '1-on-1 Business Growth Consultation | DigitalMUID',
-          description: 'Book a 1-on-1 strategic growth consultation with Digital Muid. Tailored advisory on AI automation, digital transformation, CAC/LTV scaling, and revenue architecture.'
+          '@id': 'https://digitalmuid.in/book-consultation#webpage',
+          url: 'https://digitalmuid.in/book-consultation',
+          name: 'Book a 1:1 Growth Diagnostic Consultation | Digital Muid',
+          description: 'Reserve a private Growth Diagnostic Session with Muid Khan. Identify pipeline leaks, eliminate wasted ad spend, and receive an engineered acquisition blueprint.'
+        }
+      ]
+    },
+    semanticHtml: `
+      <article>
+        <header>
+          <h1>Book a 1:1 Growth Diagnostic Consultation</h1>
+          <p>Reserve a private Growth Diagnostic Session with Muid Khan. Identify pipeline leaks, eliminate wasted ad spend, and receive an engineered acquisition blueprint.</p>
+        </header>
+        <section>
+          <h2>Growth Diagnostic Scope</h2>
+          <ul>
+            <li><strong>Pipeline & Conversion Audit:</strong> Identify funnel friction points and customer drop-offs.</li>
+            <li><strong>Ad Spend & Unit Economics:</strong> Eliminate wasted advertising budget and improve CAC-to-LTV ratios.</li>
+            <li><strong>Engineered Acquisition Blueprint:</strong> Receive actionable, prioritized growth architecture tailored to your business.</li>
+          </ul>
+        </section>
+      </article>
+    `
+  },
+
+  '/business-growth-consultation': {
+    path: '/book-consultation',
+    canonicalUrl: 'https://digitalmuid.in/book-consultation',
+    title: 'Book a 1:1 Growth Diagnostic Consultation | Digital Muid',
+    description: 'Reserve a private Growth Diagnostic Session with Muid Khan. Identify pipeline leaks, eliminate wasted ad spend, and receive an engineered acquisition blueprint.',
+    ogTitle: 'Book a 1:1 Growth Diagnostic Consultation | Digital Muid',
+    ogDescription: 'Reserve a private Growth Diagnostic Session with Muid Khan. Identify pipeline leaks, eliminate wasted ad spend, and receive an engineered acquisition blueprint.',
+    ogType: 'website',
+    schema: {
+      '@context': 'https://schema.org',
+      '@graph': [
+        {
+          '@type': 'Service',
+          '@id': 'https://digitalmuid.in/book-consultation#service',
+          name: '1:1 Growth Diagnostic Consultation',
+          serviceType: 'Executive Strategy & Digital Advisory',
+          provider: {
+            '@type': 'Person',
+            name: 'Muid Khan',
+            jobTitle: 'Growth Strategist & AI Transformation Consultant',
+            url: 'https://digitalmuid.in/about'
+          },
+          description: 'Reserve a private Growth Diagnostic Session with Muid Khan. Identify pipeline leaks, eliminate wasted ad spend, and receive an engineered acquisition blueprint.',
+          areaServed: 'Worldwide'
+        },
+        {
+          '@type': 'WebPage',
+          '@id': 'https://digitalmuid.in/book-consultation#webpage',
+          url: 'https://digitalmuid.in/book-consultation',
+          name: 'Book a 1:1 Growth Diagnostic Consultation | Digital Muid',
+          description: 'Reserve a private Growth Diagnostic Session with Muid Khan. Identify pipeline leaks, eliminate wasted ad spend, and receive an engineered acquisition blueprint.'
         }
       ]
     },

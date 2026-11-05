@@ -469,7 +469,7 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
   return (
     <div id="consultation-page-root" className="pt-28 sm:pt-32 pb-24 space-y-20">
-      <SEOHead path="/business-growth-consultation" />
+      <SEOHead path="/book-consultation" />
       {/* ========================================================================= */}
       {/* 1. HERO SECTION */}
       {/* ========================================================================= */}

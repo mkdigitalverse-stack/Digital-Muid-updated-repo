@@ -229,16 +229,7 @@ const MainApp: React.FC = () => {
     if (path === '/growth-audit' || path === '/request-growth-audit') {
       return <GrowthAuditPage navigate={navigate} />;
     }
-    if (path === '/consultation') {
-      window.history.replaceState({}, '', '/business-growth-consultation');
-      return (
-        <ConsultationPage
-          navigate={navigate}
-          onBookingConfirmed={(bk) => setLastConfirmedBooking(bk)}
-        />
-      );
-    }
-    if (path === '/business-growth-consultation') {
+    if (path === '/book-consultation' || path === '/business-growth-consultation' || path === '/consultation') {
       return (
         <ConsultationPage
           navigate={navigate}
