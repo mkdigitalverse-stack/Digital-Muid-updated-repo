@@ -130,74 +130,59 @@ export const SEO_DATA = {
   '/academy': {
     path: '/academy',
     canonicalUrl: 'https://digitalmuid.in/academy',
-    title: 'Digital MUID Academy | Digital Marketing & AI Education',
-    description: 'Explore practical digital marketing, advertising, SEO, and AI education for students, freelancers, and growth operators at Digital MUID Academy.',
-    ogTitle: 'Digital MUID Academy | Digital Marketing & AI Education',
-    ogDescription: 'Explore practical digital marketing, advertising, SEO, and AI education for students, freelancers, and growth operators at Digital MUID Academy.',
+    title: 'MK Digitalverse Academy | Advanced Performance Marketing & Systems Engineering',
+    description: 'Master full-funnel performance marketing, direct-response conversion architecture, and automated client acquisition systems. Led directly by Muid Khan.',
+    ogTitle: 'MK Digitalverse Academy | Advanced Performance Marketing & Systems Engineering',
+    ogDescription: 'Master full-funnel performance marketing, direct-response conversion architecture, and automated client acquisition systems. Led directly by Muid Khan.',
     ogType: 'website',
     schema: {
       '@context': 'https://schema.org',
       '@graph': [
         {
-          '@type': 'EducationalOrganization',
-          '@id': 'https://digitalmuid.in/academy#organization',
-          name: 'Digital MUID Academy',
-          url: 'https://digitalmuid.in/academy',
-          description: 'Explore practical digital marketing, advertising, SEO, and AI education for students, freelancers, and growth operators at Digital MUID Academy.',
-          founder: {
-            '@type': 'Person',
-            name: 'Digital Muid',
-            jobTitle: 'Growth Strategist & Systems Architect'
+          '@type': 'Course',
+          '@id': 'https://digitalmuid.in/academy#course',
+          name: 'Advanced Performance Marketing & Systems Engineering',
+          description: 'Comprehensive practical training covering Meta Ads media buying, direct-response funnel architecture, and automated client acquisition systems.',
+          provider: {
+            '@type': 'EducationalOrganization',
+            name: 'MK Digitalverse Academy',
+            sameAs: 'https://digitalmuid.in'
           },
-          hasOfferCatalog: {
-            '@type': 'OfferCatalog',
-            name: 'Digital MUID Curriculums',
-            itemListElement: [
-              {
-                '@type': 'Course',
-                name: 'Meta Ads Mastery: Algorithmic Scaling & Creative Strategy',
-                description: 'Build profitable, high-ROAS ad campaigns using algorithmic audience matching and dynamic creative testing.',
-                url: 'https://digitalmuid.in/learn/meta-ads-mastery',
-                offers: {
-                  '@type': 'Offer',
-                  price: '1999',
-                  priceCurrency: 'INR',
-                  availability: 'https://schema.org/InStock'
-                }
-              },
-              {
-                '@type': 'Course',
-                name: 'SEO (Search Engine Optimisation) with AI Integration',
-                description: 'Complete SEO mastery course integrating AI search engines, programmatic workflows, and topical authority.',
-                url: 'https://digitalmuid.in/learn/seo-search-engine-optimisation-with-ai-integration',
-                offers: {
-                  '@type': 'Offer',
-                  price: '2499',
-                  priceCurrency: 'INR',
-                  availability: 'https://schema.org/InStock'
-                }
-              },
-              {
-                '@type': 'Course',
-                name: 'AI & Automation for Modern Business Operations',
-                description: 'Deploy intelligent LLM agents and automated workflows to cut 15+ hours of manual operations every week.',
-                url: 'https://digitalmuid.in/learn/ai-automation-business-operations',
-                offers: {
-                  '@type': 'Offer',
-                  price: '2199',
-                  priceCurrency: 'INR',
-                  availability: 'https://schema.org/InStock'
-                }
-              }
-            ]
+          instructor: {
+            '@type': 'Person',
+            name: 'Muid Khan',
+            alternateName: 'Digital Muid'
           }
         },
         {
-          '@type': 'WebPage',
-          '@id': 'https://digitalmuid.in/academy#webpage',
-          url: 'https://digitalmuid.in/academy',
-          name: 'Digital MUID Academy | Digital Marketing & AI Education',
-          description: 'Explore practical digital marketing, advertising, SEO, and AI education for students, freelancers, and growth operators at Digital MUID Academy.'
+          '@type': 'FAQPage',
+          '@id': 'https://digitalmuid.in/academy#faq',
+          mainEntity: [
+            {
+              '@type': 'Question',
+              name: 'What makes MK Digitalverse Academy different from other digital marketing institutes?',
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: 'MK Digitalverse Academy focuses on full-funnel systems engineering: advanced Meta Ads media buying, automated CRM lead routing, conversion architecture, and client acquisition economics, rather than theoretical tool usage.'
+              }
+            },
+            {
+              '@type': 'Question',
+              name: 'Do I need prior coding or technical experience to enroll?',
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: 'No prior coding experience is required. The program focuses on funnel strategy, media buying mechanics, CRM integrations, and marketing automation logic.'
+              }
+            },
+            {
+              '@type': 'Question',
+              name: 'Will this program help me get clients or a high-paying job?',
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: 'Yes. The program includes an entire pillar dedicated to commercial monetization, client auditing frameworks, high-ticket retainer pitching, and portfolio creation.'
+              }
+            }
+          ]
         }
       ]
     },

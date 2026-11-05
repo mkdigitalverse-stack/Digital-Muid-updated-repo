@@ -12,58 +12,34 @@ export const AcademyFaqSection: React.FC = () => {
 
   const faqs: FaqItem[] = [
     {
-      question: 'What courses and curriculums are currently available at DigitalMUID Academy?',
+      question: 'What makes MK Digitalverse Academy different from other digital marketing institutes?',
       answer:
-        'We offer three core master curriculums: Meta & Google Ads Mastery: Algorithmic Scaling (₹1,999 special admission), SEO with AI Integration: Intent Dominance (₹2,499), and AI & Automation for Modern Business Operations (₹2,199). We also provide two 100% free foundational masterclasses covering the 60-Minute Digital Marketing Blueprint and Freelance Client Acquisition.',
+        'Most institutes offer generic, syllabus-driven training that focuses on theoretical concepts and basic tool usage. MK Digitalverse Academy focuses strictly on full-funnel system engineering: advanced Meta Ads media buying, automated CRM and WhatsApp lead routing, conversion architecture, and client acquisition economics. You learn how to drive measurable revenue rather than chasing vanity impressions.',
       category: 'Curriculum'
     },
     {
-      question: 'Do I need previous marketing experience or technical coding skills to join?',
+      question: 'Do I need prior coding or technical experience to enroll?',
       answer:
-        'No technical coding knowledge is required. Our programs start from first-principles unit economics and buyer psychology before advancing into tool configurations. The Free Foundation masterclasses and SEO curriculum welcome beginners, while the Ads Mastery program is optimized for early-to-intermediate practitioners wanting predictable scale.',
-      category: 'Eligibility'
+        'No prior software engineering experience is required. While we teach you the architectural principles behind custom-coded systems (like React and Node.js) and why they outperform bloated CMS builders, the primary training focuses on funnel strategy, media buying mechanics, CRM integrations, and no-code automation logic that anyone with computer literacy can master.',
+      category: 'Prerequisites'
     },
     {
-      question: 'How do Online cohorts differ from In-Person Classroom batches?',
+      question: 'Is the curriculum pre-recorded or live mentorship?',
       answer:
-        'Online training provides live Google Meet cohort sessions, full on-demand recordings in the student portal, downloadable spreadsheets, and weekly virtual Q&A office hours. Offline classroom training is conducted at verified training centres in Srinagar and Bengaluru, offering direct workstation feedback, physical workbooks, and face-to-face mentorship.',
-      category: 'Delivery Modes'
+        'The academy combines structured, high-definition system breakdown modules with live implementation clinics, weekly campaign teardowns, and direct portfolio audits led by Muid Khan. This ensures you receive direct feedback on your actual campaigns, funnels, and client pitches.',
+      category: 'Delivery'
     },
     {
-      question: 'How are practical projects and case studies conducted?',
+      question: 'Will this program help me get clients or a high-paying job?',
       answer:
-        'Rather than passive multiple-choice quizzes, every course incorporates scenario-based project work. Students execute simulated technical SEO audits, 30-day authority content schedules, dynamic creative sandboxes, and full-funnel GA4 tracking audits. These assignments compile directly into a client-ready proof-of-work portfolio.',
-      category: 'Projects'
+        'Yes. We dedicate an entire core pillar to commercial monetization. You will learn how to conduct diagnostic client audits, pitch high-ticket retainers, and use cold video outreach frameworks. You will graduate with a verified portfolio of real campaign architectures and funnels that demonstrate tangible authority to prospective employers or private clients.',
+      category: 'Outcomes'
     },
     {
-      question: 'What is the course duration and weekly time commitment?',
+      question: 'How does MK Digitalverse Academy connect with Digital Muid and MK Digitalverse?',
       answer:
-        'Our master curriculums typically feature 8 to 12 hours of core structured instruction across 20 to 24 lessons. We recommend allocating 4 to 6 hours per week for 4 weeks to absorb the lectures, execute guided project exercises, and attend live cohort office hours.',
-      category: 'Schedule'
-    },
-    {
-      question: 'What are the course fees and payment arrangements?',
-      answer:
-        'Fees range from ₹1,999 to ₹2,499 under current special admissions pricing (with free foundation modules at ₹0). All payments are processed securely via our encrypted Razorpay gateway, supporting UPI (Google Pay, PhonePe, Paytm), credit/debit cards, and net banking. Standard GST invoices are issued upon enrollment.',
-      category: 'Fees'
-    },
-    {
-      question: 'Do students receive a verified Certificate of Completion?',
-      answer:
-        'Yes. Students who complete all video modules and submit their required project assignments receive an official DigitalMUID Certificate of Completion. Each certificate includes a unique verification credential ID that can be shared on LinkedIn or verified by prospective employers.',
-      category: 'Certificates'
-    },
-    {
-      question: 'What career preparation and placement guidance is offered?',
-      answer:
-        'We offer pragmatic career readiness: portfolio reviews, resume positioning, freelance client acquisition frameworks, and retainer pricing models. In accordance with ethical education principles, we do not make false guarantees of automatic jobs or instant wealth. We train you to possess verifiable competence that wins real interviews and contracts.',
-      category: 'Careers'
-    },
-    {
-      question: 'How can I contact the admissions team and enrol in an upcoming cohort?',
-      answer:
-        'You can enroll directly through any curriculum page on our website or connect with our admissions team on WhatsApp at +91 93358 17155. For institutional and corporate training inquiries, email support@digitalmuid.in.',
-      category: 'Enrolment'
+        'MK Digitalverse Academy is the talent and educational division of our three-part ecosystem: Digital Muid provides private growth advisory and strategy, MK Digitalverse provides global agency execution, and the Academy trains the next generation of sovereign digital growth operators.',
+      category: 'Ecosystem'
     }
   ];
 
@@ -79,7 +55,7 @@ export const AcademyFaqSection: React.FC = () => {
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-[#1877F2]">
             <HelpCircle className="w-3.5 h-3.5 text-[#FF6B00]" />
             <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#1877F2] font-interface">
-              TRANSPARENT ADMISSIONS GUIDANCE
+              TRANSPARENT ANSWERS
             </span>
           </div>
           <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold text-slate-900 tracking-tight">

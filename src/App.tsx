@@ -115,7 +115,7 @@ const MainApp: React.FC = () => {
       const slug = path.replace('/videos/', '');
       return <VideoDetailPage slug={slug} navigate={navigate} />;
     }
-    if (path === '/academy') {
+    if (path === '/academy' || path === '/apply') {
       return <AcademyPage navigate={navigate} />;
     }
     if (path === '/courses') {
