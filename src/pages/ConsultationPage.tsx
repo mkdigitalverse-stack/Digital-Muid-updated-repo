@@ -350,70 +350,65 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
   const whatWeDiscuss = [
     {
       icon: TrendingUp,
-      title: 'Digital Growth Strategy & Marketing Architecture',
-      desc: 'Diagnosing paid acquisition efficiency, organic distribution loops, conversion drop-offs, and CAC-to-LTV unit economics.'
+      title: 'Wasted Ad Capital',
+      desc: 'Spending ₹50,000 to ₹2,00,000+ monthly on Meta Ads that bring clicks, but zero qualified buyers due to broken attribution or poor creative hooks.'
     },
     {
-      icon: Sparkles,
-      title: 'AI Adoption & Workflow Transformation',
-      desc: 'Implementing practical generative AI pipelines, operational automations, and LLM-augmented execution for modern teams.'
+      icon: Zap,
+      title: 'The Drag of Slow Tech',
+      desc: 'Losing 30% to 50% of your incoming traffic simply because a bloated WordPress or page-builder site takes more than 3 seconds to load.'
     },
     {
-      icon: Award,
-      title: 'Founder Authority & Personal Branding',
-      desc: 'Codifying deep domain expertise into proprietary intellectual property, signature frameworks, and market-commanding authority.'
+      icon: Clock,
+      title: 'Manual Lead Decay',
+      desc: 'Letting hot inquiries sit untouched for hours because you lack automated CRM and instant WhatsApp triage.'
     },
     {
       icon: Target,
-      title: 'Campaign Diagnosis & Performance Bottlenecks',
-      desc: 'Teardowns of existing landing pages, offer propositions, ad account structures, and messaging inconsistencies.'
-    },
-    {
-      icon: Layers,
-      title: 'Tech Stack & Growth Operations',
-      desc: 'Evaluating marketing automation tools, CRM orchestration, data tracking infrastructure, and conversion tooling.'
+      title: 'Locked Agency Retainers',
+      desc: 'Paying recurring agency fees to teams that can\'t explain your CAC or customer lifetime value.'
     }
   ];
 
   const whoThisIsFor = [
     {
-      title: 'Founders & Business Owners',
-      desc: 'Looking for decisive strategic clarity before committing major capital, hiring teams, or launching new digital initiatives.'
+      title: 'Strict Intake Cap',
+      desc: 'We cap diagnostic intakes strictly at 4 founders per week.'
     },
     {
-      title: 'Marketing Leaders & Growth Teams',
-      desc: 'Needing an objective, battle-tested outside perspective to audit stalled funnels and unlock untapped performance vectors.'
+      title: 'First-Come Allocation',
+      desc: 'Applications and allocations are confirmed on a first-come, payment-cleared basis.'
     },
     {
-      title: 'Professionals & Executives',
-      desc: 'Building defensible personal authority, codifying their IP, or transitioning their leadership workflows to modern AI.'
+      title: 'Rollover Queue',
+      desc: 'Once the weekly allocation is exhausted, registrations roll over to the subsequent intake window.'
     },
     {
-      title: 'Teams & Operating Units',
-      desc: 'Looking to safely integrate generative AI and autonomous workflows into daily production cycles.'
+      title: 'Opportunity Cost',
+      desc: 'Every week you delay auditing your acquisition engine is another week of capital wasted on inefficient ad spend and lost pipeline velocity.'
     }
   ];
 
   const whatYouGet = [
     {
-      icon: Clock,
-      title: 'Up to 30 Minutes of Focused Advisory',
-      desc: 'Zero fluff, zero generic pleasantries. We immediately dive into diagnosing your exact commercial bottleneck.'
+      icon: Layers,
+      title: 'The Funnel & Tech Stack Teardown',
+      desc: 'We inspect your live web assets, page speed metrics, and form conversion pathways. We highlight the exact code bloat and design friction killing your conversion rate.'
     },
     {
       icon: Target,
-      title: 'Direct Diagnostic Evaluation',
-      desc: 'An honest, transparent assessment of your current growth mechanics, positioning, and digital architecture.'
+      title: 'Paid Acquisition & Tracking Audit',
+      desc: 'We analyze your Meta Ads setup, pixel health, and conversion API attribution to show you which campaigns are genuinely driving pipeline value versus burning budget on vanity clicks.'
+    },
+    {
+      icon: Zap,
+      title: 'Lead Triage & Automation Diagnostic',
+      desc: 'We map out your current lead flow from click to close, identifying manual gaps and designing instant-response automation (CRM, webhook routing, WhatsApp triage).'
     },
     {
       icon: FileText,
-      title: 'Actionable Strategic Blueprint',
-      desc: 'Walk away with concrete recommendations, prioritized execution steps, and relevant framework models.'
-    },
-    {
-      icon: Video,
-      title: 'Private Session Recording',
-      desc: 'Full HD recording of the Google Meet session along with any shared resources and diagram references.'
+      title: 'The 90-Day Engineered Growth Blueprint',
+      desc: 'Following our audit, you receive a tailored Growth Architecture Document detailing the exact levers to pull, priority technical fixes, and budget allocation recommendations.'
     }
   ];
 
@@ -425,45 +420,37 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
     },
     {
       step: '02',
-      title: 'Submit Intake Brief',
-      desc: 'Share your business context, website URL, and primary challenges so Muid prepares prior to the call.'
+      title: 'Secure Your Diagnostic Seat',
+      desc: 'Complete payment to reserve one of the 4 capped diagnostic sessions available this week.'
     },
     {
       step: '03',
-      title: '30-Min Google Meet Call',
-      desc: 'Join the private video session focused 100% on dissecting your strategic bottleneck.'
+      title: 'Onboarding & Triage Form',
+      desc: 'Our CRM automatically captures your details, analyzes your business profile, and dispatches your session link directly to WhatsApp and email.'
     },
     {
       step: '04',
-      title: 'Execute with Clarity',
-      desc: 'Receive session takeaways and implement your custom roadmap with absolute clarity.'
+      title: 'Engineered Roadmap Delivery',
+      desc: 'Join your private 1-on-1 strategy session and receive your custom 90-day Growth Architecture Document.'
     }
   ];
 
   const faqs = [
     {
-      q: 'How should I prepare for the consultation?',
-      a: 'Complete the intake questionnaire with as much specific context as possible (metrics, current bottlenecks, and target goals). Having your current analytics, funnel links, or key questions ready ensures we spend the entire 30 minutes on strategic solutions rather than background discovery.'
+      q: 'Why is this a paid session instead of a free discovery call?',
+      a: 'Free discovery calls are almost always generic, low-effort sales pitches delivered by junior reps reading from a script. By making this a paid diagnostic, we eliminate casual inquiries and allow Muid Khan to spend real time auditing your business metrics, tracking infrastructure, and funnel mechanics before we speak. You are paying for a high-level operational consultation.'
     },
     {
-      q: 'Who conducts the session?',
-      a: 'Every 1-on-1 consultation is conducted personally and directly by Digital Muid. No junior strategists or surrogate team members.'
+      q: 'How does scheduling and calendar coordination work?',
+      a: 'Immediately after completing your payment, our CRM will route you through our intake protocol. Your confirmation, session link, and agenda will be automatically dispatched to your email and WhatsApp based on the intake information you provide.'
     },
     {
-      q: 'Is this a sales pitch for agency retainers?',
-      a: 'No. This is a standalone, paid strategic advisory working session. The objective is to provide objective, high-leverage clarity on your specific bottleneck without any pitch or sales pressure.'
+      q: 'What happens if we decide to hire MK Digitalverse for custom development or management?',
+      a: 'If we mutually agree that your business is a prime fit for full-stack implementation (custom React/Node.js web engineering, Meta Ads performance management, or CRM automation), your entire diagnostic fee is credited directly toward your initial project or retainer.'
     },
     {
-      q: 'Can members of my team join the Google Meet call?',
-      a: 'Yes. Up to 3 key stakeholders or team members (e.g., co-founder, marketing lead, tech lead) are welcome to join the video session.'
-    },
-    {
-      q: 'What if I need to reschedule my session?',
-      a: 'You can reschedule your session with at least 24 hours notice prior to the scheduled time using the reschedule link in your confirmation email.'
-    },
-    {
-      q: 'Is our discussion kept confidential?',
-      a: 'Yes. All proprietary business data, metrics, roadmaps, and discussions shared during the consultation are treated with strict professional confidentiality.'
+      q: 'Who is this diagnostic NOT suitable for?',
+      a: 'This session is not suitable for early-stage idea exploration, individuals seeking get-rich-quick hacks, or businesses without an active product, service, or dedicated budget to execute strategic recommendations.'
     }
   ];
 
@@ -480,30 +467,30 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
 
           <div className="relative z-10 max-w-3xl space-y-6">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#FF6B00]/15 border border-[#FF6B00]/30 text-[#FF6B00] text-xs font-bold uppercase tracking-widest font-interface">
-              <CalendarIcon className="w-3.5 h-3.5" /> BUSINESS GROWTH CONSULTATION
+              <CalendarIcon className="w-3.5 h-3.5" /> PRIVATE 1-ON-1 ADVISORY & SYSTEM AUDIT
             </div>
 
             <h1 className="text-3xl sm:text-5xl lg:text-6xl font-display font-bold text-white tracking-tight leading-[1.15]">
-              A focused 30-minute strategic conversation with Digital Muid.
+              One Diagnostic Intervention. Zero Agency Fluff. The Exact System to Eliminate Leaks and Scale Profit.
             </h1>
 
             <p className="text-slate-300 text-base sm:text-lg font-interface leading-relaxed font-light">
-              Get focused perspective on your business growth, digital strategy, AI opportunities, marketing systems, or transformation challenges.
+              A comprehensive, strategic deep dive into your unit economics, acquisition funnels, and tech stack. We dissect where capital is draining from your pipeline and deliver an engineered roadmap for predictable revenue.
             </p>
 
-            {/* Quick Highlights Pills */}
+            {/* Key Booking Callouts */}
             <div className="flex flex-wrap items-center gap-3 pt-2">
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-white/10 border border-white/10 text-xs font-semibold text-white">
-                <Clock className="w-3.5 h-3.5 text-[#FF6B00]" />
-                <span>UP TO 30 MINUTES</span>
+                <ShieldCheck className="w-3.5 h-3.5 text-[#FF6B00]" />
+                <span>Direct 1-on-1 with Muid Khan (No junior staff or account reps)</span>
               </div>
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-white/10 border border-white/10 text-xs font-semibold text-white">
-                <Video className="w-3.5 h-3.5 text-[#1877F2]" />
-                <span>Google Meet HD Call</span>
+                <FileText className="w-3.5 h-3.5 text-[#1877F2]" />
+                <span>Complete Revenue & Conversion Blueprint delivered directly to your inbox</span>
               </div>
               <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-white/10 border border-white/10 text-xs font-semibold text-white">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>1-on-1 Founder Advisory</span>
+                <Clock className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Strict Client Intake: Capped at 4 diagnostic audits per week</span>
               </div>
             </div>
 
@@ -514,7 +501,7 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
                 className="px-7 py-4 bg-[#FF6B00] hover:bg-[#e66000] text-white font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2.5 cursor-pointer shadow-lg shadow-[#FF6B00]/25 active:scale-98"
               >
                 <CalendarIcon className="w-4 h-4 text-white" />
-                <span>BOOK A CONSULTATION</span>
+                <span>SECURE YOUR DIAGNOSTIC SEAT</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
               <button
@@ -529,18 +516,18 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
       </section>
 
       {/* ========================================================================= */}
-      {/* 2. WHAT WE CAN DISCUSS */}
+      {/* 2. THE ECONOMIC JUSTIFICATION (VALUE VS. FEE) */}
       {/* ========================================================================= */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
         <div className="space-y-3 max-w-2xl">
           <div className="text-xs font-bold uppercase tracking-widest text-[#1877F2] font-interface">
-            Strategic Agenda
+            THE ARITHMETIC OF ADVISORY
           </div>
           <h2 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-            What We Can Discuss
+            Why This Diagnostic Is the Most Inexpensive Investment in Your Pipeline
           </h2>
           <p className="text-slate-600 text-sm sm:text-base font-interface">
-            Every session is tailored to your highest-priority challenge across our core domains of expertise.
+            Most founders hesitate to pay for strategic advisory because they have been burned by agency pitch decks that offer zero operational depth. Let’s look at the actual economics of an un-diagnosed acquisition funnel:
           </p>
         </div>
 
@@ -567,22 +554,26 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
             );
           })}
         </div>
+
+        <p className="text-slate-600 text-sm sm:text-base font-interface pt-2">
+          The cost of this diagnostic is a fraction of a single week's wasted ad spend or one lost high-ticket client. We charge for this session because it is an intensive technical intervention, not a disguised sales pitch. You walk away with concrete system architecture you can execute immediately—whether you choose to work with us long-term or not.
+        </p>
       </section>
 
       {/* ========================================================================= */}
-      {/* 3. WHO THIS IS FOR */}
+      {/* 3. CAPACITY CONSTRAINT & FOMO */}
       {/* ========================================================================= */}
       <section className="bg-slate-50 border-y border-slate-200 py-16">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
           <div className="space-y-3 max-w-2xl">
             <div className="text-xs font-bold uppercase tracking-widest text-[#FF6B00] font-interface">
-              Target Audience
+              CAPACITY RESTRICTION
             </div>
             <h2 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-              Who This Consultation Is For
+              Why We Only Accept 4 Advisory Clients Per Week
             </h2>
             <p className="text-slate-600 text-sm sm:text-base font-interface">
-              Built for decision-makers who value structured diagnostic clarity over superficial advice.
+              I am an active growth operator, not a full-time content creator. The majority of my week is dedicated to engineering custom React/Node.js web systems and directing live ad campaigns for private agency clients. Because each diagnostic requires dedicated pre-call research and a custom 90-day blueprint delivered afterward:
             </p>
           </div>
 
@@ -604,22 +595,26 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
               </div>
             ))}
           </div>
+
+          <p className="text-slate-600 text-sm sm:text-base font-interface pt-2">
+            Every week you delay auditing your acquisition engine is another week of capital wasted on inefficient ad spend and lost pipeline velocity.
+          </p>
         </div>
       </section>
 
       {/* ========================================================================= */}
-      {/* 4. WHAT YOU'LL GET */}
+      {/* 4. WHAT WE CONCRETELY DELIVER */}
       {/* ========================================================================= */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
         <div className="space-y-3 max-w-2xl">
           <div className="text-xs font-bold uppercase tracking-widest text-emerald-600 font-interface">
-            Deliverables & Outcomes
+            CLINICAL BREAKDOWN
           </div>
           <h2 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-            What You'll Get
+            What We Audit and Engineer Inside Your Diagnostic
           </h2>
           <p className="text-slate-600 text-sm sm:text-base font-interface">
-            Direct, practical takeaways designed to be immediately put into production.
+            Following our audit, you receive a tailored Growth Architecture Document detailing the exact levers to pull, priority technical fixes, and budget allocation recommendations.
           </p>
         </div>
 
@@ -647,16 +642,17 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
       </section>
 
       {/* ========================================================================= */}
+      {/* ========================================================================= */}
       {/* 5. HOW IT WORKS */}
       {/* ========================================================================= */}
       <section className="bg-slate-900 text-white py-16 border-y border-slate-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
           <div className="text-center space-y-3 max-w-2xl mx-auto">
             <div className="text-xs font-bold uppercase tracking-widest text-[#FF6B00] font-interface">
-              Simple 4-Step Process
+              INTAKE PROTOCOL
             </div>
             <h2 className="text-3xl sm:text-4xl font-display font-bold text-white tracking-tight">
-              How It Works
+              How Scheduling Works
             </h2>
             <p className="text-slate-400 text-sm font-interface">
               From slot reservation to strategic execution in four seamless steps.
@@ -679,23 +675,44 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
       </section>
 
       {/* ========================================================================= */}
-      {/* 6. FEE & PRICING TRANSPARENCY */}
+      {/* 6. INVESTMENT & INTAKE PROTOCOL */}
       {/* ========================================================================= */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="p-8 sm:p-10 rounded-3xl bg-white border border-slate-200 shadow-md flex flex-col lg:flex-row items-center justify-between gap-8">
-          <div className="space-y-3 max-w-xl">
+        <div className="p-8 sm:p-10 rounded-3xl bg-white border border-slate-200 shadow-md flex flex-col lg:flex-row items-start justify-between gap-8">
+          <div className="space-y-4 max-w-xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-[#1877F2] text-xs font-bold uppercase tracking-wider">
-              Consultation Fee
+              THE PRIVATE GROWTH DIAGNOSTIC
             </div>
             <h2 className="text-2xl sm:text-3xl font-display font-bold text-slate-900">
-              Fixed Strategic Investment. Zero Upsell Pressure.
+              Investment: ₹9,999 / $149 USD
             </h2>
             <p className="text-slate-600 text-sm font-interface leading-relaxed">
-              We believe in complete pricing transparency. The consultation is a 100% focused strategic session dedicated entirely to solving your challenge.
+              (100% credited toward your implementation build if we partner for agency or development services)
             </p>
-            <div className="flex items-center gap-2 text-xs text-slate-500 pt-1">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Official GST invoice provided for business expense deduction</span>
+            <div className="space-y-2 pt-1 text-xs sm:text-sm text-slate-700 font-interface">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Direct 1-on-1 Strategy & System Audit Session with Muid Khan</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Pre-Session Audit of Your Ads, Web Architecture & Conversion Paths</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Attribution & Tracking Health Check (Pixel, CAPI, Server-side)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Written 90-Day Custom Growth & Automation Blueprint</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>Direct Follow-up Access for implementation questions</span>
+              </div>
+            </div>
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600 font-interface leading-relaxed italic">
+              &ldquo;If after our diagnostic session you feel you didn’t get at least 5x the value in actionable system clarity, simply let me know before we conclude, and your fee will be refunded in full. No debates.&rdquo;
             </div>
           </div>
 
@@ -727,16 +744,17 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
       {/* 7. BOOKING SCHEDULING UI & INTAKE BRIEF */}
       {/* ========================================================================= */}
       <section id="consultation-scheduler" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-        <div className="text-center space-y-2 max-w-2xl mx-auto">
+        <div className="text-center space-y-3 max-w-3xl mx-auto">
           <div className="text-xs font-bold uppercase tracking-widest text-[#FF6B00] font-interface">
-            Booking & Availability
+            STEP 1
           </div>
           <h2 className="text-3xl sm:text-4xl font-display font-bold text-slate-900 tracking-tight">
-            Reserve Your Consultation
+            SECURE YOUR DIAGNOSTIC SEAT
           </h2>
-          <p className="text-slate-600 text-sm font-interface">
-            Pick your preferred date and slot, then complete the brief below so Muid can prepare prior to the call.
-          </p>
+          <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200 text-left text-xs sm:text-sm text-slate-700 font-interface space-y-1">
+            <strong className="text-slate-900 block font-semibold">How Scheduling Works:</strong>
+            <span>Once your payment is confirmed, you will be redirected to our priority onboarding triage form. Our CRM will automatically capture your details, analyze your business profile, and send a priority calendar dispatch directly to your WhatsApp and email with your reserved session details.</span>
+          </div>
         </div>
 
         {isSubmitted ? (
@@ -1029,7 +1047,7 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
                       <CreditCard className="w-4 h-4" />
                       <span>
                         {selectedDate && selectedTime
-                          ? `Proceed to Payment (₹${totalAmount}) · ${selectedDate}`
+                          ? `Secure Your Diagnostic Seat (₹${totalAmount}) · ${selectedDate}`
                           : 'Select Date & Time to Continue'}
                       </span>
                       <ArrowRight className="w-4 h-4" />
@@ -1048,10 +1066,10 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
       <section className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
         <div className="text-center space-y-2">
           <div className="text-xs font-bold uppercase tracking-widest text-[#1877F2] font-interface">
-            Common Inquiries
+            FREQUENT QUESTIONS
           </div>
           <h2 className="text-3xl font-display font-bold text-slate-900 tracking-tight">
-            Frequently Asked Questions
+            Everything You Need to Know Before Reserving
           </h2>
         </div>
 
@@ -1092,10 +1110,10 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="p-8 sm:p-12 rounded-3xl bg-gradient-to-r from-slate-900 via-[#0B1E3B] to-slate-900 border border-slate-800 text-center space-y-6 shadow-xl">
           <h2 className="text-2xl sm:text-4xl font-display font-bold text-white tracking-tight">
-            Ready to Get Strategic Clarity?
+            One Diagnostic Intervention. Zero Agency Fluff.
           </h2>
           <p className="text-slate-300 text-sm sm:text-base max-w-xl mx-auto font-interface">
-            Book your 1-on-1 session to unpack your primary growth vector or get in touch for custom enterprise advisory.
+            Dissect where capital is draining from your pipeline and receive an engineered roadmap for predictable revenue.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
             <button
@@ -1103,7 +1121,7 @@ export const ConsultationPage: React.FC<ConsultationPageProps> = ({
               className="px-8 py-3.5 rounded-xl bg-[#FF6B00] hover:bg-[#e66000] text-white font-bold text-xs uppercase tracking-widest shadow-xl inline-flex items-center gap-2 cursor-pointer transition-all"
             >
               <CalendarIcon className="w-4 h-4" />
-              <span>Book a Consultation</span>
+              <span>Secure Your Diagnostic Seat</span>
               <ArrowRight className="w-4 h-4" />
             </button>
             <button
