@@ -10,10 +10,10 @@ export const SEO_DATA = {
   '/': {
     path: '/',
     canonicalUrl: 'https://digitalmuid.in/',
-    title: 'Digital Muid — Growth Strategist | Founder | Educator | AI & Digital Transformation',
-    description: 'I help businesses and professionals understand the changing digital world—and turn knowledge into meaningful growth. Strategic consulting, practical AI frameworks, courses, and resources.',
-    ogTitle: 'Digital Muid — Growth Strategist | Founder | Educator',
-    ogDescription: 'Turn digital knowledge into meaningful growth. Frameworks, education, and strategic consultation.',
+    title: 'Digital Muid | Performance Growth Strategist & Systems Architect',
+    description: 'We engineer predictable customer acquisition engines, bespoke React/Node.js web architecture, and automated client intake systems for ambitious businesses.',
+    ogTitle: 'Digital Muid | Performance Growth Strategist & Systems Architect',
+    ogDescription: 'We engineer predictable customer acquisition engines, bespoke React/Node.js web architecture, and automated client intake systems for ambitious businesses.',
     ogType: 'website',
     schema: {
       '@context': 'https://schema.org',
@@ -21,13 +21,14 @@ export const SEO_DATA = {
         {
           '@type': 'Organization',
           '@id': 'https://digitalmuid.in/#organization',
-          name: 'DigitalMUID',
+          name: 'Digital Muid',
           url: 'https://digitalmuid.in/',
           logo: 'https://digitalmuid.in/favicon.ico',
           founder: {
             '@type': 'Person',
-            name: 'Digital Muid',
-            jobTitle: 'Growth Strategist & AI Transformation Consultant',
+            name: 'Muid Khan',
+            alternateName: 'Digital Muid',
+            jobTitle: 'Performance Growth Strategist & Systems Architect',
             url: 'https://digitalmuid.in/about'
           },
           sameAs: [
@@ -40,26 +41,67 @@ export const SEO_DATA = {
           '@type': 'WebSite',
           '@id': 'https://digitalmuid.in/#website',
           url: 'https://digitalmuid.in/',
-          name: 'DigitalMUID',
+          name: 'Digital Muid',
           publisher: { '@id': 'https://digitalmuid.in/#organization' }
+        },
+        {
+          '@type': 'FAQPage',
+          '@id': 'https://digitalmuid.in/#faq',
+          mainEntity: [
+            {
+              '@type': 'Question',
+              name: 'How does Digital Muid differ from a regular digital marketing agency?',
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: 'Traditional agencies sell piecemeal services—like managing ads without touching your website, or building a generic website without understanding performance marketing economics. Digital Muid is a growth consultancy and systems architecture firm led by Muid Khan. We build the entire infrastructure: scientific Meta Ads, custom-coded React/Node.js websites, and automated back-end lead triage so your marketing and technology work as a unified revenue engine.'
+              }
+            },
+            {
+              '@type': 'Question',
+              name: 'Why do you build websites in React and Node.js instead of WordPress?',
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: 'Modern conversion rates are won or lost on loading speed, security, and responsive user experience. Generic CMS platforms rely on dozens of third-party plugins that bloat code, slow down page speed, and introduce security vulnerabilities. Custom code in React and Node.js ensures sub-second load times, superior conversion rates, custom interactive triage funnels, and complete ownership of your digital assets.'
+              }
+            },
+            {
+              '@type': 'Question',
+              name: 'What kind of businesses do you work with?',
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: 'We partner with established service businesses, high-ticket B2B consultancies, specialized firms, and premium brands that already have a proven product or service and are ready to invest in custom infrastructure to scale their customer acquisition predictably.'
+              }
+            },
+            {
+              '@type': 'Question',
+              name: 'How do we start working together?',
+              acceptedAnswer: {
+                '@type': 'Answer',
+                text: 'All client relationships begin with a private Growth Diagnostic Session. We analyze your past campaign data, current website conversion flow, and lead management processes to uncover exact friction points and design a custom 90-day system blueprint.'
+              }
+            }
+          ]
         }
       ]
     },
     semanticHtml: `
       <header>
-        <h1>Digital Muid — Growth Strategist, Founder & AI Transformation Consultant</h1>
-        <p>Turning digital knowledge into predictable business growth through AI frameworks, education, and advisory.</p>
+        <h1>Digital Muid | Performance Growth Strategist & Systems Architect</h1>
+        <p>Growth Is Not a Tactic. It Is an Engineered System. We design, code, and deploy unified client acquisition pipelines—combining scientific paid media, custom React & Node.js web architecture, and automated triage systems built for bottom-line profit.</p>
       </header>
       <main>
-        <nav aria-label="Main Navigation">
-          <ul>
-            <li><a href="/web">Web Design & Development Services</a></li>
-            <li><a href="/learn">Practical Digital Education & Courses</a></li>
-            <li><a href="/business-growth-consultation">Book a Business Growth Consultation</a></li>
-            <li><a href="/services">Strategic Advisory Services</a></li>
-            <li><a href="/contact">Get in Touch</a></li>
-          </ul>
-        </nav>
+        <section>
+          <h2>Why Your Marketing Feels Inconsistent, Unpredictable, and Expensive</h2>
+          <p>You don't have a traffic problem. You have an architecture problem. When front-end acquisition doesn't talk to your web infrastructure and back-end operations, growth stalls.</p>
+        </section>
+        <section>
+          <h2>The Engineered Growth Engine: How We Build Predictability</h2>
+          <p>Four core pillars: Scientific Paid Media (Meta Ads), Custom Full-Stack Web Engineering (React & Node.js), Automated CRM & Lead Triage Engines, and Strategic Positioning & Offer Mechanics.</p>
+        </section>
+        <section>
+          <h2>One Unified Ecosystem. Three Distinct Capabilities.</h2>
+          <p>Digital Muid (Advisory & Architecture), MK Digitalverse (Global Full-Service Execution), and MK Digitalverse Academy (Skills & Education).</p>
+        </section>
       </main>
     `
   },
