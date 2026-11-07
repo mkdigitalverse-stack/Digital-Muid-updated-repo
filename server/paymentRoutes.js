@@ -173,6 +173,52 @@ export function getAuthoritativeResourcePricing(idOrSlug, resourceRecord = null,
   };
 }
 
+// ==============================================================================
+// AUTHORITATIVE COURSE CATALOG IDENTIFIERS & RESOLUTION
+// ==============================================================================
+export const COURSE_LOCAL_ID_MAP = {
+  "crs-01": "digital-marketing-masterclass",
+  "crs-02": "meta-ads-mastery",
+  "crs-03": "ai-automation-business-operations",
+  "crs-04": "social-media-mastery"
+};
+
+/**
+ * Resolves authoritative course record by UUID, slug, or local identifier.
+ */
+export async function fetchCourseRecordAuthoritative(dbClient, rawCourseIdentifier) {
+  if (!dbClient || !rawCourseIdentifier || typeof rawCourseIdentifier !== "string") {
+    return { course: null, error: new Error("Invalid course identifier or database client.") };
+  }
+  const cleanId = rawCourseIdentifier.trim();
+  const selectFields = "id, slug, title, price, offer_price, offer_expires_at, currency, status, max_seats, enrolled_count";
+
+  if (isValidUUID(cleanId)) {
+    const { data, error } = await dbClient
+      .from("courses")
+      .select(selectFields)
+      .eq("id", cleanId)
+      .maybeSingle();
+
+    if (error) {
+      return { course: null, error };
+    }
+    if (data) {
+      return { course: data, error: null };
+    }
+  }
+
+  // If not UUID or not found by UUID, resolve via slug or local ID map
+  const resolvedSlug = COURSE_LOCAL_ID_MAP[cleanId] || cleanId;
+  const { data, error } = await dbClient
+    .from("courses")
+    .select(selectFields)
+    .eq("slug", resolvedSlug)
+    .maybeSingle();
+
+  return { course: data, error };
+}
+
 const router = express.Router();
 
 /**
@@ -209,15 +255,15 @@ router.post("/create-course-order", async (req, res) => {
 
     // 2. Validate courseId format - ignore any client-sent amount, price, or user ID
     const { courseId } = req.body || {};
-    if (!courseId || !isValidUUID(courseId)) {
+    if (!courseId || typeof courseId !== "string" || !courseId.trim()) {
       return res.status(400).json({
         success: false,
-        error: "A valid courseId (UUID) is required."
+        error: "A valid courseId or course slug is required."
       });
     }
 
     // 3. Obtain database client
-    const dbClient = getSupabaseDbClient(authHeader);
+    const dbClient = getSupabaseDbClient(authHeader) || getSupabaseServerClient();
     if (!dbClient) {
       return res.status(503).json({
         success: false,
@@ -226,11 +272,7 @@ router.post("/create-course-order", async (req, res) => {
     }
 
     // 4. Fetch authoritative course record from Supabase
-    const { data: course, error: courseError } = await dbClient
-      .from("courses")
-      .select("id, title, price, offer_price, offer_expires_at, currency, status, max_seats, enrolled_count")
-      .eq("id", courseId)
-      .maybeSingle();
+    const { course, error: courseError } = await fetchCourseRecordAuthoritative(dbClient, courseId);
 
     if (courseError) {
       console.error("[Create Order] Supabase query error:", courseError.message);
@@ -435,11 +477,11 @@ router.post("/verify-course-payment", async (req, res) => {
       });
     }
 
-    if (!courseId || !isValidUUID(courseId)) {
+    if (!courseId || typeof courseId !== "string" || !courseId.trim()) {
       return res.status(400).json({
         success: false,
         verified: false,
-        error: "A valid courseId (UUID) is required."
+        error: "A valid courseId or course slug is required."
       });
     }
 
@@ -473,7 +515,7 @@ router.post("/verify-course-payment", async (req, res) => {
     );
 
     // 5. Query public.courses for authoritative price & details (NEVER trust client price)
-    const dbClient = getSupabaseDbClient(authHeader);
+    const dbClient = getSupabaseDbClient(authHeader) || getSupabaseServerClient();
     if (!dbClient) {
       return res.status(503).json({
         success: false,
@@ -484,11 +526,7 @@ router.post("/verify-course-payment", async (req, res) => {
       });
     }
 
-    const { data: course, error: courseError } = await dbClient
-      .from("courses")
-      .select("id, slug, title, price, offer_price, offer_expires_at, currency, status")
-      .eq("id", courseId)
-      .maybeSingle();
+    const { course, error: courseError } = await fetchCourseRecordAuthoritative(dbClient, courseId);
 
     if (courseError || !course) {
       return res.status(404).json({

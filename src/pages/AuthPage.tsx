@@ -24,6 +24,16 @@ interface AuthPageProps {
   navigate: (path: string) => void;
 }
 
+/**
+ * Validates that a redirect path is strictly an internal, relative website route.
+ * Rejects external URLs, protocol-relative '//', and javascript: or data: URIs.
+ */
+export function isValidInternalRedirect(path: string | null | undefined): boolean {
+  if (!path || typeof path !== 'string') return false;
+  const trimmed = path.trim();
+  return trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.includes('://');
+}
+
 export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navigate }) => {
   const {
     currentUser,
@@ -65,6 +75,17 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navig
       setMode(initialMode);
     }
   }, [initialMode, isPasswordRecovery]);
+
+  // Immediate post-authentication destination resumption (avoids dashboard diversion)
+  useEffect(() => {
+    if (!isAuthLoading && currentUser && !isPasswordRecovery && mode !== 'reset') {
+      const redirectPath = sessionStorage.getItem('auth_redirect');
+      if (isValidInternalRedirect(redirectPath)) {
+        sessionStorage.removeItem('auth_redirect');
+        navigate(redirectPath!.trim());
+      }
+    }
+  }, [currentUser, isAuthLoading, isPasswordRecovery, mode, navigate]);
 
   // Clear messages on mode switch
   const handleSwitchMode = (targetMode: 'login' | 'register' | 'forgot' | 'reset') => {
@@ -171,9 +192,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navig
         if (res.success) {
           setSuccessMessage('Account registered successfully!');
           const redirectPath = sessionStorage.getItem('auth_redirect');
-          if (redirectPath) {
+          if (isValidInternalRedirect(redirectPath)) {
             sessionStorage.removeItem('auth_redirect');
-            setTimeout(() => navigate(redirectPath), 600);
+            navigate(redirectPath!.trim());
+            return;
           }
         } else {
           setErrorMessage(res.error || 'Registration failed. Please check your details.');
@@ -191,9 +213,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navig
         if (res.success) {
           setSuccessMessage('Signed in successfully!');
           const redirectPath = sessionStorage.getItem('auth_redirect');
-          if (redirectPath) {
+          if (isValidInternalRedirect(redirectPath)) {
             sessionStorage.removeItem('auth_redirect');
-            setTimeout(() => navigate(redirectPath), 600);
+            navigate(redirectPath!.trim());
+            return;
           }
         } else {
           setErrorMessage(res.error || 'Invalid credentials. Please verify your email and password.');
@@ -319,13 +342,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navig
                 <p className="text-xs text-slate-600 leading-relaxed">
                   Your student dashboard and learning progress are ready. Track your courses, continue learning, and master high-leverage frameworks.
                 </p>
-                {typeof window !== 'undefined' && sessionStorage.getItem('auth_redirect') && (
+                {typeof window !== 'undefined' && isValidInternalRedirect(sessionStorage.getItem('auth_redirect')) && (
                   <button
                     type="button"
                     onClick={() => {
                       const redirectPath = sessionStorage.getItem('auth_redirect');
                       sessionStorage.removeItem('auth_redirect');
-                      if (redirectPath) navigate(redirectPath);
+                      if (isValidInternalRedirect(redirectPath)) navigate(redirectPath!.trim());
                     }}
                     className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
                   >

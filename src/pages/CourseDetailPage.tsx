@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   ArrowLeft,
@@ -48,7 +48,9 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({ slug, naviga
     fetchStudentPayments,
     refreshCourseWishlist,
     isCourseWishlisted,
-    toggleCourseWishlist
+    toggleCourseWishlist,
+    isAdminAuthenticated,
+    isAuthLoading
   } = useApp();
   const [fetchedCourse, setFetchedCourse] = useState<Course | null>(null);
   const [isFetchingRemote, setIsFetchingRemote] = useState<boolean>(isSupabaseConfigured());
@@ -232,6 +234,28 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({ slug, naviga
     )
   );
 
+  /**
+   * Preserves checkout intent in sessionStorage so checkout can resume seamlessly
+   * immediately following registration or login without losing context or requiring duplicate clicks.
+   */
+  const saveCheckoutIntentAndRedirectToLogin = () => {
+    if (!course) return;
+    try {
+      sessionStorage.setItem(
+        'pending_course_checkout',
+        JSON.stringify({
+          slug: course.slug,
+          courseId: course.id,
+          intendedAt: Date.now()
+        })
+      );
+      sessionStorage.setItem('auth_redirect', `/learn/${course.slug}?checkout=true`);
+    } catch (err) {
+      console.warn('[Course Detail] Failed to preserve checkout intent:', err);
+    }
+    navigate('/login');
+  };
+
   const handleInitiateRazorpayCheckout = async () => {
     if (!course?.id) return;
 
@@ -242,8 +266,7 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({ slug, naviga
 
     // 1. Require student authentication
     if (!currentUser) {
-      sessionStorage.setItem('auth_redirect', `/learn/${course.slug}`);
-      navigate('/login');
+      saveCheckoutIntentAndRedirectToLogin();
       return;
     }
 
@@ -321,7 +344,7 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({ slug, naviga
               razorpay_order_id: response.razorpay_order_id,
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
-              courseId: course.id
+              courseId: orderResult.courseId || course.id
             });
 
             if (verifyResult.success && verifyResult.verified) {
@@ -395,6 +418,21 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({ slug, naviga
   };
 
   const handleOpenEnrollModal = (initialTab: 'checkout' | 'enquiry' = 'checkout') => {
+    if (!currentUser && course) {
+      try {
+        sessionStorage.setItem(
+          'pending_course_checkout',
+          JSON.stringify({
+            slug: course.slug,
+            courseId: course.id,
+            intendedAt: Date.now()
+          })
+        );
+        sessionStorage.setItem('auth_redirect', `/learn/${course.slug}?checkout=true`);
+      } catch (e) {
+        // Safe fallback
+      }
+    }
     setIsEnrollModalOpen(true);
     setEnrollTab(initialTab);
     if (checkoutStatus !== 'verification_pending') {
@@ -419,6 +457,76 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({ slug, naviga
       setCheckoutError(null);
     }
   };
+
+  // Guard to ensure auto-checkout resumption triggers at most once per page lifecycle
+  const hasResumedCheckoutRef = useRef(false);
+
+  useEffect(() => {
+    if (isAuthLoading || !currentUser || !course || hasResumedCheckoutRef.current) {
+      return;
+    }
+
+    let shouldResume = false;
+    let urlParamPresent = false;
+
+    if (typeof window !== 'undefined') {
+      try {
+        const searchParams = new URLSearchParams(window.location.search);
+        if (searchParams.get('checkout') === 'true') {
+          shouldResume = true;
+          urlParamPresent = true;
+        }
+
+        const rawPending = sessionStorage.getItem('pending_course_checkout');
+        if (rawPending) {
+          const parsed = JSON.parse(rawPending);
+          if (
+            (parsed?.slug === course.slug || parsed?.courseId === course.id) &&
+            (!parsed.intendedAt || Date.now() - parsed.intendedAt < 2 * 60 * 60 * 1000)
+          ) {
+            shouldResume = true;
+          }
+        }
+      } catch (err) {
+        console.warn('[Course Detail] Checkout resumption error:', err);
+      }
+    }
+
+    if (shouldResume) {
+      hasResumedCheckoutRef.current = true;
+
+      // Clear preserved checkout intent immediately so it cannot re-trigger
+      try {
+        sessionStorage.removeItem('pending_course_checkout');
+        sessionStorage.removeItem('auth_redirect');
+        if (urlParamPresent && typeof window !== 'undefined' && window.history?.replaceState) {
+          const cleanUrl = window.location.pathname + window.location.hash;
+          window.history.replaceState({}, '', cleanUrl);
+        }
+      } catch (e) {
+        // Safe fallback
+      }
+
+      // Check whether user already has active access
+      const alreadyEnrolled = studentEnrollments.some(
+        (e) => (e.courseId === course.id || e.course?.slug === course.slug) && e.status === 'active'
+      );
+
+      if (alreadyEnrolled) {
+        setIsEnrollModalOpen(true);
+        setCheckoutStatus('already_enrolled');
+        return;
+      }
+
+      // Auto-open modal on checkout tab and initiate Razorpay checkout with authoritative price
+      setIsEnrollModalOpen(true);
+      setEnrollTab('checkout');
+      setCheckoutStatus('idle');
+      setCheckoutError(null);
+
+      handleInitiateRazorpayCheckout();
+    }
+  }, [currentUser, isAuthLoading, course, studentEnrollments]);
 
   const handleEnrollSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -677,37 +785,45 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({ slug, naviga
                                   <Play className="w-2.5 h-2.5 fill-current" />
                                   <span>Free Preview</span>
                                 </button>
-                              ) : Boolean(typeof lesson === 'object' && lesson?.hasSecureMedia) ? (
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenLessonPlayback(modTitle, lesson)}
-                                  className="inline-flex items-center gap-1 text-[10px] text-emerald-700 hover:text-emerald-800 font-semibold font-mono bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200 transition-colors cursor-pointer"
-                                  title="Open Lesson Stream"
-                                >
-                                  <Shield className="w-2.5 h-2.5 text-emerald-600" />
-                                  <span>Watch Lesson</span>
-                                </button>
-                              ) : isEnrolled ? (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    navigate(
-                                      `/learn/${course.slug}/player?lesson=${
-                                        typeof lesson === 'object' ? lesson.id : ''
-                                      }`
-                                    )
-                                  }
-                                  className="inline-flex items-center gap-1 text-[10px] text-[#FF6B00] hover:text-[#e66000] font-bold font-mono bg-orange-50 hover:bg-orange-100 px-2 py-0.5 rounded border border-orange-200 transition-colors cursor-pointer"
-                                  title="Play in Course Player"
-                                >
-                                  <Play className="w-2.5 h-2.5 fill-[#FF6B00]" />
-                                  <span>Play Lesson</span>
-                                </button>
+                              ) : (isEnrolled || isAdminAuthenticated) ? (
+                                Boolean(typeof lesson === 'object' && lesson?.hasSecureMedia) ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenLessonPlayback(modTitle, lesson)}
+                                    className="inline-flex items-center gap-1 text-[10px] text-emerald-700 hover:text-emerald-800 font-semibold font-mono bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200 transition-colors cursor-pointer"
+                                    title="Open Lesson Stream"
+                                  >
+                                    <Shield className="w-2.5 h-2.5 text-emerald-600" />
+                                    <span>Watch Lesson</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      navigate(
+                                        `/learn/${course.slug}/player?lesson=${
+                                          typeof lesson === 'object' ? lesson.id : ''
+                                        }`
+                                      )
+                                    }
+                                    className="inline-flex items-center gap-1 text-[10px] text-[#FF6B00] hover:text-[#e66000] font-bold font-mono bg-orange-50 hover:bg-orange-100 px-2 py-0.5 rounded border border-orange-200 transition-colors cursor-pointer"
+                                    title="Play in Course Player"
+                                  >
+                                    <Play className="w-2.5 h-2.5 fill-[#FF6B00]" />
+                                    <span>Play Lesson</span>
+                                  </button>
+                                )
                               ) : (
                                 <button
                                   type="button"
-                                  onClick={() => setIsEnrollModalOpen(true)}
-                                  className="inline-flex items-center gap-1 text-[10px] text-slate-500 font-medium font-mono bg-slate-50 hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 transition-colors cursor-pointer"
+                                  onClick={() => {
+                                    if (!currentUser) {
+                                      saveCheckoutIntentAndRedirectToLogin();
+                                    } else {
+                                      handleOpenEnrollModal('checkout');
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-700 font-medium font-mono bg-slate-50 hover:bg-slate-100 px-2 py-0.5 rounded border border-slate-200 transition-colors cursor-pointer"
                                   title="Enrolled students only"
                                 >
                                   <Lock className="w-2.5 h-2.5 text-slate-400" />
@@ -1001,10 +1117,7 @@ export const CourseDetailPage: React.FC<CourseDetailPageProps> = ({ slug, naviga
 
                     <button
                       type="button"
-                      onClick={() => {
-                        sessionStorage.setItem('auth_redirect', `/learn/${course.slug}`);
-                        navigate('/login');
-                      }}
+                      onClick={saveCheckoutIntentAndRedirectToLogin}
                       className="w-full py-3.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <UserIcon className="w-4 h-4" />
