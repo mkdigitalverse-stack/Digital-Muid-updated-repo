@@ -33,6 +33,7 @@ import {
 import { StudentEnrollmentWithCourse, LessonProgress, Resource, Framework, Course } from '../types';
 import { INITIAL_COURSES } from '../data/initialData';
 import { progressService, resourceService } from '../services';
+import { isAuthoritativePaidResource } from '../constants/authoritativePaidResources';
 
 interface StudentDashboardPageProps {
   navigate: (path: string) => void;
@@ -114,7 +115,7 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
   }, [studentEnrollments, resources, frameworks]);
 
   const handleDeliverToolkit = async (res: Resource) => {
-    const isPaid = (res.accessType === 'paid' || (res as any).access_type === 'paid') && (res.price || 0) > 0;
+    const isPaid = isAuthoritativePaidResource(res.id) || isAuthoritativePaidResource(res.slug) || ((res.accessType === 'paid' || (res as any).access_type === 'paid') && (res.price || 0) > 0);
     const isEntitled = !isPaid || hasPurchasedResource(res.id);
 
     if (isPaid && !isEntitled) {

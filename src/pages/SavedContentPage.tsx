@@ -19,6 +19,7 @@ import {
   Layers,
   CheckCircle2
 } from 'lucide-react';
+import { isAuthoritativePaidResource } from '../constants/authoritativePaidResources';
 import { BookmarkContentType, SavedContentItem, Resource } from '../types';
 import { resourceService } from '../services';
 
@@ -206,7 +207,7 @@ export const SavedContentPage: React.FC<SavedContentPageProps> = ({ navigate }) 
   const handleDeliverResource = async (res: Resource) => {
     if (!res) return;
 
-    const isPaid = (res.accessType === 'paid' || (res as any).access_type === 'paid') && (res.price || 0) > 0;
+    const isPaid = isAuthoritativePaidResource(res.id) || isAuthoritativePaidResource(res.slug) || ((res.accessType === 'paid' || (res as any).access_type === 'paid') && (res.price || 0) > 0);
     const isEntitled = !isPaid || hasPurchasedResource(res.id);
 
     if (isPaid && !isEntitled) {

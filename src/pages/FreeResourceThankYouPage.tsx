@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext';
 import { resourceService } from '../services/resourceService';
 import { analytics } from '../utils/analytics';
 import { Resource } from '../types';
+import { isAuthoritativePaidResource } from '../constants/authoritativePaidResources';
 import {
   CheckCircle2,
   Download,
@@ -39,6 +40,7 @@ export const FreeResourceThankYouPage: React.FC<FreeResourceThankYouPageProps> =
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [downloadSuccess, setDownloadSuccess] = useState<boolean>(false);
+  const [isPaidBlocked, setIsPaidBlocked] = useState<boolean>(false);
   const conversionTrackedRef = useRef<boolean>(false);
 
   // Identify resource and verify lead authorization
@@ -54,15 +56,30 @@ export const FreeResourceThankYouPage: React.FC<FreeResourceThankYouPageProps> =
       return;
     }
 
+    // Security Guard: Immediately block if resource is an authoritative paid resource
+    if (isAuthoritativePaidResource(resId)) {
+      setIsPaidBlocked(true);
+      setIsLoading(false);
+      return;
+    }
+
     const found = resources.find(r => r.id === resId || r.slug === resId);
     if (found) {
-      setMatchedResource(found);
+      if (isAuthoritativePaidResource(found.id) || isAuthoritativePaidResource(found.slug) || found.accessType === 'paid') {
+        setIsPaidBlocked(true);
+      } else {
+        setMatchedResource(found);
+      }
       setIsLoading(false);
     } else {
       // Attempt async fetch by slug or ID
       resourceService.fetchResourceBySlug(resId).then(res => {
         if (res.data) {
-          setMatchedResource(res.data);
+          if (isAuthoritativePaidResource(res.data.id) || isAuthoritativePaidResource(res.data.slug) || res.data.accessType === 'paid') {
+            setIsPaidBlocked(true);
+          } else {
+            setMatchedResource(res.data);
+          }
         }
         setIsLoading(false);
       }).catch(() => {
@@ -102,6 +119,14 @@ export const FreeResourceThankYouPage: React.FC<FreeResourceThankYouPageProps> =
 
   const handleDownload = async () => {
     if (!matchedResource) return;
+
+    // Strict Guard: Never deliver a paid resource via free thank you handler
+    if (isPaidBlocked || isAuthoritativePaidResource(matchedResource.id) || isAuthoritativePaidResource(matchedResource.slug) || matchedResource.accessType === 'paid') {
+      notify("Paid toolkits require a confirmed purchase and cannot be downloaded here.", "error");
+      navigate(`/resources?resourceId=${encodeURIComponent(matchedResource.id)}`);
+      return;
+    }
+
     setIsDownloading(true);
     setDownloadError(null);
 
@@ -113,7 +138,7 @@ export const FreeResourceThankYouPage: React.FC<FreeResourceThankYouPageProps> =
         fileType: matchedResource.fileType || matchedResource.format || 'pdf'
       });
 
-      const delivery = await resourceService.deliverResource(matchedResource, { isAuthorized: true });
+      const delivery = await resourceService.deliverResource(matchedResource);
       if (delivery.success) {
         setDownloadSuccess(true);
         notify(`Downloading ${matchedResource.title || 'resource'}...`, 'success');
@@ -135,6 +160,32 @@ export const FreeResourceThankYouPage: React.FC<FreeResourceThankYouPageProps> =
         <div className="text-center space-y-3">
           <Loader2 className="w-8 h-8 animate-spin text-amber-500 mx-auto" />
           <p className="text-sm text-slate-600 font-medium">Verifying your free access pass...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Security blocked view for paid resources
+  if (isPaidBlocked) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center px-4 py-16 bg-slate-50">
+        <div className="max-w-md w-full bg-white rounded-3xl p-8 border border-amber-200 shadow-sm text-center space-y-5">
+          <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto text-amber-600">
+            <AlertCircle className="w-7 h-7" />
+          </div>
+          <div className="space-y-2">
+            <h1 className="text-2xl font-display font-bold text-slate-900">Paid Toolkit Access</h1>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              This toolkit is a premium paid resource and cannot be downloaded via the free enquiry portal. A verified purchase is required to unlock this content.
+            </p>
+          </div>
+          <button
+            onClick={() => navigate(params.resourceId ? `/resources?resourceId=${encodeURIComponent(params.resourceId)}` : '/resources')}
+            className="w-full py-3.5 px-6 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-sm"
+          >
+            <span>Proceed to Official Checkout</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
         </div>
       </div>
     );

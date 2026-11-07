@@ -3,6 +3,11 @@ import { Resource, ResourcePurchase } from '../types';
 import { slugify } from './articleService';
 import { generateResourcePdfBlob } from '../utils/pdfGenerator';
 import { normalizeThumbnailUrl } from '../utils/thumbnailUtils';
+import {
+  isAuthoritativePaidResource,
+  getAuthoritativePaidResourceInfo,
+  AUTHORITATIVE_PAID_RESOURCES
+} from '../constants/authoritativePaidResources';
 
 /**
  * Transforms a raw row from public.resource_purchases into a domain ResourcePurchase object.
@@ -88,23 +93,34 @@ export const mapDbRowToResource = (row: any): Resource => {
     ? rawPubDate.split('T')[0]
     : (rawPubDate ? String(rawPubDate) : undefined);
 
+  // Authoritative Paid Catalog Resolution:
+  // Guarantees immutable, authoritative pricing and paid status regardless of missing DB columns or empty localStorage
+  const authoritativeInfo = getAuthoritativePaidResourceInfo(row.id) || getAuthoritativePaidResourceInfo(row.slug);
+  const isAuthoritative = Boolean(authoritativeInfo);
+
   const localOverrides = getResourcePricingOverrides();
   const localOverride = (row.id ? localOverrides[row.id] : null) || (row.slug ? localOverrides[row.slug] : null);
 
   const rawAccessType = row.access_type ?? row.accessType;
-  const resolvedAccessType = (rawAccessType !== undefined && rawAccessType !== null
-    ? String(rawAccessType).toLowerCase()
-    : (localOverride?.accessType || 'free')) as 'free' | 'paid';
+  // If authoritatively paid, NEVER allow downgrading to 'free' via localOverride or missing DB fields!
+  const resolvedAccessType: 'free' | 'paid' = isAuthoritative
+    ? 'paid'
+    : (rawAccessType !== undefined && rawAccessType !== null
+      ? (String(rawAccessType).toLowerCase() === 'paid' ? 'paid' : 'free')
+      : (localOverride?.accessType === 'paid' ? 'paid' : 'free'));
 
   const rawPrice = row.price;
-  const resolvedPrice = typeof rawPrice === 'number'
-    ? rawPrice
-    : (rawPrice !== undefined && rawPrice !== null ? (parseFloat(rawPrice) || 0) : (localOverride?.price ?? 0));
+  const resolvedPrice = isAuthoritative
+    ? authoritativeInfo!.price
+    : (typeof rawPrice === 'number'
+      ? rawPrice
+      : (rawPrice !== undefined && rawPrice !== null ? (parseFloat(rawPrice) || 0) : (localOverride?.price ?? 0)));
 
-  const resolvedCurrency = row.currency || localOverride?.currency || 'INR';
+  const resolvedCurrency = authoritativeInfo?.currency || row.currency || localOverride?.currency || 'INR';
 
   // Security: Redact private paid file locations from unauthenticated public queries
-  const isPaid = resolvedAccessType === 'paid' && resolvedPrice > 0;
+  // Authoritative paid resources MUST ALWAYS have their fileUrl and downloadUrl redacted to undefined!
+  const isPaid = isAuthoritative || (resolvedAccessType === 'paid' && resolvedPrice > 0);
   const allowExplicitUrls = Boolean(row.__allow_paid_urls);
   const rawFileUrl = row.file_url || row.fileUrl || row.downloadUrl || undefined;
   const rawExternalUrl = row.external_url || row.externalUrl || undefined;
@@ -145,9 +161,9 @@ export const mapDbRowToResource = (row: any): Resource => {
     leadCaptureRequired: row.lead_capture_required !== undefined ? Boolean(row.lead_capture_required) : true,
     seoTitle: row.seo_title || row.seoTitle || undefined,
     seoDescription: row.seo_description || row.seoDescription || undefined,
-    accessType: resolvedAccessType === 'paid' ? 'paid' : 'free',
-    access_type: resolvedAccessType === 'paid' ? 'paid' : 'free',
-    price: resolvedAccessType === 'paid' ? Math.max(0, resolvedPrice) : 0,
+    accessType: isPaid ? 'paid' : 'free',
+    access_type: isPaid ? 'paid' : 'free',
+    price: isPaid ? Math.max(0, resolvedPrice) : 0,
     currency: resolvedCurrency,
     createdAt: String(row.created_at || row.createdAt || new Date().toISOString()),
     updatedAt: String(row.updated_at || row.updatedAt || new Date().toISOString())
@@ -745,19 +761,15 @@ export const resourceService = {
       return { success: false, error: 'This resource is temporarily unavailable. Please try again later.' };
     }
 
-    const isPaid = (resource.accessType === 'paid' || (resource as any).access_type === 'paid') && (resource.price || 0) > 0;
-    if (isPaid && !options?.isAuthorized) {
-      console.warn(`[Resource Delivery Guard] Unauthorized delivery attempt for paid resource: ${resource.id}`);
-      return {
-        success: false,
-        error: 'This is a paid resource. Valid payment verification is required to download or access this content.'
-      };
-    }
+    const isAuthoritativelyPaid = isAuthoritativePaidResource(resource.id) || isAuthoritativePaidResource(resource.slug);
+    const isPaid = isAuthoritativelyPaid || ((resource.accessType === 'paid' || (resource as any).access_type === 'paid') && (resource.price || 0) > 0);
 
     let externalUrl = resource.externalUrl?.trim() || null;
     let rawFileUrl = (resource.fileUrl || resource.downloadUrl)?.trim() || null;
 
-    // Server-side payment verification and asset link resolution for paid assets
+    // Strict Server-Side Purchase Verification:
+    // Client-side isAuthorized flags are NEVER accepted as proof of purchase.
+    // Every paid download must be authoritatively verified by the server.
     if (isPaid) {
       try {
         const { data: authSessionData } = isSupabaseConfigured()
@@ -996,7 +1008,15 @@ export const resourceService = {
 
       // -------------------------------------------------------------
       // 4. Reliable Client-Side Dynamic PDF Generation Fallback
+      // (STRICT: Allowed ONLY for free resources. Paid assets must NEVER fall back to client PDF generation)
       // -------------------------------------------------------------
+      if (isPaid) {
+        return {
+          success: false,
+          error: 'The authorized paid asset could not be delivered. Please try again or contact support.'
+        };
+      }
+
       deliveryMethod = 'Dynamic PDF';
       resolvedUrl = 'blob:application/pdf';
 

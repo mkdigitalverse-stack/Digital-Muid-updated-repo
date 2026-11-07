@@ -8,7 +8,7 @@ import { isRazorpayConfigured, isWebhookConfigured } from "./server/razorpay.js"
 import { isSupabaseServerConfigured } from "./server/supabaseServer.js";
 import { isMailerConfigured } from "./server/mailerService.js";
 import { handleRazorpayWebhook } from "./server/paymentWebhook.js";
-import paymentRoutes from "./server/paymentRoutes.js";
+import paymentRoutes, { isAssetTokenSecretConfigured } from "./server/paymentRoutes.js";
 import webEnquiryRoutes from "./server/webEnquiryRoutes.js";
 import growthAuditRoutes from "./server/growthAuditRoutes.js";
 import authRoutes from "./server/authRoutes.js";
@@ -113,6 +113,7 @@ async function startServer() {
         webhookConfigured: isWebhookConfigured(),
         supabaseServerConfigured: isSupabaseServerConfigured(),
         emailConfigured: isMailerConfigured(),
+        assetTokenSecretConfigured: isAssetTokenSecretConfigured(),
       },
     });
   });
@@ -136,6 +137,45 @@ async function startServer() {
 
   // 8. Legacy WordPress 301 Redirects & 410 Retirements Middleware
   app.use(seoRedirectMiddleware);
+
+  // 8.5. Security Guard: Prohibit unauthorised direct HTTP/GET/HEAD access to paid digital assets
+  const PROTECTED_ASSET_IDENTIFIERS = [
+    "meta-ads-campaign-planner-workbook",
+    "the-ad-budget-break-even-calculator",
+    "the-ad-budget-breat-even-calculate",
+    "10-high-converting-meta-ads-copy-frameworks",
+    "pre-launch-tracking-audit-checklist",
+    "meta-ads-campaign-planner-bundle"
+  ];
+
+  app.use((req, res, next) => {
+    // Exempt authorized API routes
+    if (req.path.startsWith("/api/")) {
+      return next();
+    }
+
+    let decodedPath = "";
+    try {
+      decodedPath = decodeURIComponent(req.originalUrl || req.url || req.path).toLowerCase();
+    } catch {
+      decodedPath = (req.originalUrl || req.url || req.path).toLowerCase();
+    }
+
+    const matchesProtectedAsset = PROTECTED_ASSET_IDENTIFIERS.some((ident) =>
+      decodedPath.includes(ident.toLowerCase())
+    );
+
+    if (matchesProtectedAsset) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      res.setHeader("Pragma", "no-cache");
+      return res.status(403).json({
+        error: "Forbidden",
+        message: "Direct access to paid digital assets is strictly prohibited. A confirmed, verified purchase is required."
+      });
+    }
+
+    next();
+  });
 
   // 9. Vite middleware for development / Static fallback for production
   if (!isProduction) {
@@ -176,7 +216,11 @@ async function startServer() {
       }
     });
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    const distPath = fs.existsSync(path.join(process.cwd(), "dist", "index.html"))
+      ? path.join(process.cwd(), "dist")
+      : (fs.existsSync(path.join(process.cwd(), "index.html"))
+          ? process.cwd()
+          : path.join(__dirname, "..", "dist"));
     const indexPath = path.join(distPath, "index.html");
 
     app.use(express.static(distPath, { index: false, redirect: false }));

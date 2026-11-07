@@ -8,6 +8,7 @@ import { findFrameworksForResource } from '../utils/frameworkRelationships';
 import { loadRazorpayCheckoutScript, getClientRazorpayKeyId } from '../lib/razorpay';
 import { analytics } from '../utils/analytics';
 import { SafeImage } from '../components/SafeImage';
+import { isAuthoritativePaidResource, getAuthoritativePaidResourceInfo } from '../constants/authoritativePaidResources';
 
 interface ResourcesPageProps {
   navigate: (path: string) => void;
@@ -121,7 +122,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
     if (targetId && targetId !== dismissedResourceId) {
       const res = publishedResources.find((r) => r.id === targetId || r.slug === targetId);
       if (res) {
-        const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
+        const isPaid = isAuthoritativePaidResource(res.id) || isAuthoritativePaidResource(res.slug) || ((res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0);
         if (isPaid) {
           if (!hasPurchasedResource(res.id)) {
             const saved = getSavedCheckoutData(res.id);
@@ -159,7 +160,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
 
   const handleDownloadClick = async (res: Resource) => {
     setDismissedResourceId(null);
-    const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
+    const isPaid = isAuthoritativePaidResource(res.id) || isAuthoritativePaidResource(res.slug) || ((res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0);
 
     // 1. Paid resources: require verified purchase
     if (isPaid) {
@@ -588,10 +589,12 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                         {resType}
                       </span>
                       {(() => {
-                        const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
+                        const isPaid = isAuthoritativePaidResource(res.id) || isAuthoritativePaidResource(res.slug) || ((res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0);
+                        const authInfo = getAuthoritativePaidResourceInfo(res.id) || getAuthoritativePaidResourceInfo(res.slug);
+                        const displayPrice = authInfo ? authInfo.price : res.price;
                         return isPaid ? (
                           <span className="text-xs font-mono font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200">
-                            Paid • ₹{res.price}
+                            Paid • ₹{displayPrice}
                           </span>
                         ) : (
                           <span className="text-xs font-mono font-bold text-blue-800 bg-blue-50 px-2.5 py-1 rounded border border-blue-200">
@@ -659,8 +662,10 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
 
                 <div className="flex items-center gap-2 pt-1">
                   {(() => {
-                    const isPaid = (res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0;
+                    const isPaid = isAuthoritativePaidResource(res.id) || isAuthoritativePaidResource(res.slug) || ((res.accessType === 'paid' || res.access_type === 'paid') && (res.price || 0) > 0);
                     const isPurchased = hasPurchasedResource(res.id);
+                    const authInfo = getAuthoritativePaidResourceInfo(res.id) || getAuthoritativePaidResourceInfo(res.slug);
+                    const displayPrice = authInfo ? authInfo.price : res.price;
 
                     return (
                       <button
@@ -677,7 +682,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                         {isPaid && !isPurchased ? (
                           <>
                             <Lock className="w-4 h-4" />
-                            <span>Unlock Toolkit • ₹{res.price}</span>
+                            <span>Unlock Toolkit • ₹{displayPrice}</span>
                           </>
                         ) : (
                           <>

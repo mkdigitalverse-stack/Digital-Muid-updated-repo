@@ -1,5 +1,7 @@
 import express from "express";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 import {
   getRazorpayClient,
   getRazorpayKeyId,
@@ -44,6 +46,98 @@ export const AUTHORITATIVE_PAID_RESOURCES = {
   "6867ecdd-2797-40f0-bdc8-ead20600ac6c": { price: 79, accessType: "paid", currency: "INR" },
   "pre-launch-tracking-audit-checklist": { price: 79, accessType: "paid", currency: "INR" }
 };
+
+/**
+ * Dedicated high-entropy HMAC secret for paid asset access tokens.
+ * Requires at least 32 bytes (256 bits) of entropy.
+ * Returns null if missing, empty, or under 32 bytes (fails closed).
+ * Does NOT use Supabase service role key or hardcoded fallback.
+ */
+export function getAssetHmacSecret() {
+  const secret = process.env.ASSET_TOKEN_HMAC_SECRET;
+  if (!secret || typeof secret !== "string") {
+    return null;
+  }
+  const clean = secret.trim();
+  // Ensure minimum 32 bytes of key material
+  if (Buffer.byteLength(clean, "utf8") < 32) {
+    console.error("[Security Alert] ASSET_TOKEN_HMAC_SECRET has insufficient entropy (< 32 bytes). Failing closed.");
+    return null;
+  }
+  return clean;
+}
+
+export function isAssetTokenSecretConfigured() {
+  return Boolean(getAssetHmacSecret());
+}
+
+/**
+ * Transitional fallback secret for validating active unexpired tokens issued within the past 1 hour.
+ * Allows graceful cutover without breaking active sessions for legitimate buyers.
+ */
+function getTransitionalLegacySecret() {
+  const legacy = process.env.RAZORPAY_KEY_SECRET;
+  if (!legacy || typeof legacy !== "string") return null;
+  const clean = legacy.trim();
+  return clean.length >= 8 ? clean : null;
+}
+
+export function generateAssetAccessToken(resourceId, authId) {
+  const secret = getAssetHmacSecret();
+  if (!secret) {
+    console.error("[Security Guard] Cannot issue asset download token: ASSET_TOKEN_HMAC_SECRET is missing or invalid.");
+    return null;
+  }
+
+  const payload = {
+    resourceId: String(resourceId).trim(),
+    authId: String(authId || "guest").trim(),
+    expiresAt: Date.now() + 60 * 60 * 1000 // 1 hour expiration
+  };
+  const json = JSON.stringify(payload);
+  const data = Buffer.from(json).toString("base64url");
+  const sig = crypto.createHmac("sha256", secret).update(data).digest("base64url");
+  return `${data}.${sig}`;
+}
+
+export function verifyAssetAccessToken(token) {
+  if (!token || typeof token !== "string" || !token.includes(".")) return null;
+  const [data, sig] = token.split(".");
+  if (!data || !sig) return null;
+
+  const primarySecret = getAssetHmacSecret();
+  let isValidSig = false;
+
+  // 1. Primary verification using dedicated high-entropy ASSET_TOKEN_HMAC_SECRET
+  if (primarySecret) {
+    const expectedSig = crypto.createHmac("sha256", primarySecret).update(data).digest("base64url");
+    if (sig.length === expectedSig.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
+      isValidSig = true;
+    }
+  }
+
+  // 2. Safe transitional grace period: if token was generated with legacy RAZORPAY_KEY_SECRET in the last hour
+  if (!isValidSig) {
+    const legacySecret = getTransitionalLegacySecret();
+    if (legacySecret) {
+      const expectedLegacySig = crypto.createHmac("sha256", legacySecret).update(data).digest("base64url");
+      if (sig.length === expectedLegacySig.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedLegacySig))) {
+        isValidSig = true;
+      }
+    }
+  }
+
+  // Fail closed if signature did not match either key
+  if (!isValidSig) return null;
+
+  try {
+    const payload = JSON.parse(Buffer.from(data, "base64url").toString("utf8"));
+    if (!payload.expiresAt || Date.now() > payload.expiresAt) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
 
 export function getAuthoritativeResourcePricing(idOrSlug, resourceRecord = null, fallbackBody = null) {
   const clean = String(idOrSlug || "").trim();
@@ -1735,11 +1829,11 @@ router.post("/get-resource-download-url", async (req, res) => {
     // If paid, verify authorization
     let isAuthorized = false;
 
-    // Check paymentId and orderId against database (strict dual-identifier requirement)
+    // Check paymentId and orderId against database (strict dual-identifier requirement + user ownership)
     if (cleanPaymentId && cleanOrderId) {
       const { data: pRecord } = await supabaseServer
         .from("payments")
-        .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, item_id, item_type")
+        .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, item_id, item_type, user_id")
         .eq("razorpay_payment_id", cleanPaymentId)
         .eq("razorpay_order_id", cleanOrderId)
         .in("item_id", allowedResourceIds)
@@ -1755,13 +1849,16 @@ router.post("/get-resource-download-url", async (req, res) => {
         pRecord.razorpay_payment_id === cleanPaymentId &&
         String(pRecord.currency || "").toUpperCase() === "INR"
       ) {
-        isAuthorized = true;
+        // Enforce ownership: if user is logged in, payment must either belong to this user or have no user_id (guest)
+        if (!authenticatedUser || !pRecord.user_id || pRecord.user_id === authenticatedUser.id) {
+          isAuthorized = true;
+        }
       }
 
       if (!isAuthorized) {
         const { data: purRecord } = await supabaseServer
           .from("resource_purchases")
-          .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, resource_id")
+          .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, resource_id, user_id")
           .eq("razorpay_payment_id", cleanPaymentId)
           .eq("razorpay_order_id", cleanOrderId)
           .in("resource_id", allowedResourceIds)
@@ -1776,7 +1873,10 @@ router.post("/get-resource-download-url", async (req, res) => {
           purRecord.razorpay_payment_id === cleanPaymentId &&
           String(purRecord.currency || "").toUpperCase() === "INR"
         ) {
-          isAuthorized = true;
+          // Enforce ownership
+          if (!authenticatedUser || !purRecord.user_id || purRecord.user_id === authenticatedUser.id) {
+            isAuthorized = true;
+          }
         }
       }
 
@@ -1918,6 +2018,18 @@ router.post("/get-resource-download-url", async (req, res) => {
       } else {
         finalDownloadUrl = rawUrl;
       }
+    }
+
+    // Fallback: If Supabase Storage signed URL is unavailable, generate an authoritative server download link
+    if (!finalDownloadUrl || finalDownloadUrl.startsWith("/downloads/")) {
+      const token = generateAssetAccessToken(resourceRecord.id, cleanPaymentId || authenticatedUser?.id || "authorized");
+      if (!token) {
+        return res.status(503).json({
+          success: false,
+          error: "Asset delivery service is temporarily unconfigured. Please contact support."
+        });
+      }
+      finalDownloadUrl = `/api/payments/download-paid-asset?token=${token}`;
     }
 
     return res.json({
@@ -2119,6 +2231,12 @@ async function handleBundleFilesRequest(req, res) {
         .from("resources")
         .createSignedUrl(item.storagePath, 3600);
 
+      let fileUrl = sData?.signedUrl || null;
+      if (!fileUrl) {
+        const token = generateAssetAccessToken(item.id, cleanPaymentId || authenticatedUser?.id || "bundle-authorized");
+        fileUrl = `/api/payments/download-paid-asset?token=${token}`;
+      }
+
       signedFiles.push({
         id: item.id,
         slug: item.slug,
@@ -2127,7 +2245,7 @@ async function handleBundleFilesRequest(req, res) {
         format: item.format,
         fileSize: item.fileSize,
         filename: item.filename,
-        downloadUrl: sData?.signedUrl || null
+        downloadUrl: fileUrl
       });
     }
 
@@ -2151,6 +2269,78 @@ async function handleBundleFilesRequest(req, res) {
 
 router.get("/bundle-files", handleBundleFilesRequest);
 router.post("/get-bundle-files", handleBundleFilesRequest);
+
+/**
+ * GET /api/payments/download-paid-asset
+ *
+ * Secure server-side download streamer for verified paid assets.
+ * Requires a cryptographically signed, unexpired HMAC token generated by the server.
+ * Rejects missing, invalid, expired, or tampered tokens with 403 Forbidden.
+ */
+router.get("/download-paid-asset", async (req, res) => {
+  try {
+    const { token } = req.query;
+    const payload = verifyAssetAccessToken(token);
+    if (!payload || !payload.resourceId) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      return res.status(403).json({
+        success: false,
+        error: "Forbidden: Invalid, expired, or tampered download token. Please generate a fresh access link."
+      });
+    }
+
+    const { resourceId } = payload;
+    const cleanId = String(resourceId).trim();
+    const matched = BUNDLE_ITEMS.find((b) => b.id === cleanId || b.slug === cleanId ||
+      (b.slug === "the-ad-budget-breat-even-calculate" && cleanId === "the-ad-budget-break-even-calculator")) ||
+      (cleanId === BUNDLE_RESOURCE_ID || cleanId === BUNDLE_SLUG ? { filename: "meta-ads-campaign-planner-bundle.zip" } : null);
+
+    const filename = matched?.filename || "meta-ads-campaign-planner-workbook.pdf";
+    const candidateDirs = [
+      path.join(process.cwd(), "server", "protected_downloads"),
+      path.join(process.cwd(), "protected_downloads"),
+      path.join(__dirname, "..", "server", "protected_downloads"),
+      path.join(__dirname, "server", "protected_downloads"),
+      path.join(__dirname, "protected_downloads"),
+      path.join(__dirname, "..", "protected_downloads")
+    ];
+
+    let filePath = null;
+    for (const cDir of candidateDirs) {
+      const candidatePath = path.join(cDir, filename);
+      if (fs.existsSync(candidatePath)) {
+        filePath = candidatePath;
+        break;
+      }
+    }
+
+    if (!filePath || !fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, error: "Asset file temporarily unavailable." });
+    }
+
+    res.setHeader("Cache-Control", "private, no-cache, no-store, must-revalidate, max-age=0");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+
+    const ext = path.extname(filename).toLowerCase();
+    const mimeType = ext === ".pdf"
+      ? "application/pdf"
+      : ext === ".xlsx"
+      ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      : ext === ".zip"
+      ? "application/zip"
+      : "application/octet-stream";
+
+    res.setHeader("Content-Type", mimeType);
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+    const stream = fs.createReadStream(filePath);
+    return stream.pipe(res);
+  } catch (err) {
+    console.error("[Download Paid Asset] Stream error:", err);
+    return res.status(500).json({ success: false, error: "Failed to download asset." });
+  }
+});
 
 /**
  * GET /api/payments/admin/all-payments
