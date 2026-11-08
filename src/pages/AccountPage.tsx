@@ -34,7 +34,10 @@ import {
 } from 'lucide-react';
 import { Certificate, PaymentRecord } from '../types';
 import { CourseCertificateCelebrationModal } from '../components/CourseCertificateCelebrationModal';
+import { InvoiceModal } from '../components/InvoiceModal';
 import { downloadCertificatePdf, downloadInvoicePdf } from '../utils/pdfGenerator';
+import { formatStudentId, formatInvoiceNumber } from '../utils/studentId';
+import { paymentService } from '../services/paymentService';
 
 interface AccountPageProps {
   navigate: (path: string) => void;
@@ -73,8 +76,14 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
 
   const [selectedCertForModal, setSelectedCertForModal] = useState<Certificate | null>(null);
   const [copiedPaymentId, setCopiedPaymentId] = useState<string | null>(null);
+  const [copiedInvoiceNumber, setCopiedInvoiceNumber] = useState<string | null>(null);
+  const [copiedStudentId, setCopiedStudentId] = useState(false);
   const [downloadingReceiptId, setDownloadingReceiptId] = useState<string | null>(null);
   const [billingSubFilter, setBillingSubFilter] = useState<'all' | 'courses' | 'consultations' | 'resources'>('all');
+
+  // Interactive Invoice Modal State
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [selectedInvoicePayment, setSelectedInvoicePayment] = useState<PaymentRecord | null>(null);
 
   // Synchronize initialTab or URL query parameter
   useEffect(() => {
@@ -97,6 +106,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
   const [headline, setHeadline] = useState('');
   const [bio, setBio] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
+  const [billingState, setBillingState] = useState('');
+  const [billingAddress, setBillingAddress] = useState('');
 
   // Profile State Status
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -129,6 +140,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
       setHeadline(userProfile.headline || '');
       setBio(userProfile.bio || '');
       setAvatarUrl(userProfile.avatarUrl || '');
+      setBillingState(userProfile.state || '');
+      setBillingAddress(userProfile.billingAddress || '');
     } else if (currentUser) {
       const fallbackName =
         currentUser.user_metadata?.full_name ||
@@ -154,6 +167,9 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
     .slice(0, 2)
     .join('')
     .toUpperCase() || 'ST';
+
+  // Human-friendly permanent Student ID (Supabase internal UUID is never displayed)
+  const studentId = formatStudentId(currentUser?.id, userProfile?.studentId);
 
   const memberSince = currentUser?.created_at
     ? new Date(currentUser.created_at).toLocaleDateString('en-US', {
@@ -181,7 +197,9 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
         phone: phone.trim() || undefined,
         headline: headline.trim() || undefined,
         bio: bio.trim() || undefined,
-        avatarUrl: avatarUrl.trim() || undefined
+        avatarUrl: avatarUrl.trim() || undefined,
+        state: billingState.trim() || undefined,
+        billingAddress: billingAddress.trim() || undefined
       });
 
       if (res.success) {
@@ -204,6 +222,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
       setHeadline(userProfile.headline || '');
       setBio(userProfile.bio || '');
       setAvatarUrl(userProfile.avatarUrl || '');
+      setBillingState(userProfile.state || '');
+      setBillingAddress(userProfile.billingAddress || '');
     }
     setProfileSuccessMsg(null);
     setProfileErrorMsg(null);
@@ -307,6 +327,21 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                   </h1>
                   <span className="px-2.5 py-0.5 rounded-full bg-orange-500/20 border border-orange-500/40 text-orange-400 text-xs font-semibold uppercase tracking-wider">
                     Student / Member
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-blue-500/20 border border-blue-500/40 text-blue-300 font-mono text-xs font-semibold">
+                    <span>Student ID: {studentId}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(studentId);
+                        setCopiedStudentId(true);
+                        setTimeout(() => setCopiedStudentId(false), 2000);
+                      }}
+                      className="hover:text-white transition-colors cursor-pointer"
+                      title="Copy Student ID"
+                    >
+                      {copiedStudentId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    </button>
                   </span>
                 </div>
                 <p className="text-sm text-slate-300 font-sans">
@@ -536,6 +571,41 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                     </div>
                   </div>
 
+                  {/* Billing State / Place of Supply for GST */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
+                        State / UT (Place of Supply for GST)
+                      </label>
+                      <input
+                        type="text"
+                        value={billingState}
+                        onChange={(e) => setBillingState(e.target.value)}
+                        placeholder="e.g. Uttar Pradesh, Maharashtra, Delhi"
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-[#FF6B00] focus:ring-1 focus:ring-[#FF6B00] outline-none text-sm text-slate-900 placeholder:text-slate-400 transition-all"
+                      />
+                      <p className="text-[11px] text-slate-500">
+                        Required for accurate CGST/SGST (intra-state UP) or IGST (inter-state) tax invoicing.
+                      </p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
+                        Billing Address (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={billingAddress}
+                        onChange={(e) => setBillingAddress(e.target.value)}
+                        placeholder="e.g. Street, City, PIN Code"
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-[#FF6B00] focus:ring-1 focus:ring-[#FF6B00] outline-none text-sm text-slate-900 placeholder:text-slate-400 transition-all"
+                      />
+                      <p className="text-[11px] text-slate-500">
+                        Optional billing address printed on official tax receipts.
+                      </p>
+                    </div>
+                  </div>
+
                   {/* Actions */}
                   <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-4">
                     <button
@@ -618,6 +688,12 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                 </div>
 
                 <div className="pt-3 border-t border-slate-100 space-y-2 text-xs">
+                  <div className="flex items-center justify-between text-slate-500">
+                    <span>Student ID</span>
+                    <span className="font-mono font-bold text-[#2457D6] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                      {studentId}
+                    </span>
+                  </div>
                   <div className="flex items-center justify-between text-slate-500">
                     <span>Contact Phone</span>
                     <span className="font-mono text-slate-700">{phone || 'Not set'}</span>
@@ -1220,27 +1296,31 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                           </div>
                         ) : (
                           <>
-                            <div className="hidden md:block overflow-x-auto">
+                            {/* Desktop Table View */}
+                            <div className="hidden md:block overflow-x-auto rounded-2xl border border-slate-200 bg-white">
                               <table className="w-full text-left text-xs border-collapse">
                                 <thead>
-                                  <tr className="border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
-                                    <th className="py-3 px-4">Date</th>
-                                    <th className="py-3 px-4">Description</th>
-                                    <th className="py-3 px-4">Category</th>
-                                    <th className="py-3 px-4">Amount</th>
-                                    <th className="py-3 px-4">Payment Status</th>
-                                    <th className="py-3 px-4">Payment Ref</th>
-                                    <th className="py-3 px-4 text-right">Receipt</th>
+                                  <tr className="border-b border-slate-200 bg-slate-900 text-white font-mono uppercase tracking-wider text-[11px]">
+                                    <th className="py-3.5 px-4">Invoice No</th>
+                                    <th className="py-3.5 px-4">Date</th>
+                                    <th className="py-3.5 px-4">Item / Description</th>
+                                    <th className="py-3.5 px-4">Category</th>
+                                    <th className="py-3.5 px-4">Student ID</th>
+                                    <th className="py-3.5 px-4">Amount Paid</th>
+                                    <th className="py-3.5 px-4">Status</th>
+                                    <th className="py-3.5 px-4 text-right">Actions</th>
                                   </tr>
                                 </thead>
-                                <tbody className="divide-y divide-slate-100">
+                                <tbody className="divide-y divide-slate-100 text-slate-700">
                                   {displayedPayments.map((p) => {
                                     const isCaptured = p.status === 'captured';
                                     const isPending = p.status === 'pending';
-                                    const isFailed = p.status === 'failed';
                                     const isRefunded = p.status === 'refunded';
                                     const isCourse = p.itemType === 'course';
                                     const isResource = p.itemType === 'resource';
+
+                                    const persistentInvoiceNo = p.invoiceNumber || formatInvoiceNumber(p.createdAt, p.razorpayPaymentId || p.id);
+                                    const displayStudentId = p.studentId || studentId;
 
                                     let formattedDate = 'Recent';
                                     try {
@@ -1256,18 +1336,50 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
 
                                     return (
                                       <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
-                                        <td className="py-4 px-4 font-mono text-slate-600 whitespace-nowrap">
+                                        {/* Invoice Number */}
+                                        <td className="py-4 px-4 whitespace-nowrap">
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="font-mono font-bold text-slate-900 text-[11px]">
+                                              {persistentInvoiceNo}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                navigator.clipboard.writeText(persistentInvoiceNo);
+                                                setCopiedInvoiceNumber(persistentInvoiceNo);
+                                                setTimeout(() => setCopiedInvoiceNumber(null), 2000);
+                                              }}
+                                              className="text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                                              title="Copy Invoice Number"
+                                            >
+                                              {copiedInvoiceNumber === persistentInvoiceNo ? (
+                                                <Check className="w-3 h-3 text-emerald-600" />
+                                              ) : (
+                                                <Copy className="w-3 h-3" />
+                                              )}
+                                            </button>
+                                          </div>
+                                        </td>
+
+                                        {/* Date */}
+                                        <td className="py-4 px-4 font-mono text-slate-600 whitespace-nowrap text-[11px]">
                                           {formattedDate}
                                         </td>
+
+                                        {/* Item Title */}
                                         <td className="py-4 px-4 font-medium text-slate-900 max-w-xs">
-                                          <div className="truncate font-semibold">{p.itemTitle || (isResource ? 'Digital Toolkit / Resource' : (isCourse ? 'Course Masterclass' : 'Consultation Session'))}</div>
+                                          <div className="truncate font-semibold text-slate-900" title={p.itemTitle || ''}>
+                                            {p.itemTitle || (isResource ? 'Digital Toolkit / Resource' : (isCourse ? 'Course Masterclass' : 'Consultation Session'))}
+                                          </div>
                                           {p.razorpayOrderId && (
                                             <div className="text-[10px] font-mono text-slate-400 truncate">
                                               Order: {p.razorpayOrderId}
                                             </div>
                                           )}
                                         </td>
-                                        <td className="py-4 px-4">
+
+                                        {/* Category */}
+                                        <td className="py-4 px-4 whitespace-nowrap">
                                           <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider inline-flex items-center gap-1 ${
                                             isCourse
                                               ? 'bg-orange-50 text-[#FF6B00] border border-orange-200'
@@ -1278,9 +1390,20 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                                             {isCourse ? 'Course' : isResource ? 'Resource' : 'Consultation'}
                                           </span>
                                         </td>
-                                        <td className="py-4 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
-                                          {p.currency || 'INR'} {p.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+
+                                        {/* Student ID */}
+                                        <td className="py-4 px-4 whitespace-nowrap">
+                                          <span className="font-mono text-xs font-semibold text-[#2457D6] bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                                            {displayStudentId}
+                                          </span>
                                         </td>
+
+                                        {/* Amount Paid */}
+                                        <td className="py-4 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
+                                          ₹{p.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {p.currency || 'INR'}
+                                        </td>
+
+                                        {/* Status */}
                                         <td className="py-4 px-4 whitespace-nowrap">
                                           <span
                                             className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider inline-flex items-center gap-1 ${
@@ -1304,74 +1427,100 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                                                   : 'bg-rose-500'
                                               }`}
                                             />
-                                            <span>{isCaptured ? 'Paid' : p.status}</span>
+                                            <span>{isCaptured ? 'Captured' : p.status}</span>
                                           </span>
                                         </td>
-                                        <td className="py-4 px-4">
-                                          <div className="flex items-center gap-1.5">
-                                            <span className="font-mono text-[11px] text-slate-600 truncate max-w-[110px]" title={p.razorpayPaymentId || p.id}>
-                                              {p.razorpayPaymentId || p.id.slice(0, 12)}
-                                            </span>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                const text = p.razorpayPaymentId || p.id;
-                                                navigator.clipboard.writeText(text);
-                                                setCopiedPaymentId(p.id);
-                                                setTimeout(() => setCopiedPaymentId(null), 2000);
-                                              }}
-                                              className="text-slate-400 hover:text-slate-700 transition-colors p-1 cursor-pointer"
-                                              title="Copy Payment ID"
-                                            >
-                                              {copiedPaymentId === p.id ? (
-                                                <Check className="w-3.5 h-3.5 text-emerald-600" />
-                                              ) : (
-                                                <Copy className="w-3.5 h-3.5" />
-                                              )}
-                                            </button>
-                                          </div>
-                                        </td>
+
+                                        {/* Actions */}
                                         <td className="py-4 px-4 text-right whitespace-nowrap">
                                           <div className="flex items-center justify-end gap-2">
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                setDownloadingReceiptId(p.id);
-                                                try {
-                                                  downloadInvoicePdf({
-                                                    paymentId: p.razorpayPaymentId || p.id,
-                                                    orderId: p.razorpayOrderId,
-                                                    customerName: userProfile?.fullName || currentUser?.user_metadata?.full_name || 'Valued Student',
-                                                    customerEmail: currentUser?.email || '',
-                                                    itemTitle: p.itemTitle || (isCourse ? 'Digital Muid Masterclass' : 'Digital Muid Consultation'),
-                                                    itemType: p.itemType,
-                                                    amount: p.amount,
-                                                    currency: p.currency || 'INR',
-                                                    paymentDate: p.createdAt,
-                                                    status: p.status,
-                                                    invoiceUrl: p.invoiceUrl
-                                                  });
-                                                } finally {
-                                                  setTimeout(() => setDownloadingReceiptId(null), 500);
-                                                }
-                                              }}
-                                              disabled={downloadingReceiptId === p.id}
-                                              className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-[#FF6B00] text-white text-[11px] font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-60"
-                                            >
-                                              <Download className="w-3 h-3 text-[#FF6B00] group-hover:text-white" />
-                                              <span>{downloadingReceiptId === p.id ? 'Generating...' : 'Receipt'}</span>
-                                            </button>
+                                            {isRefunded ? (
+                                              <>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                    setSelectedInvoicePayment(p);
+                                                    setIsInvoiceModalOpen(true);
+                                                  }}
+                                                  className="px-2.5 py-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 text-rose-700 text-[11px] font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer"
+                                                  title="View Statutory Credit Note"
+                                                >
+                                                  <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+                                                  <span>Credit Note</span>
+                                                </button>
 
-                                            {p.invoiceUrl && (
-                                              <a
-                                                href={p.invoiceUrl}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-                                                title="External Invoice"
-                                              >
-                                                <ExternalLink className="w-3.5 h-3.5" />
-                                              </a>
+                                                <button
+                                                  type="button"
+                                                  onClick={async () => {
+                                                    setDownloadingReceiptId(p.id);
+                                                    try {
+                                                      await paymentService.downloadOfficialCreditNote(p.razorpayPaymentId || p.id);
+                                                    } finally {
+                                                      setDownloadingReceiptId(null);
+                                                    }
+                                                  }}
+                                                  disabled={downloadingReceiptId === p.id}
+                                                  className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-60"
+                                                >
+                                                  <Download className="w-3 h-3 text-white" />
+                                                  <span>{downloadingReceiptId === p.id ? 'Loading...' : 'CN PDF'}</span>
+                                                </button>
+                                              </>
+                                            ) : isCaptured || p.status === 'paid' ? (
+                                              <>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                    setSelectedInvoicePayment(p);
+                                                    setIsInvoiceModalOpen(true);
+                                                  }}
+                                                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 text-[11px] font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer"
+                                                  title="View Interactive Invoice"
+                                                >
+                                                  <Eye className="w-3.5 h-3.5 text-slate-600" />
+                                                  <span>View</span>
+                                                </button>
+
+                                                <button
+                                                  type="button"
+                                                  onClick={async () => {
+                                                    setDownloadingReceiptId(p.id);
+                                                    try {
+                                                      const res = await paymentService.downloadOfficialInvoice(p.razorpayPaymentId || p.id, persistentInvoiceNo);
+                                                      if (!res.success) {
+                                                        // Fallback to client-side vector PDF
+                                                        downloadInvoicePdf({
+                                                          paymentId: p.razorpayPaymentId || p.id,
+                                                          orderId: p.razorpayOrderId,
+                                                          customerName: userProfile?.fullName || currentUser?.user_metadata?.full_name || 'Valued Student',
+                                                          customerEmail: currentUser?.email || '',
+                                                          customerState: userProfile?.state || undefined,
+                                                          studentId: displayStudentId,
+                                                          itemTitle: p.itemTitle || (isCourse ? 'Digital Muid Masterclass' : 'Digital Muid Consultation'),
+                                                          itemType: p.itemType,
+                                                          amount: p.amount,
+                                                          currency: p.currency || 'INR',
+                                                          paymentDate: p.createdAt,
+                                                          status: p.status,
+                                                          invoiceNumber: persistentInvoiceNo,
+                                                          invoiceUrl: p.invoiceUrl
+                                                        });
+                                                      }
+                                                    } finally {
+                                                      setDownloadingReceiptId(null);
+                                                    }
+                                                  }}
+                                                  disabled={downloadingReceiptId === p.id}
+                                                  className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-[#FF6B00] text-white text-[11px] font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-60"
+                                                >
+                                                  <Download className="w-3 h-3 text-[#FF6B00] group-hover:text-white" />
+                                                  <span>{downloadingReceiptId === p.id ? 'Loading...' : 'PDF'}</span>
+                                                </button>
+                                              </>
+                                            ) : (
+                                              <span className="text-[10px] font-mono text-slate-400 italic px-2 py-1">
+                                                Unsettled
+                                              </span>
                                             )}
                                           </div>
                                         </td>
@@ -1386,8 +1535,12 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                             <div className="grid grid-cols-1 gap-3 md:hidden">
                               {displayedPayments.map((p) => {
                                 const isCaptured = p.status === 'captured';
+                                const isRefunded = p.status === 'refunded';
                                 const isCourse = p.itemType === 'course';
                                 const isResource = p.itemType === 'resource';
+                                const persistentInvoiceNo = p.invoiceNumber || formatInvoiceNumber(p.createdAt, p.razorpayPaymentId || p.id);
+                                const displayStudentId = p.studentId || studentId;
+
                                 let formattedDate = 'Recent';
                                 try {
                                   const d = new Date(p.createdAt);
@@ -1403,26 +1556,35 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                                 return (
                                   <div
                                     key={p.id}
-                                    className="p-4 rounded-2xl bg-slate-50/70 border border-slate-200 space-y-3"
+                                    className="p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3"
                                   >
                                     <div className="flex items-start justify-between gap-2">
                                       <div>
                                         <div className="flex items-center gap-2 mb-1">
+                                          <span className="text-[10px] font-mono font-bold text-[#FF6B00]">{persistentInvoiceNo}</span>
+                                          <span className="text-[10px] font-mono text-slate-400">·</span>
                                           <span className="text-[10px] font-mono text-slate-500">{formattedDate}</span>
-                                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider ${
-                                            isCourse ? 'bg-orange-50 text-[#FF6B00]' : isResource ? 'bg-blue-50 text-[#2457D6]' : 'bg-purple-50 text-purple-700'
-                                          }`}>
-                                            {isCourse ? 'Course' : isResource ? 'Resource' : 'Consultation'}
-                                          </span>
                                         </div>
-                                        <h4 className="text-sm font-bold text-slate-900">{p.itemTitle || (isResource ? 'Digital Toolkit / Resource' : (isCourse ? 'Course Masterclass' : 'Consultation Session'))}</h4>
+                                        <h4 className="text-sm font-bold text-slate-900">
+                                          {p.itemTitle || (isResource ? 'Digital Toolkit / Resource' : (isCourse ? 'Course Masterclass' : 'Consultation Session'))}
+                                        </h4>
+                                        <div className="text-[10px] font-mono text-[#2457D6] font-semibold mt-0.5">
+                                          Student ID: {displayStudentId}
+                                        </div>
                                       </div>
-                                      <span className="font-mono font-bold text-slate-900 text-sm">
-                                        {p.currency || 'INR'} {p.amount.toLocaleString('en-IN')}
-                                      </span>
+                                      <div className="text-right">
+                                        <div className="font-mono font-bold text-slate-900 text-sm">
+                                          ₹{p.amount.toLocaleString('en-IN')}
+                                        </div>
+                                        <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider inline-block mt-1 ${
+                                          isCourse ? 'bg-orange-50 text-[#FF6B00]' : isResource ? 'bg-blue-50 text-[#2457D6]' : 'bg-purple-50 text-purple-700'
+                                        }`}>
+                                          {isCourse ? 'Course' : isResource ? 'Resource' : 'Consultation'}
+                                        </span>
+                                      </div>
                                     </div>
 
-                                    <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/60">
+                                    <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-100">
                                       <span
                                         className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                                           isCaptured
@@ -1430,31 +1592,94 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                                             : 'bg-slate-100 text-slate-700'
                                         }`}
                                       >
-                                        {p.status}
+                                        {isCaptured ? 'Captured' : p.status}
                                       </span>
 
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          downloadInvoicePdf({
-                                            paymentId: p.razorpayPaymentId || p.id,
-                                            orderId: p.razorpayOrderId,
-                                            customerName: userProfile?.fullName || currentUser?.user_metadata?.full_name || 'Valued Student',
-                                            customerEmail: currentUser?.email || '',
-                                            itemTitle: p.itemTitle || (isCourse ? 'Digital Muid Masterclass' : 'Digital Muid Consultation'),
-                                            itemType: p.itemType,
-                                            amount: p.amount,
-                                            currency: p.currency || 'INR',
-                                            paymentDate: p.createdAt,
-                                            status: p.status,
-                                            invoiceUrl: p.invoiceUrl
-                                          });
-                                        }}
-                                        className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1.5"
-                                      >
-                                        <Download className="w-3 h-3 text-[#FF6B00]" />
-                                        <span>Receipt PDF</span>
-                                      </button>
+                                      <div className="flex items-center gap-2">
+                                        {isRefunded ? (
+                                          <>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setSelectedInvoicePayment(p);
+                                                setIsInvoiceModalOpen(true);
+                                              }}
+                                              className="px-2.5 py-1.5 rounded-lg border border-rose-200 hover:bg-rose-50 text-rose-700 text-[11px] font-semibold transition-colors inline-flex items-center gap-1"
+                                            >
+                                              <RotateCcw className="w-3.5 h-3.5" />
+                                              <span>Credit Note</span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              onClick={async () => {
+                                                setDownloadingReceiptId(p.id);
+                                                try {
+                                                  await paymentService.downloadOfficialCreditNote(p.razorpayPaymentId || p.id);
+                                                } finally {
+                                                  setDownloadingReceiptId(null);
+                                                }
+                                              }}
+                                              disabled={downloadingReceiptId === p.id}
+                                              className="px-3 py-1.5 rounded-lg bg-rose-600 text-white text-[11px] font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1.5"
+                                            >
+                                              <Download className="w-3 h-3 text-white" />
+                                              <span>CN</span>
+                                            </button>
+                                          </>
+                                        ) : isCaptured || p.status === 'paid' ? (
+                                          <>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setSelectedInvoicePayment(p);
+                                                setIsInvoiceModalOpen(true);
+                                              }}
+                                              className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-[11px] font-semibold transition-colors inline-flex items-center gap-1"
+                                            >
+                                              <Eye className="w-3.5 h-3.5" />
+                                              <span>View</span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              onClick={async () => {
+                                                setDownloadingReceiptId(p.id);
+                                                try {
+                                                  const res = await paymentService.downloadOfficialInvoice(p.razorpayPaymentId || p.id, persistentInvoiceNo);
+                                                  if (!res.success) {
+                                                    downloadInvoicePdf({
+                                                      paymentId: p.razorpayPaymentId || p.id,
+                                                      orderId: p.razorpayOrderId,
+                                                      customerName: userProfile?.fullName || currentUser?.user_metadata?.full_name || 'Valued Student',
+                                                      customerEmail: currentUser?.email || '',
+                                                      customerState: userProfile?.state || undefined,
+                                                      studentId: displayStudentId,
+                                                      itemTitle: p.itemTitle || (isCourse ? 'Digital Muid Masterclass' : 'Digital Muid Consultation'),
+                                                      itemType: p.itemType,
+                                                      amount: p.amount,
+                                                      currency: p.currency || 'INR',
+                                                      paymentDate: p.createdAt,
+                                                      status: p.status,
+                                                      invoiceNumber: persistentInvoiceNo,
+                                                      invoiceUrl: p.invoiceUrl
+                                                    });
+                                                  }
+                                                } finally {
+                                                  setDownloadingReceiptId(null);
+                                                }
+                                              }}
+                                              disabled={downloadingReceiptId === p.id}
+                                              className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1.5"
+                                            >
+                                              <Download className="w-3 h-3 text-[#FF6B00]" />
+                                              <span>PDF</span>
+                                            </button>
+                                          </>
+                                        ) : (
+                                          <span className="text-[10px] font-mono text-slate-400 italic">Unsettled</span>
+                                        )}
+                                      </div>
                                     </div>
                                   </div>
                                 );
@@ -1472,7 +1697,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
         )}
       </div>
 
-      {/* Certificate Modal */}
+      {/* Certificate Celebration Modal */}
       {selectedCertForModal && (
         <CourseCertificateCelebrationModal
           isOpen={Boolean(selectedCertForModal)}
@@ -1483,6 +1708,16 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
           navigate={navigate}
         />
       )}
+
+      {/* Interactive Tax Invoice Modal */}
+      <InvoiceModal
+        isOpen={isInvoiceModalOpen}
+        onClose={() => {
+          setIsInvoiceModalOpen(false);
+          setSelectedInvoicePayment(null);
+        }}
+        paymentRecord={selectedInvoicePayment}
+      />
     </div>
   );
 };

@@ -34,6 +34,7 @@ import { StudentEnrollmentWithCourse, LessonProgress, Resource, Framework, Cours
 import { INITIAL_COURSES } from '../data/initialData';
 import { progressService, resourceService } from '../services';
 import { isAuthoritativePaidResource } from '../constants/authoritativePaidResources';
+import { formatStudentId, formatEnrollmentId } from '../utils/studentId';
 
 interface StudentDashboardPageProps {
   navigate: (path: string) => void;
@@ -257,6 +258,11 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
     if (currentUser?.user_metadata?.name) return currentUser.user_metadata.name;
     return 'Student';
   }, [userProfile, currentUser]);
+
+  // Permanent Human-friendly Student ID
+  const studentId = useMemo(() => {
+    return formatStudentId(currentUser?.id, userProfile?.studentId);
+  }, [currentUser?.id, userProfile?.studentId]);
 
   // Next upcoming consultation
   const nextUpcomingConsultation = useMemo(() => {
@@ -483,9 +489,14 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
       {/* 1. Welcome Section */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-slate-200">
         <div className="space-y-3">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-50 border border-orange-200 text-[#FF6B00] text-xs font-bold uppercase tracking-wider font-interface">
-            <GraduationCap className="w-3.5 h-3.5" />
-            <span>Student Learning Portal</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-50 border border-orange-200 text-[#FF6B00] text-xs font-bold uppercase tracking-wider font-interface">
+              <GraduationCap className="w-3.5 h-3.5" />
+              <span>Student Learning Portal</span>
+            </div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-[#2457D6] text-xs font-mono font-semibold">
+              <span>Student ID: {studentId}</span>
+            </div>
           </div>
           <h1 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold text-slate-900 tracking-tight">
             Welcome back, {displayName}
@@ -732,6 +743,9 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
                   )}
                   <span className="text-xs text-slate-500 font-mono">
                     Enrolled {new Date(featuredResumeCourse.enrolledAt).toLocaleDateString()}
+                  </span>
+                  <span className="text-[11px] font-mono font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
+                    Enrolment ID: {formatEnrollmentId(featuredResumeCourse.enrollmentId || featuredResumeCourse.id)}
                   </span>
                 </div>
 

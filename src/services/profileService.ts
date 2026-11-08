@@ -1,13 +1,18 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { UserProfile } from '../types';
 
+import { formatStudentId } from '../utils/studentId';
+
 export interface ProfileDbRow {
   id: string;
+  student_id?: string | null;
   full_name: string | null;
   avatar_url: string | null;
   phone: string | null;
   headline: string | null;
   bio: string | null;
+  state?: string | null;
+  billing_address?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -15,11 +20,14 @@ export interface ProfileDbRow {
 export function mapProfileFromDb(row: ProfileDbRow): UserProfile {
   return {
     id: row.id,
+    studentId: formatStudentId(row.id, row.student_id),
     fullName: row.full_name,
     avatarUrl: row.avatar_url,
     phone: row.phone,
     headline: row.headline,
     bio: row.bio,
+    state: row.state,
+    billingAddress: row.billing_address,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -117,6 +125,8 @@ export const profileService = {
       phone?: string;
       headline?: string;
       bio?: string;
+      state?: string;
+      billingAddress?: string;
     }
   ): Promise<{ data: UserProfile | null; error: any }> {
     if (!isSupabaseConfigured()) {
@@ -132,6 +142,8 @@ export const profileService = {
       if (updates.phone !== undefined) payload.phone = updates.phone;
       if (updates.headline !== undefined) payload.headline = updates.headline;
       if (updates.bio !== undefined) payload.bio = updates.bio;
+      if (updates.state !== undefined) payload.state = updates.state;
+      if (updates.billingAddress !== undefined) payload.billing_address = updates.billingAddress;
 
       const { data, error } = await supabase
         .from('profiles')

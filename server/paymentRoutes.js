@@ -22,7 +22,19 @@ import {
   fulfillConsultationPayment,
   fulfillResourcePurchase
 } from "./paymentFulfillment.js";
-import { generateAuthoritativeInvoicePdf } from "./invoiceService.js";
+import {
+  generateAuthoritativeInvoicePdf,
+  buildAuthoritativeInvoiceModel,
+  generateAuthoritativeCreditNotePdf,
+  buildAuthoritativeCreditNoteModel
+} from "./invoiceService.js";
+import {
+  formatStudentId,
+  formatEnrollmentId,
+  formatInvoiceNumber,
+  formatCreditNoteNumber,
+  getIndianFinancialYear
+} from "./studentId.js";
 
 // ==============================================================================
 // AUTHORITATIVE PAID RESOURCES CATALOG & PRICING
@@ -2605,37 +2617,176 @@ router.get("/invoice/:paymentId", async (req, res) => {
       });
     }
 
-    // 3. Assemble invoice details
+    // 3. Authoritative Payment Status Verification
+    const rawStatus = (
+      paymentRecord?.status ||
+      bookingRecord?.payment_status ||
+      bookingRecord?.status ||
+      resourceRecord?.status ||
+      rzpPayment?.status ||
+      ""
+    ).toLowerCase();
+
+    // 4. Obtain Student Profile & Enrollment data for persistent IDs & Billing Address
+    const targetUserId = paymentRecord?.user_id || bookingRecord?.user_id || resourceRecord?.user_id || userId;
+    let profileData = null;
+    try {
+      if (targetUserId) {
+        const { data: pData } = await supabaseServer
+          .from("profiles")
+          .select("full_name, phone, student_id, state, billing_address")
+          .eq("id", targetUserId)
+          .maybeSingle();
+        if (pData) profileData = pData;
+      }
+    } catch {}
+
+    // Find course enrollment if course purchase
+    let enrollmentId = null;
+    if (paymentRecord?.item_type === "course" && paymentRecord?.item_id) {
+      try {
+        const { data: enrData } = await supabaseServer
+          .from("course_enrollments")
+          .select("id, enrollment_id")
+          .eq("user_id", targetUserId)
+          .eq("course_id", paymentRecord.item_id)
+          .maybeSingle();
+        if (enrData) {
+          enrollmentId = enrData.enrollment_id || enrData.id;
+        }
+      } catch {}
+    }
+
+    // Common transaction fields
     const cleanPayId = paymentRecord?.razorpay_payment_id || bookingRecord?.payment_id || resourceRecord?.razorpay_payment_id || (rzpPayment?.id || rawPaymentId);
     const cleanOrderId = paymentRecord?.razorpay_order_id || bookingRecord?.razorpay_order_id || resourceRecord?.razorpay_order_id || (rzpPayment?.order_id || "N/A");
-    const customerName = bookingRecord?.customer_name || user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "Valued Member";
+    const customerName = profileData?.full_name || bookingRecord?.customer_name || user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "Valued Student";
     const customerEmail = bookingRecord?.customer_email || resourceRecord?.customer_email || rzpPayment?.email || user.email || "";
-    const customerPhone = bookingRecord?.customer_phone || rzpPayment?.contact || "";
-    const itemTitle = paymentRecord?.item_title || (bookingRecord ? "Business Growth & Scaling Consultation" : (resourceRecord ? "Digital Resource Toolkit / Asset" : "Course Masterclass"));
-    const itemType = paymentRecord?.item_type || (bookingRecord ? "consultation" : (resourceRecord ? "resource" : "course"));
+    const customerPhone = profileData?.phone || bookingRecord?.customer_phone || rzpPayment?.contact || "N/A";
+    const customerState = profileData?.state || bookingRecord?.customer_state || paymentRecord?.customer_state || "";
+    const customerBillingAddress = profileData?.billing_address || "";
+    const itemTitle = paymentRecord?.item_title || (bookingRecord ? "Business Growth Strategy Consultation" : (resourceRecord ? "Digital Resource Toolkit / Asset" : "Digital Growth Masterclass"));
+    const rawItemType = paymentRecord?.item_type || (bookingRecord ? "consultation" : (resourceRecord ? "resource" : "course"));
     const amount = Number(paymentRecord?.amount || bookingRecord?.total_amount || resourceRecord?.amount || (rzpPayment?.amount ? rzpPayment.amount / 100 : 0));
     const currency = (paymentRecord?.currency || bookingRecord?.currency || resourceRecord?.currency || rzpPayment?.currency || "INR").toUpperCase();
-    const baseAmount = bookingRecord?.base_amount ? Number(bookingRecord.base_amount) : undefined;
-    const gstAmount = bookingRecord?.gst_amount ? Number(bookingRecord.gst_amount) : undefined;
     const paymentDate = paymentRecord?.created_at || bookingRecord?.created_at || resourceRecord?.created_at || new Date().toISOString();
 
-    const pdfBuffer = generateAuthoritativeInvoicePdf({
+    // 5. Handle Refunded Transaction => Issue Credit Note (Section 34 CGST Act)
+    if (rawStatus === "refunded" || req.query.type === "credit-note") {
+      const creditNoteModel = buildAuthoritativeCreditNoteModel({
+        paymentId: cleanPayId,
+        orderId: cleanOrderId,
+        customerName,
+        customerEmail,
+        customerPhone,
+        customerState,
+        billingAddress: customerBillingAddress,
+        userId: targetUserId,
+        studentId: profileData?.student_id,
+        enrollmentId,
+        itemTitle,
+        itemType: rawItemType,
+        amount,
+        currency,
+        paymentDate,
+        refundDate: paymentRecord?.updated_at || new Date().toISOString(),
+        invoiceNumber: paymentRecord?.invoice_number,
+        creditNoteNumber: paymentRecord?.credit_note_number,
+        refundId: paymentRecord?.refund_id || "RFND-AUTHORITATIVE",
+        reason: "Educational course enrolment cancellation & refund"
+      });
+
+      if (req.query.format === "json") {
+        return res.json({
+          success: true,
+          isCreditNote: true,
+          creditNote: creditNoteModel
+        });
+      }
+
+      const pdfBuffer = generateAuthoritativeCreditNotePdf(creditNoteModel);
+      const safeCreditNoteNum = creditNoteModel.creditNoteNumber.replace(/[/\\?%*:|"<>]/g, "_");
+      const filename = `DigitalMuid-CreditNote-${safeCreditNoteNum}.pdf`;
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Length", pdfBuffer.length);
+      return res.end(pdfBuffer);
+    }
+
+    // 6. Payment Security Verification:
+    // Reject pending, failed, cancelled, or unverified transactions
+    const isCaptured =
+      rawStatus === "captured" ||
+      rawStatus === "paid" ||
+      rawStatus === "confirmed" ||
+      rawStatus === "completed";
+
+    if (!isCaptured) {
+      return res.status(400).json({
+        success: false,
+        error: `Cannot generate tax invoice: Payment is not verified or captured (current status: ${rawStatus || "unverified"}).`
+      });
+    }
+
+    // 7. Atomic Invoice Sequence Assignment & Persistence
+    let finalInvoiceNumber = paymentRecord?.invoice_number || null;
+    if (!finalInvoiceNumber && paymentRecord?.id) {
+      try {
+        const { data: rpcNum } = await supabaseServer.rpc("get_next_invoice_number", {
+          p_date: paymentDate
+        });
+        if (rpcNum && String(rpcNum).trim().length > 0) {
+          finalInvoiceNumber = rpcNum;
+        }
+      } catch {}
+
+      if (!finalInvoiceNumber) {
+        finalInvoiceNumber = formatInvoiceNumber(paymentDate, cleanPayId, null);
+      }
+
+      // Lock invoice number into payments table so it is never changed
+      try {
+        await supabaseServer
+          .from("payments")
+          .update({ invoice_number: finalInvoiceNumber })
+          .eq("id", paymentRecord.id);
+      } catch {}
+    }
+
+    // 8. Assemble Authoritative Invoice Model
+    const invoiceModel = buildAuthoritativeInvoiceModel({
       paymentId: cleanPayId,
       orderId: cleanOrderId,
       customerName,
       customerEmail,
       customerPhone,
+      customerState,
+      billingAddress: customerBillingAddress,
+      userId: targetUserId,
+      studentId: profileData?.student_id,
+      enrollmentId,
       itemTitle,
-      itemType,
+      itemType: rawItemType,
       amount,
       currency,
-      baseAmount,
-      gstAmount,
-      paymentDate
+      paymentDate,
+      invoiceNumber: finalInvoiceNumber,
+      status: rawStatus
     });
 
-    const fileSuffix = cleanPayId.replace(/[^a-zA-Z0-9]/g, "").slice(-8) || "receipt";
-    const filename = `DigitalMUID-Invoice-${fileSuffix}.pdf`;
+    // Support JSON response for interactive modal viewer
+    if (req.query.format === "json") {
+      return res.json({
+        success: true,
+        invoice: invoiceModel
+      });
+    }
+
+    // Standard PDF Generation & Stream
+    const pdfBuffer = generateAuthoritativeInvoicePdf(invoiceModel);
+    const safeInvoiceNum = invoiceModel.invoiceNumber.replace(/[/\\?%*:|"<>]/g, "_");
+    const filename = `DigitalMuid-Invoice-${safeInvoiceNum}.pdf`;
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -2645,6 +2796,15 @@ router.get("/invoice/:paymentId", async (req, res) => {
     console.error("[Invoice Endpoint] Error generating invoice:", err);
     return res.status(500).json({ success: false, error: "Internal server error generating tax invoice." });
   }
+});
+
+/**
+ * GET /api/payments/credit-note/:paymentId
+ * Explicit endpoint for Section 34 CGST Act Credit Note generation.
+ */
+router.get("/credit-note/:paymentId", (req, res) => {
+  req.query.type = "credit-note";
+  return router.handle(req, res);
 });
 
 /**

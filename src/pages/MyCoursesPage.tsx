@@ -23,6 +23,7 @@ import {
 import { StudentEnrollmentWithCourse, Certificate } from '../types';
 import { CourseCertificateCelebrationModal } from '../components/CourseCertificateCelebrationModal';
 import { downloadCertificatePdf } from '../utils/pdfGenerator';
+import { formatEnrollmentId } from '../utils/studentId';
 
 interface MyCoursesPageProps {
   navigate: (path: string) => void;
@@ -364,14 +365,19 @@ export const MyCoursesPage: React.FC<MyCoursesPageProps> = ({ navigate }) => {
                   </div>
 
                   {/* Enrollment Status & Timestamps */}
-                  <div className="pt-1 flex items-center justify-between text-[11px] text-slate-500 font-interface border-t border-slate-100">
+                  <div className="pt-1 flex flex-wrap items-center justify-between gap-1 text-[11px] text-slate-500 font-interface border-t border-slate-100">
                     <span className="flex items-center gap-1 text-emerald-600 font-semibold">
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       <span>{item.status === 'active' ? 'Active Access' : item.status}</span>
                     </span>
-                    <span className="font-mono text-slate-500">
-                      Enrolled {new Date(item.enrolledAt).toLocaleDateString()}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[10px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-200">
+                        {formatEnrollmentId(item.enrollmentId || item.id)}
+                      </span>
+                      <span className="font-mono text-slate-500">
+                        {new Date(item.enrolledAt).toLocaleDateString()}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Progress Bar and Lesson Count */}

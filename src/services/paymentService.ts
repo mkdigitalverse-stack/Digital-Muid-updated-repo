@@ -10,13 +10,18 @@ import {
   RecoverLeadResult
 } from '../types';
 
+import { formatStudentId, formatInvoiceNumber } from '../utils/studentId';
+import { InvoiceModel, CreditNoteModel } from '../types';
+
 /**
  * Transforms a raw row from public.payments into a domain PaymentRecord object.
  */
 export const mapDbRowToPaymentRecord = (row: any): PaymentRecord => ({
   id: row.id,
   userId: row.user_id,
-  itemType: (row.item_type as 'course' | 'consultation' | 'subscription') || 'course',
+  studentId: formatStudentId(row.user_id, row.student_id),
+  invoiceNumber: formatInvoiceNumber(row.created_at, row.razorpay_payment_id || row.id, row.invoice_number),
+  itemType: (row.item_type as 'course' | 'consultation' | 'subscription' | 'resource') || 'course',
   itemId: row.item_id || null,
   itemTitle: row.item_title || 'Digital Muid Educational Service',
   amount: typeof row.amount === 'number' ? row.amount : parseFloat(row.amount || '0') || 0,
@@ -113,6 +118,140 @@ export const paymentService = {
       return { data: [], error: err };
     }
   },
+
+  /**
+   * Fetches authoritative invoice details as JSON for interactive modal display.
+   */
+  async fetchInvoiceDetails(paymentId: string): Promise<{
+    data: InvoiceModel | null;
+    creditNote?: CreditNoteModel | null;
+    isCreditNote?: boolean;
+    error: any;
+  }> {
+    try {
+      if (!isSupabaseConfigured()) {
+        return { data: null, error: new Error('Database service is not configured.') };
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        return { data: null, error: new Error('Authentication required to view tax invoice.') };
+      }
+
+      const res = await fetch(`/api/payments/invoice/${encodeURIComponent(paymentId)}?format=json`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        return { data: null, error: new Error(errJson.error || 'Failed to retrieve invoice data.') };
+      }
+
+      const json = await res.json();
+      if (json.success) {
+        if (json.isCreditNote && json.creditNote) {
+          return { data: null, creditNote: json.creditNote as CreditNoteModel, isCreditNote: true, error: null };
+        }
+        if (json.invoice) {
+          return { data: json.invoice as InvoiceModel, error: null };
+        }
+      }
+
+      return { data: null, error: new Error('Invoice data format unrecognized.') };
+    } catch (err: any) {
+      console.error('[PaymentService] Error fetching invoice details:', err);
+      return { data: null, error: err };
+    }
+  },
+
+  /**
+   * Downloads the authoritative PDF tax invoice from the server.
+   */
+  async downloadOfficialInvoice(paymentId: string, invoiceNumber?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!isSupabaseConfigured()) {
+        return { success: false, error: 'Database service is not configured.' };
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        return { success: false, error: 'Authentication required to download tax invoice.' };
+      }
+
+      const res = await fetch(`/api/payments/invoice/${encodeURIComponent(paymentId)}`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        return { success: false, error: errJson.error || 'Failed to download official tax invoice.' };
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const safeNum = (invoiceNumber || `DM-INV-${paymentId.slice(-4)}`).replace(/[/\\?%*:|"<>]/g, '_');
+      link.download = `DigitalMuid-Invoice-${safeNum}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('[PaymentService] Error downloading invoice PDF:', err);
+      return { success: false, error: err?.message || 'Network error downloading tax invoice.' };
+    }
+  },
+
+  /**
+   * Downloads the authoritative PDF credit note from the server.
+   */
+  async downloadOfficialCreditNote(paymentId: string, creditNoteNumber?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!isSupabaseConfigured()) {
+        return { success: false, error: 'Database service is not configured.' };
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        return { success: false, error: 'Authentication required to download credit note.' };
+      }
+
+      const res = await fetch(`/api/payments/invoice/${encodeURIComponent(paymentId)}?type=credit-note`, {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        return { success: false, error: errJson.error || 'Failed to download credit note.' };
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const safeNum = (creditNoteNumber || `CN-REF-${paymentId.slice(-4)}`).replace(/[/\\?%*:|"<>]/g, '_');
+      link.download = `DigitalMuid-CreditNote-${safeNum}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('[PaymentService] Error downloading credit note PDF:', err);
+      return { success: false, error: err?.message || 'Network error downloading credit note.' };
+    }
+  },
+
   async createCourseOrder(courseId: string): Promise<CreateCourseOrderResult> {
     try {
       if (!isSupabaseConfigured()) {

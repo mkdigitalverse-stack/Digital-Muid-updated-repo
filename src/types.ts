@@ -539,11 +539,14 @@ export interface SiteSettings {
 
 export interface UserProfile {
   id: string; // matches auth.users.id
+  studentId?: string | null; // Human-friendly Permanent Student ID (e.g. DM-STU-010001)
   fullName?: string | null;
   avatarUrl?: string | null;
   phone?: string | null;
   headline?: string | null;
   bio?: string | null;
+  state?: string | null; // Place of supply / recipient state for GST compliance
+  billingAddress?: string | null; // Optional billing address for tax invoices
   createdAt: string;
   updatedAt: string;
 }
@@ -562,7 +565,9 @@ export interface LessonProgress {
 export interface PaymentRecord {
   id: string;
   userId: string;
-  itemType: 'course' | 'consultation' | 'subscription';
+  studentId?: string | null;
+  invoiceNumber?: string | null;
+  itemType: 'course' | 'consultation' | 'subscription' | 'resource';
   itemId?: string | null;
   itemTitle?: string | null;
   amount: number;
@@ -572,6 +577,83 @@ export interface PaymentRecord {
   status: 'pending' | 'captured' | 'failed' | 'refunded';
   invoiceUrl?: string | null;
   createdAt: string;
+}
+
+export interface InvoiceSellerInfo {
+  businessName: string;
+  brand: string;
+  gstin: string;
+  stateCode: string;
+  stateName: string;
+  businessAddress: string;
+  coverage: string;
+  supportEmail: string;
+  websiteUrl: string;
+  phone?: string;
+}
+
+export interface InvoiceCustomerInfo {
+  name: string;
+  email: string;
+  phone?: string;
+  studentId: string;
+  state?: string;
+  billingAddress?: string;
+}
+
+export interface InvoicePaymentInfo {
+  gateway: string;
+  paymentId: string;
+  orderId: string;
+  status: string;
+  currency: string;
+  totalAmount: number;
+  baseAmount: number;
+  gstAmount: number;
+  taxRatePercent: number;
+  isInterState: boolean;
+  isExport: boolean;
+  cgstAmount: number;
+  sgstAmount: number;
+  igstAmount: number;
+}
+
+export interface InvoiceItemInfo {
+  title: string;
+  type: string;
+  rawType: string;
+  sacCode: string;
+  sacDescription: string;
+  enrollmentId?: string;
+  quantity: number;
+  unitPrice: number;
+  taxableAmount: number;
+  totalAmount: number;
+}
+
+export interface InvoiceModel {
+  invoiceNumber: string;
+  paymentDate: string;
+  status: string;
+  seller: InvoiceSellerInfo;
+  customer: InvoiceCustomerInfo;
+  payment: InvoicePaymentInfo;
+  item: InvoiceItemInfo;
+}
+
+export interface CreditNoteModel {
+  creditNoteNumber: string; // e.g. CN/26-27/0001 (<= 16 characters)
+  originalInvoiceNumber: string;
+  creditNoteDate: string;
+  reason: string;
+  refundId?: string | null;
+  paymentId: string;
+  seller: InvoiceSellerInfo;
+  customer: InvoiceCustomerInfo;
+  refundAmount: number;
+  taxAdjustmentAmount: number;
+  baseRefundAmount: number;
+  currency: string;
 }
 
 export interface UserNotification {

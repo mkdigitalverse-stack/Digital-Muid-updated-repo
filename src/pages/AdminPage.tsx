@@ -48,13 +48,17 @@ import {
   Receipt,
   Building2
 } from 'lucide-react';
-import { Article, Video, Framework, Course, Resource, Lead, Booking, ContactMessage, NewsletterSubscriber, AvailabilityRules, LeadStatus, LeadSource, BookingStatus, WebEnquiry, WebEnquiryStatus } from '../types';
+import { Article, Video, Framework, Course, Resource, Lead, Booking, ContactMessage, NewsletterSubscriber, AvailabilityRules, LeadStatus, LeadSource, BookingStatus, WebEnquiry, WebEnquiryStatus, PaymentRecord } from '../types';
 import { ArticleEditorModal } from '../components/ArticleEditorModal';
 import { VideoEditorModal } from '../components/VideoEditorModal';
 import { ResourceEditorModal } from '../components/ResourceEditorModal';
 import { FrameworkEditorModal } from '../components/FrameworkEditorModal';
 import { FrameworkCategoriesModal } from '../components/FrameworkCategoriesModal';
 import { CourseEditorModal } from '../components/CourseEditorModal';
+import { InvoiceModal } from '../components/InvoiceModal';
+import { paymentService } from '../services/paymentService';
+import { formatStudentId, formatInvoiceNumber } from '../utils/studentId';
+import { downloadInvoicePdf } from '../utils/pdfGenerator';
 
 interface AdminPageProps {
   navigate: (path: string) => void;
@@ -240,6 +244,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
   const [paymentSearch, setPaymentSearch] = useState('');
   const [paymentTypeFilter, setPaymentTypeFilter] = useState<'all' | 'course' | 'consultation' | 'resource'>('all');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState<'all' | string>('all');
+  const [adminInvoiceModalOpen, setAdminInvoiceModalOpen] = useState(false);
+  const [selectedAdminPayment, setSelectedAdminPayment] = useState<PaymentRecord | null>(null);
+  const [downloadingAdminInvoiceId, setDownloadingAdminInvoiceId] = useState<string | null>(null);
 
   // Bookings Filter & Search State
   const [bookingSearch, setBookingSearch] = useState('');
@@ -939,9 +946,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
   // Filtered Payments Ledger
   const filteredPayments = adminPayments.filter(p => {
     const q = (paymentSearch || '').toLowerCase().trim();
+    const invNo = (p.invoiceNumber || formatInvoiceNumber(p.createdAt, p.razorpayPaymentId || p.id)).toLowerCase();
+    const stuId = (p.studentId || formatStudentId(p.userId)).toLowerCase();
+
     const matchesSearch =
       q === '' ||
       (p.itemTitle || '').toLowerCase().includes(q) ||
+      invNo.includes(q) ||
+      stuId.includes(q) ||
       (p.razorpayOrderId || '').toLowerCase().includes(q) ||
       (p.razorpayPaymentId || '').toLowerCase().includes(q) ||
       (p.id || '').toLowerCase().includes(q) ||
@@ -1492,18 +1504,23 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400 uppercase tracking-wider text-[11px]">
+                    <th className="py-3.5 px-4 font-semibold">Invoice No</th>
                     <th className="py-3.5 px-4 font-semibold">Date & Time</th>
                     <th className="py-3.5 px-4 font-semibold">Type</th>
                     <th className="py-3.5 px-4 font-semibold">Item / Service Title</th>
+                    <th className="py-3.5 px-4 font-semibold">Student ID</th>
                     <th className="py-3.5 px-4 font-semibold">Amount</th>
-                    <th className="py-3.5 px-4 font-semibold">Razorpay Payment ID</th>
-                    <th className="py-3.5 px-4 font-semibold">Razorpay Order ID</th>
+                    <th className="py-3.5 px-4 font-semibold">Gateway Ref</th>
                     <th className="py-3.5 px-4 font-semibold">Status</th>
+                    <th className="py-3.5 px-4 font-semibold text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800 text-slate-300">
                   {filteredPayments.map((p) => {
                     const isConsultation = p.itemType === 'consultation';
+                    const persistentInvoiceNo = p.invoiceNumber || formatInvoiceNumber(p.createdAt, p.razorpayPaymentId || p.id);
+                    const displayStudentId = p.studentId || formatStudentId(p.userId);
+
                     const formattedDate = p.createdAt
                       ? new Date(p.createdAt).toLocaleDateString('en-IN', {
                           year: 'numeric',
@@ -1516,6 +1533,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
 
                     return (
                       <tr key={p.id} className="hover:bg-slate-800/50 transition-colors">
+                        <td className="py-3.5 px-4 whitespace-nowrap font-mono font-bold text-white text-[11px]">
+                          {persistentInvoiceNo}
+                        </td>
                         <td className="py-3.5 px-4 whitespace-nowrap text-slate-400 font-mono text-[11px]">
                           {formattedDate}
                         </td>
@@ -1537,17 +1557,22 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
                             </span>
                           )}
                         </td>
-                        <td className="py-3.5 px-4 font-semibold text-white max-w-xs truncate" title={p.itemTitle}>
+                        <td className="py-3.5 px-4 font-semibold text-white max-w-xs truncate" title={p.itemTitle || ''}>
                           {p.itemTitle}
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <span className="font-mono text-xs text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/30">
+                            {displayStudentId}
+                          </span>
                         </td>
                         <td className="py-3.5 px-4 whitespace-nowrap font-mono font-bold text-[#FF6B00]">
                           ₹{Number(p.amount).toLocaleString('en-IN')} {p.currency}
                         </td>
                         <td className="py-3.5 px-4 whitespace-nowrap font-mono text-slate-300 text-[11px]">
-                          {p.razorpayPaymentId || '—'}
-                        </td>
-                        <td className="py-3.5 px-4 whitespace-nowrap font-mono text-slate-400 text-[11px]">
-                          {p.razorpayOrderId || '—'}
+                          <div>{p.razorpayPaymentId || '—'}</div>
+                          {p.razorpayOrderId && (
+                            <div className="text-[10px] text-slate-500 truncate max-w-[120px]">{p.razorpayOrderId}</div>
+                          )}
                         </td>
                         <td className="py-3.5 px-4 whitespace-nowrap">
                           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium capitalize ${
@@ -1558,6 +1583,62 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
                             <CheckCircle2 className="w-3 h-3" />
                             <span>{p.status}</span>
                           </span>
+                        </td>
+                        <td className="py-3.5 px-4 whitespace-nowrap text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedAdminPayment(p);
+                                setAdminInvoiceModalOpen(true);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer"
+                              title="View Document Details"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-slate-400" />
+                              <span>View</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                setDownloadingAdminInvoiceId(p.id);
+                                try {
+                                  if (p.status === 'refunded') {
+                                    await paymentService.downloadOfficialCreditNote(p.razorpayPaymentId || p.id);
+                                  } else {
+                                    const res = await paymentService.downloadOfficialInvoice(p.razorpayPaymentId || p.id, persistentInvoiceNo);
+                                    if (!res.success) {
+                                      downloadInvoicePdf({
+                                        paymentId: p.razorpayPaymentId || p.id,
+                                        orderId: p.razorpayOrderId,
+                                        customerName: 'Valued Student',
+                                        studentId: displayStudentId,
+                                        itemTitle: p.itemTitle || 'Educational Service',
+                                        itemType: p.itemType,
+                                        amount: Number(p.amount) || 0,
+                                        currency: p.currency || 'INR',
+                                        paymentDate: p.createdAt,
+                                        status: p.status,
+                                        invoiceNumber: persistentInvoiceNo
+                                      });
+                                    }
+                                  }
+                                } finally {
+                                  setDownloadingAdminInvoiceId(null);
+                                }
+                              }}
+                              disabled={downloadingAdminInvoiceId === p.id}
+                              className={`px-2.5 py-1 rounded-lg text-white text-[11px] font-bold uppercase tracking-wider transition-colors inline-flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                                p.status === 'refunded'
+                                  ? 'bg-rose-600 hover:bg-rose-700'
+                                  : 'bg-[#FF6B00] hover:bg-[#e66000]'
+                              }`}
+                              title={p.status === 'refunded' ? 'Download Credit Note PDF' : 'Download Tax Invoice PDF'}
+                            >
+                              <Download className="w-3 h-3" />
+                              <span>{downloadingAdminInvoiceId === p.id ? '...' : p.status === 'refunded' ? 'CN' : 'PDF'}</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -5723,6 +5804,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ navigate }) => {
           </div>
         </div>
       )}
+
+      {/* Interactive Tax Invoice Modal for Admin */}
+      <InvoiceModal
+        isOpen={adminInvoiceModalOpen}
+        onClose={() => {
+          setAdminInvoiceModalOpen(false);
+          setSelectedAdminPayment(null);
+        }}
+        paymentRecord={selectedAdminPayment}
+      />
     </div>
   );
 };
