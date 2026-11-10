@@ -65,6 +65,184 @@ export const SELLER_PROFILE = {
 };
 
 /**
+ * Standard Indian States and Union Territories with 2-digit GST State Codes
+ */
+export const INDIAN_GST_STATE_CODES = {
+  "01": "Jammu & Kashmir",
+  "02": "Himachal Pradesh",
+  "03": "Punjab",
+  "04": "Chandigarh",
+  "05": "Uttarakhand",
+  "06": "Haryana",
+  "07": "Delhi",
+  "08": "Rajasthan",
+  "09": "Uttar Pradesh",
+  "10": "Bihar",
+  "11": "Sikkim",
+  "12": "Arunachal Pradesh",
+  "13": "Nagaland",
+  "14": "Manipur",
+  "15": "Mizoram",
+  "16": "Tripura",
+  "17": "Meghalaya",
+  "18": "Assam",
+  "19": "West Bengal",
+  "20": "Jharkhand",
+  "21": "Odisha",
+  "22": "Chhattisgarh",
+  "23": "Madhya Pradesh",
+  "24": "Gujarat",
+  "26": "Dadra & Nagar Haveli and Daman & Diu",
+  "27": "Maharashtra",
+  "28": "Andhra Pradesh",
+  "29": "Karnataka",
+  "30": "Goa",
+  "31": "Lakshadweep",
+  "32": "Kerala",
+  "33": "Tamil Nadu",
+  "34": "Puducherry",
+  "35": "Andaman & Nicobar Islands",
+  "36": "Telangana",
+  "37": "Ladakh",
+  "38": "Other Territory"
+};
+
+/**
+ * Robust Place of Supply determination under Sections 12 & 13 of the IGST Act, 2017.
+ * Evaluates multiple non-contradictory signals:
+ * 1. Customer GSTIN (first 2 digits identify State Code under Section 12(2)(a))
+ * 2. Declared Customer State / UT name or code
+ * 3. Customer Billing Address signals
+ * 4. International / Currency signals for export evaluation
+ *
+ * @param {object} raw
+ * @param {string} currency
+ * @returns {object} { customerState, stateCode, isInterState, isOverseas, isExportWithLut }
+ */
+export function determinePlaceOfSupply(raw, currency = "INR") {
+  const rawGstin = String(raw.customerGstin || raw.gstin || "").trim().toUpperCase();
+  const rawState = String(raw.customerState || raw.state || "").trim();
+  const billingAddress = String(raw.billingAddress || raw.billing_address || "").trim();
+  const country = String(raw.country || raw.billingCountry || "").trim().toLowerCase();
+
+  // 1. Check if recipient has a registered GSTIN
+  if (rawGstin && rawGstin.length >= 2) {
+    const code = rawGstin.slice(0, 2);
+    if (INDIAN_GST_STATE_CODES[code]) {
+      const isUP = code === "09";
+      return {
+        customerState: `${INDIAN_GST_STATE_CODES[code]} (${code})`,
+        stateCode: code,
+        isInterState: !isUP,
+        isOverseas: false,
+        isExportWithLut: false
+      };
+    }
+  }
+
+  // 2. Check for Overseas / Foreign indicators
+  const isForeignCurrency = currency !== "INR";
+  const addressOverseas = billingAddress && (
+    billingAddress.toLowerCase().includes("usa") ||
+    billingAddress.toLowerCase().includes("united states") ||
+    billingAddress.toLowerCase().includes("uk") ||
+    billingAddress.toLowerCase().includes("united kingdom") ||
+    billingAddress.toLowerCase().includes("canada") ||
+    billingAddress.toLowerCase().includes("uae") ||
+    billingAddress.toLowerCase().includes("dubai") ||
+    billingAddress.toLowerCase().includes("singapore") ||
+    billingAddress.toLowerCase().includes("australia")
+  );
+  const stateOverseas = rawState && (
+    rawState.toLowerCase().includes("overseas") ||
+    rawState.toLowerCase().includes("international") ||
+    rawState.toLowerCase().includes("outside india")
+  );
+  const countryOverseas = country && country !== "india" && country !== "in";
+
+  const isOverseas = Boolean(isForeignCurrency || addressOverseas || stateOverseas || countryOverseas || raw.isOverseas);
+  const isExportWithLut = Boolean(raw.isExportWithLut || raw.lutVerified || false);
+
+  if (isOverseas) {
+    if (isExportWithLut) {
+      return {
+        customerState: rawState || "Overseas (Zero-Rated under Verified LUT - Form GST RFD-11)",
+        stateCode: "96", // Standard overseas trade code
+        isInterState: true,
+        isOverseas: true,
+        isExportWithLut: true
+      };
+    } else {
+      // Under Section 7(5)(a) of IGST Act, cross-border supply without confirmed LUT is subject to Inter-State IGST
+      return {
+        customerState: rawState || "Overseas / International (IGST Applicable - Pending CA LUT Confirmation)",
+        stateCode: "96",
+        isInterState: true,
+        isOverseas: true,
+        isExportWithLut: false
+      };
+    }
+  }
+
+  // 3. Match Indian State / UT from state or billing address
+  const combinedText = `${rawState} ${billingAddress}`.toLowerCase();
+
+  // Check Uttar Pradesh (Supplier Location - State Code 09)
+  if (
+    combinedText.includes("uttar pradesh") ||
+    combinedText.includes("lucknow") ||
+    combinedText.includes("kanpur") ||
+    combinedText.includes("noida") ||
+    combinedText.includes("ghaziabad") ||
+    combinedText.includes("varanasi") ||
+    rawState.toLowerCase() === "up" ||
+    rawState === "09"
+  ) {
+    return {
+      customerState: "Uttar Pradesh (09)",
+      stateCode: "09",
+      isInterState: false,
+      isOverseas: false,
+      isExportWithLut: false
+    };
+  }
+
+  // Check all other Indian States and Codes
+  for (const [code, name] of Object.entries(INDIAN_GST_STATE_CODES)) {
+    if (code === "09") continue;
+    if (combinedText.includes(name.toLowerCase()) || rawState === code) {
+      return {
+        customerState: `${name} (${code})`,
+        stateCode: code,
+        isInterState: true,
+        isOverseas: false,
+        isExportWithLut: false
+      };
+    }
+  }
+
+  // 4. Default if State is completely unstated/unidentifiable
+  if (!rawState && !billingAddress) {
+    return {
+      customerState: "Recipient State Unstated (Inter-State IGST Applicable under Sec 7(5) / 12(2))",
+      stateCode: "99",
+      isInterState: true,
+      isOverseas: false,
+      isExportWithLut: false
+    };
+  }
+
+  // Fallback to customer's raw input with Inter-State assumption
+  return {
+    customerState: rawState || "Other Territory (Inter-State IGST)",
+    stateCode: "99",
+    isInterState: true,
+    isOverseas: false,
+    isExportWithLut: false
+  };
+}
+
+/**
  * Builds a normalized, authoritative invoice model from raw payment/order data.
  * @param {object} raw
  * @returns {object} Authoritative invoice object
@@ -111,16 +289,20 @@ export function buildAuthoritativeInvoiceModel(raw) {
   const totalAmount = Number(raw.amount) || 0;
   const currency = (raw.currency || "INR").toUpperCase();
 
-  // Authoritative SAC & Tax determination
+  // Authoritative SAC & Tax determination (F-04 CA Classification Flexibility)
   // Course/Training: SAC 999293 (Commercial training & coaching services)
   // Consultation: SAC 998311 (Management consulting and advisory services)
-  // Digital Tools: SAC 998313 (Information technology services)
-  const sacCode = rawItemType === "consultation" ? "998311" : rawItemType === "resource" ? "998313" : "999293";
-  const sacDescription = rawItemType === "consultation"
-    ? "Management Consulting & Advisory Services (SAC 998311)"
-    : rawItemType === "resource"
-    ? "IT Digital Tools & Interactive Educational Assets (SAC 998313)"
-    : "Commercial Training & Coaching Services (SAC 999293)";
+  // Digital Tools: SAC 998313 (IT services) or SAC 998431 (Online content & text workbooks)
+  const sacCode = String(raw.sacCode || (rawItemType === "consultation" ? "998311" : rawItemType === "resource" ? "998313" : "999293")).trim();
+  const sacDescription = raw.sacDescription || (
+    rawItemType === "consultation"
+      ? "Management Consulting & Advisory Services (SAC 998311)"
+      : rawItemType === "resource"
+      ? (sacCode === "998431"
+          ? "On-Line Educational Workbooks & Digital Toolkits (SAC 998431)"
+          : "IT Digital Tools & Interactive Educational Assets (SAC 998313)")
+      : "Commercial Training & Coaching Services (SAC 999293)"
+  );
 
   // Configurable Tax Rate Determination (Do NOT assume 18% blindly)
   let taxRatePercent = 18;
@@ -130,46 +312,15 @@ export function buildAuthoritativeInvoiceModel(raw) {
     taxRatePercent = 0; // Printed books / materials under HSN 4901
   }
 
-  // Place of Supply & Overseas Evaluation (Strict Compliance: Do NOT automatically treat as 0% LUT export)
-  const rawState = String(raw.customerState || raw.state || "").trim();
-  let customerState = rawState;
-  let isInterState = false;
+  // Robust Place of Supply Determination
+  const pos = determinePlaceOfSupply(raw, currency);
+  let customerState = pos.customerState;
+  let isInterState = pos.isInterState;
+  const isOverseasCustomer = pos.isOverseas;
+  const isExportWithLut = pos.isExportWithLut;
 
-  const isForeignCurrency = currency !== "INR";
-  const isDeclaredOverseas = rawState && (
-    rawState.toLowerCase().includes("overseas") ||
-    rawState.toLowerCase().includes("international") ||
-    rawState.toLowerCase().includes("outside india")
-  );
-  const isOverseasCustomer = Boolean(isForeignCurrency || isDeclaredOverseas || raw.isOverseas);
-
-  // Under Section 16(3) of the IGST Act, zero-rating without payment of IGST is strictly contingent
-  // on a verified Letter of Undertaking (LUT - Form GST RFD-11) on record with the tax department.
-  // Overseas customers MUST NOT be automatically zero-rated unless LUT status is confirmed by the CA.
-  const isExportWithLut = Boolean(raw.isExportWithLut || raw.lutVerified || false);
-
-  if (isOverseasCustomer) {
-    if (isExportWithLut) {
-      customerState = rawState || "Overseas (Zero-Rated under Verified LUT)";
-      isInterState = true;
-      taxRatePercent = 0;
-    } else {
-      // Billed as Inter-State Supply with Integrated GST (IGST) pending LUT confirmation by CA
-      customerState = rawState || "Overseas / International (IGST - Pending CA LUT Confirmation)";
-      isInterState = true;
-    }
-  } else if (!rawState) {
-    customerState = "Recipient State Unspecified (Inter-State IGST Applicable)";
-    isInterState = true;
-  } else {
-    const lower = rawState.toLowerCase();
-    if (lower === "uttar pradesh" || lower === "up" || lower.includes("uttar pradesh") || lower === "09") {
-      customerState = "Uttar Pradesh (09)";
-      isInterState = false;
-    } else {
-      customerState = rawState;
-      isInterState = true;
-    }
+  if (isExportWithLut) {
+    taxRatePercent = 0; // Zero-rated under valid LUT
   }
 
   // GST Calculation based on configurable rate and Place of Supply
@@ -203,13 +354,19 @@ export function buildAuthoritativeInvoiceModel(raw) {
     invoiceNumber,
     paymentDate,
     status: (raw.status || "captured").toLowerCase(),
-    seller: { ...SELLER_PROFILE },
+    sacCode,
+    sacDescription,
+    seller: {
+      ...SELLER_PROFILE,
+      reverseCharge: "No (Tax is payable by Supplier under Forward Charge)"
+    },
     customer: {
       name: customerName,
       email: customerEmail,
       phone: customerPhone,
       studentId,
       state: customerState,
+      stateCode: pos.stateCode,
       billingAddress: customerBillingAddress || undefined
     },
     payment: {
@@ -227,7 +384,10 @@ export function buildAuthoritativeInvoiceModel(raw) {
       isOverseasCustomer,
       cgstAmount,
       sgstAmount,
-      igstAmount
+      igstAmount,
+      cgstRatePercent: isInterState ? 0 : taxRatePercent / 2,
+      sgstRatePercent: isInterState ? 0 : taxRatePercent / 2,
+      igstRatePercent: isInterState ? taxRatePercent : 0
     },
     item: {
       title: itemTitle,
@@ -246,6 +406,8 @@ export function buildAuthoritativeInvoiceModel(raw) {
 
 /**
  * Builds an authoritative credit note model for refunded transactions (Section 34 CGST Act).
+ * Matches original invoice tax split and Place of Supply rather than assuming 18%.
+ *
  * @param {object} raw
  * @returns {object} Authoritative credit note model
  */
@@ -258,22 +420,53 @@ export function buildAuthoritativeCreditNoteModel(raw) {
     raw.creditNoteSeq
   );
   const refundAmount = Number(raw.refundAmount || raw.amount || invoiceModel.payment.totalAmount);
-  const baseRefund = Number((refundAmount / 1.18).toFixed(2));
-  const taxAdjustment = Number((refundAmount - baseRefund).toFixed(2));
+  const taxRate = invoiceModel.payment.taxRatePercent || 18;
+  const isInterState = invoiceModel.payment.isInterState;
+
+  let baseRefund = 0;
+  let taxAdjustment = 0;
+  let cgstAdjustment = 0;
+  let sgstAdjustment = 0;
+  let igstAdjustment = 0;
+
+  if (taxRate === 0) {
+    baseRefund = refundAmount;
+    taxAdjustment = 0;
+  } else {
+    baseRefund = Number((refundAmount / (1 + taxRate / 100)).toFixed(2));
+    taxAdjustment = Number((refundAmount - baseRefund).toFixed(2));
+    if (isInterState) {
+      igstAdjustment = taxAdjustment;
+    } else {
+      cgstAdjustment = Number((taxAdjustment / 2).toFixed(2));
+      sgstAdjustment = Number((taxAdjustment / 2).toFixed(2));
+    }
+  }
 
   return {
     creditNoteNumber,
-    originalInvoiceNumber: invoiceModel.invoiceNumber,
+    originalInvoiceNumber: raw.invoiceNumber || invoiceModel.invoiceNumber,
+    originalInvoiceDate: invoiceModel.paymentDate,
     creditNoteDate: refundDate,
     reason: raw.reason || "Course access withdrawal / refund",
     refundId: raw.refundId || raw.razorpayRefundId || "RFND-REF",
     paymentId: invoiceModel.payment.paymentId,
-    seller: { ...SELLER_PROFILE },
+    seller: {
+      ...SELLER_PROFILE,
+      reverseCharge: "No"
+    },
     customer: invoiceModel.customer,
     currency: invoiceModel.payment.currency,
     refundAmount,
     baseRefundAmount: baseRefund,
     taxAdjustmentAmount: taxAdjustment,
+    cgstAdjustmentAmount: cgstAdjustment,
+    sgstAdjustmentAmount: sgstAdjustment,
+    igstAdjustmentAmount: igstAdjustment,
+    taxRatePercent: taxRate,
+    isInterState,
+    placeOfSupply: invoiceModel.customer.state,
+    reverseCharge: "No",
     item: invoiceModel.item
   };
 }

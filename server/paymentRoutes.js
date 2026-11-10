@@ -37,6 +37,129 @@ import {
 } from "./studentId.js";
 
 // ==============================================================================
+// GUEST INVOICE TOKEN CRYPTOGRAPHIC HARDENING (SEC-03 Compliance)
+// High-entropy HMAC-SHA256 tokens protect guest invoices from sequential enumeration.
+// Supports dedicated INVOICE_TOKEN_HMAC_SECRET or falls back to server payment/asset secrets.
+// Fails closed if HMAC secret is missing or has < 32 bytes of entropy.
+// ==============================================================================
+export function getInvoiceTokenHmacSecret() {
+  const candidates = [
+    process.env.INVOICE_TOKEN_HMAC_SECRET,
+    process.env.PAYMENT_VERIFICATION_SECRET,
+    process.env.ASSET_TOKEN_HMAC_SECRET,
+    process.env.RAZORPAY_KEY_SECRET
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "string") {
+      const clean = candidate.trim();
+      if (clean !== "undefined" && clean !== "null" && Buffer.byteLength(clean, "utf8") >= 32) {
+        return clean;
+      }
+    }
+  }
+
+  return null;
+}
+
+export function generateSignedInvoiceToken(paymentId, expiresInMs = 24 * 60 * 60 * 1000) {
+  if (!paymentId) throw new Error("Payment ID is required to generate signed invoice token");
+  const secret = getInvoiceTokenHmacSecret();
+  if (!secret) {
+    throw new Error("Invoice HMAC secret missing or insufficient entropy (requires >= 32 bytes). Server configuration error.");
+  }
+  const exp = Date.now() + expiresInMs;
+  const signature = crypto
+    .createHmac("sha256", secret)
+    .update(`${paymentId}:${exp}`)
+    .digest("hex");
+  return `${exp}.${signature}`;
+}
+
+export function verifySignedInvoiceToken(paymentId, token) {
+  if (!paymentId || !token || typeof token !== "string" || !token.includes(".")) return false;
+  const [expStr, sig] = token.split(".");
+  const exp = Number(expStr);
+  if (!exp || isNaN(exp) || Date.now() > exp) return false;
+
+  const secret = getInvoiceTokenHmacSecret();
+  if (!secret) return false;
+
+  try {
+    const expected = crypto
+      .createHmac("sha256", secret)
+      .update(`${paymentId}:${exp}`)
+      .digest("hex");
+    const a = Buffer.from(sig, "hex");
+    const b = Buffer.from(expected, "hex");
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+// ==============================================================================
+// RATE LIMITING FOR SENSITIVE BILLING & ASSET DOWNLOAD ENDPOINTS (SEC-05 Compliance)
+// 30 requests per 15 minutes per client IP. Returns HTTP 429 with Retry-After header.
+// ==============================================================================
+const paymentRateLimitMap = new Map();
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const RATE_LIMIT_MAX_REQUESTS = 30; // 30 requests
+
+export function getClientIp(req) {
+  return req.ip ||
+         (req.headers && req.headers["x-forwarded-for"] ? String(req.headers["x-forwarded-for"]).split(",")[0].trim() : null) ||
+         req.socket?.remoteAddress ||
+         "127.0.0.1";
+}
+
+export function paymentRateLimiter(req, res, next) {
+  const ip = getClientIp(req);
+  const now = Date.now();
+  let timestamps = paymentRateLimitMap.get(ip);
+  if (!timestamps) {
+    timestamps = [];
+    paymentRateLimitMap.set(ip, timestamps);
+  }
+
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+  const recentTimestamps = timestamps.filter(t => t > windowStart);
+
+  if (recentTimestamps.length >= RATE_LIMIT_MAX_REQUESTS) {
+    const oldest = recentTimestamps[0];
+    const retryAfterSeconds = Math.max(1, Math.ceil((oldest + RATE_LIMIT_WINDOW_MS - now) / 1000));
+    res.setHeader("Retry-After", String(retryAfterSeconds));
+    return res.status(429).json({
+      success: false,
+      code: "RATE_LIMIT_EXCEEDED",
+      error: `Too many requests. Rate limit is ${RATE_LIMIT_MAX_REQUESTS} requests per 15 minutes. Please retry after ${retryAfterSeconds} seconds.`,
+      retryAfterSeconds
+    });
+  }
+
+  recentTimestamps.push(now);
+  paymentRateLimitMap.set(ip, recentTimestamps);
+
+  if (paymentRateLimitMap.size > 5000) {
+    for (const [key, tsList] of paymentRateLimitMap.entries()) {
+      const valid = tsList.filter(t => t > windowStart);
+      if (valid.length === 0) {
+        paymentRateLimitMap.delete(key);
+      } else {
+        paymentRateLimitMap.set(key, valid);
+      }
+    }
+  }
+
+  next();
+}
+
+export function resetPaymentRateLimits() {
+  paymentRateLimitMap.clear();
+}
+
+// ==============================================================================
 // AUTHORITATIVE PAID RESOURCES CATALOG & PRICING
 // Guarantees authoritative fail-closed pricing even if DB schema cache lacks columns
 // ==============================================================================
@@ -1816,7 +1939,7 @@ router.get("/verify-purchase-status", async (req, res) => {
  * Enforces server verification: only returns private storage signed URL if a verified captured payment exists.
  * Rejects cross-resource tampering and never exposes Google Drive or raw storage tokens.
  */
-router.post("/get-resource-download-url", async (req, res) => {
+router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     let authenticatedUser = null;
@@ -2317,8 +2440,8 @@ async function handleBundleFilesRequest(req, res) {
   }
 }
 
-router.get("/bundle-files", handleBundleFilesRequest);
-router.post("/get-bundle-files", handleBundleFilesRequest);
+router.get("/bundle-files", paymentRateLimiter, handleBundleFilesRequest);
+router.post("/get-bundle-files", paymentRateLimiter, handleBundleFilesRequest);
 
 /**
  * GET /api/payments/download-paid-asset
@@ -2327,7 +2450,7 @@ router.post("/get-bundle-files", handleBundleFilesRequest);
  * Requires a cryptographically signed, unexpired HMAC token generated by the server.
  * Rejects missing, invalid, expired, or tampered tokens with 403 Forbidden.
  */
-router.get("/download-paid-asset", async (req, res) => {
+router.get("/download-paid-asset", paymentRateLimiter, async (req, res) => {
   try {
     const { token } = req.query;
     const payload = verifyAssetAccessToken(token);
@@ -2508,7 +2631,7 @@ router.post("/admin/update-consultation-pricing", async (req, res) => {
  * - Non-owners receive 403 Forbidden.
  * - Unauthenticated requests receive 401 Unauthorized.
  */
-router.get("/invoice/:paymentId", async (req, res) => {
+router.get("/invoice/:paymentId", paymentRateLimiter, async (req, res) => {
   try {
     const rawPaymentId = String(req.params.paymentId || "").trim();
     if (!rawPaymentId) {
@@ -2516,17 +2639,33 @@ router.get("/invoice/:paymentId", async (req, res) => {
     }
 
     const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const signedToken = req.query.token;
+
+    let user = null;
+    let isAdmin = false;
+    let isSignedTokenValid = false;
+
+    if (signedToken) {
+      isSignedTokenValid = verifySignedInvoiceToken(rawPaymentId, signedToken);
+    }
+
+    if (!authHeader && !isSignedTokenValid) {
       return res.status(401).json({ success: false, error: "Authentication required to download tax invoice." });
     }
 
-    const { user, error: authError } = await verifySupabaseToken(authHeader);
-    if (authError || !user) {
-      return res.status(401).json({ success: false, error: "Invalid or expired session. Please sign in again." });
+    if (authHeader) {
+      const { user: authUser, error: authError } = await verifySupabaseToken(authHeader);
+      if (authError || !authUser) {
+        if (!isSignedTokenValid) {
+          return res.status(401).json({ success: false, error: "Invalid or expired session. Please sign in again." });
+        }
+      } else {
+        user = authUser;
+        isAdmin = checkIsAdmin(user);
+      }
     }
 
-    const isAdmin = checkIsAdmin(user);
-    const supabaseServer = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    const supabaseServer = getSupabaseServerClient() || (authHeader ? getSupabaseDbClient(authHeader) : null);
     if (!supabaseServer) {
       return res.status(503).json({ success: false, error: "Database service is currently unavailable." });
     }
@@ -2566,14 +2705,20 @@ router.get("/invoice/:paymentId", async (req, res) => {
       if (data) resourceRecord = data;
     } catch {}
 
-    // If not found in database, check gateway if Razorpay is configured
+    // Gateway reconciliation: Check gateway if Razorpay is configured
     let rzpPayment = null;
-    if (!paymentRecord && !bookingRecord && !resourceRecord && rawPaymentId.startsWith("pay_")) {
+    const gatewayPayId = (rawPaymentId.startsWith("pay_") ? rawPaymentId : null) ||
+                         paymentRecord?.razorpay_payment_id ||
+                         resourceRecord?.razorpay_payment_id;
+
+    if (gatewayPayId && gatewayPayId.startsWith("pay_")) {
       const razorpay = getRazorpayClient();
       if (razorpay) {
         try {
-          rzpPayment = await razorpay.payments.fetch(rawPaymentId);
-        } catch {}
+          rzpPayment = await razorpay.payments.fetch(gatewayPayId);
+        } catch (fetchErr) {
+          console.warn("[Invoice Endpoint] Gateway payment fetch notice:", fetchErr?.message);
+        }
       }
     }
 
@@ -2581,31 +2726,66 @@ router.get("/invoice/:paymentId", async (req, res) => {
       return res.status(404).json({ success: false, error: "Invoice transaction not found." });
     }
 
-    // 2. Authorization check: Owner or Admin
-    const userEmail = (user.email || "").toLowerCase().trim();
-    const userId = user.id;
+    // 2. Authorization check: Strict Hierarchy (F-02 & F-05 Audit Compliance)
+    // Case A: payments.user_id === authenticated_user.id -> ALLOW
+    // Case B: payments.user_id IS NULL -> ALLOW ONLY if user email matches customer_email AND email_confirmed_at is verified
+    // Case C: payments.user_id IS NOT NULL and != auth.uid() -> DENY (email match NEVER overrides different user_id)
+    // Case D: Unverified email attempting to claim guest invoice -> DENY with 403 UNCONFIRMED_EMAIL
+    // Case E: Administrator -> ALLOW
+    // Signed Token: Cryptographic HMAC valid token -> ALLOW
+    let isAuthorized = false;
+    let authDenialReason = "Forbidden: You are not authorized to access this invoice.";
 
-    let isAuthorized = isAdmin;
+    if (isAdmin) {
+      // Case E: Server-verified administrator access
+      isAuthorized = true;
+    } else if (isSignedTokenValid) {
+      // F-05: Valid HMAC signed guest token
+      isAuthorized = true;
+    } else if (user) {
+      const userId = user.id;
+      const userEmail = (user.email || "").toLowerCase().trim();
+      const isEmailConfirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
 
-    if (!isAuthorized) {
-      // Check user_id matching
-      if (paymentRecord?.user_id && paymentRecord.user_id === userId) isAuthorized = true;
-      if (bookingRecord?.user_id && bookingRecord.user_id === userId) isAuthorized = true;
-      if (resourceRecord?.user_id && resourceRecord.user_id === userId) isAuthorized = true;
+      // Determine primary owner user_id from records
+      const recordUserId = paymentRecord?.user_id || bookingRecord?.user_id || resourceRecord?.user_id || null;
+      const recordCustomerEmail = (
+        paymentRecord?.customer_email ||
+        bookingRecord?.customer_email ||
+        resourceRecord?.customer_email ||
+        rzpPayment?.email ||
+        ""
+      ).toLowerCase().trim();
 
-      // Check email matching
-      if (userEmail) {
-        if (bookingRecord?.customer_email && bookingRecord.customer_email.toLowerCase().trim() === userEmail) {
+      if (recordUserId) {
+        // Record has an assigned account user_id
+        if (recordUserId === userId) {
+          // Case A: Authenticated user matches assigned user_id
           isAuthorized = true;
+        } else {
+          // Case C: Record belongs to a different user account.
+          // STRICT RULE: Email match must NEVER override a different assigned user_id!
+          isAuthorized = false;
+          authDenialReason = "Forbidden: This invoice is assigned to a different user account. Cross-account access denied.";
         }
-        if (resourceRecord?.customer_email && resourceRecord.customer_email.toLowerCase().trim() === userEmail) {
-          isAuthorized = true;
-        }
-        if (rzpPayment?.email && rzpPayment.email.toLowerCase().trim() === userEmail) {
-          isAuthorized = true;
-        }
-        if (rzpPayment?.notes?.userId && rzpPayment.notes.userId === userId) {
-          isAuthorized = true;
+      } else {
+        // Record is a guest checkout (user_id IS NULL)
+        if (recordCustomerEmail && userEmail && recordCustomerEmail === userEmail) {
+          if (isEmailConfirmed) {
+            // Case B: Guest purchase claimed by user with confirmed, matching email
+            isAuthorized = true;
+          } else {
+            // Case D: Unverified email attempting to claim guest invoice
+            isAuthorized = false;
+            return res.status(403).json({
+              success: false,
+              code: "UNCONFIRMED_EMAIL",
+              error: "Forbidden: Your email address is unconfirmed. Please verify your email before accessing guest invoices."
+            });
+          }
+        } else {
+          isAuthorized = false;
+          authDenialReason = "Forbidden: You are not authorized to access this guest invoice.";
         }
       }
     }
@@ -2613,7 +2793,7 @@ router.get("/invoice/:paymentId", async (req, res) => {
     if (!isAuthorized) {
       return res.status(403).json({
         success: false,
-        error: "Forbidden: You are not authorized to access this invoice."
+        error: authDenialReason
       });
     }
 
@@ -2671,8 +2851,172 @@ router.get("/invoice/:paymentId", async (req, res) => {
     const currency = (paymentRecord?.currency || bookingRecord?.currency || resourceRecord?.currency || rzpPayment?.currency || "INR").toUpperCase();
     const paymentDate = paymentRecord?.created_at || bookingRecord?.created_at || resourceRecord?.created_at || new Date().toISOString();
 
-    // 5. Handle Refunded Transaction => Issue Credit Note (Section 34 CGST Act)
+    // 5. Handle Refunded Transaction => Issue / Retrieve Credit Note (Section 34 CGST Act)
     if (rawStatus === "refunded" || req.query.type === "credit-note") {
+      let finalCreditNoteNumber = null;
+      let existingCreditNoteRow = null;
+
+      const rawRefundId = String(
+        req.query.refundId ||
+        req.body?.refundId ||
+        paymentRecord?.refund_id ||
+        `rfnd_${cleanPayId}`
+      ).trim();
+
+      const rawRequestedAmount = req.query.refundAmount ?? req.body?.refundAmount;
+      const requestedRefundAmount = rawRequestedAmount !== undefined ? Number(rawRequestedAmount) : amount;
+
+      // F-01: Validate requested refund amount is a positive, finite number
+      if (isNaN(requestedRefundAmount) || !isFinite(requestedRefundAmount) || requestedRefundAmount <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid refund amount: "${rawRequestedAmount}". Refund amount must be a positive finite number greater than zero.`
+        });
+      }
+
+      // Check payment status is eligible for credit note/refund
+      if (["failed", "cancelled", "pending"].includes(rawStatus)) {
+        return res.status(400).json({
+          success: false,
+          error: `Cannot issue credit note for transaction with status '${rawStatus}'. Only captured or settled payments can be refunded.`
+        });
+      }
+
+      // F-01: Check cumulative credit notes against original payment amount
+      let priorCreditNotes = [];
+      try {
+        const { data: priorCns } = await supabaseServer
+          .from("credit_notes")
+          .select("id, refund_id, amount, credit_note_number, created_at")
+          .eq("payment_id", cleanPayId);
+        if (priorCns) priorCreditNotes = priorCns;
+      } catch (e) {
+        console.warn("[Credit Note] Could not fetch prior credit notes:", e.message);
+      }
+
+      // Check if refund_id was already processed (Idempotency)
+      const existingForRefundId = priorCreditNotes.find(cn => cn.refund_id === rawRefundId);
+      if (existingForRefundId) {
+        existingCreditNoteRow = existingForRefundId;
+        finalCreditNoteNumber = existingForRefundId.credit_note_number;
+      }
+
+      const priorRefundTotal = priorCreditNotes
+        .filter(cn => cn.refund_id !== rawRefundId)
+        .reduce((sum, cn) => sum + Number(cn.amount || 0), 0);
+
+      const remainingEligibleBalance = Math.max(0, Number((amount - priorRefundTotal).toFixed(2)));
+
+      // F-01: Reject excessive refunds (NO SILENT CLAMPING!)
+      if (!existingCreditNoteRow && requestedRefundAmount > remainingEligibleBalance) {
+        return res.status(400).json({
+          success: false,
+          error: `Refund amount ₹${requestedRefundAmount} exceeds remaining eligible refundable balance of ₹${remainingEligibleBalance} (Original payment: ₹${amount}, Prior refunds: ₹${priorRefundTotal}). Excessive refund rejected.`
+        });
+      }
+
+      const isPartialRefund = (priorRefundTotal + requestedRefundAmount) < amount;
+      const refundDate = paymentRecord?.updated_at || new Date().toISOString();
+
+      // If no credit note exists yet for this refund_id, allocate atomically via RPC only (SEC-02 Compliance)
+      // Direct INSERT fallback is strictly prohibited to prevent race conditions and limit bypass.
+      if (!finalCreditNoteNumber) {
+        try {
+          const { data: rpcRows, error: rpcErr } = await supabaseServer.rpc("record_credit_note_with_limit", {
+            p_payment_id: cleanPayId,
+            p_refund_id: rawRefundId,
+            p_refund_amount: requestedRefundAmount,
+            p_reason: isPartialRefund ? "Partial educational course fee adjustment & refund" : "Educational course enrolment cancellation & refund",
+            p_user_id: targetUserId || null,
+            p_currency: currency,
+            p_date: refundDate
+          });
+
+          if (rpcErr) {
+            console.error("[Credit Note] RPC record_credit_note_with_limit returned error:", rpcErr.message);
+            const isLimitErr = rpcErr.message && (
+              rpcErr.message.includes("exceeds remaining") ||
+              rpcErr.message.includes("Invalid refund amount") ||
+              rpcErr.message.includes("not eligible")
+            );
+            if (isLimitErr) {
+              return res.status(400).json({
+                success: false,
+                code: "REFUND_LIMIT_EXCEEDED",
+                error: rpcErr.message
+              });
+            }
+            return res.status(500).json({
+              success: false,
+              code: "CREDIT_NOTE_RPC_FAILED",
+              error: `Failed to record credit note via atomic RPC: ${rpcErr.message}. Manual reconciliation required.`,
+              reconciliation: {
+                status: "pending_manual_reconciliation",
+                refundId: rawRefundId,
+                paymentId: cleanPayId,
+                requestedAmount: requestedRefundAmount
+              }
+            });
+          } else if (rpcRows && rpcRows.length > 0 && rpcRows[0]?.credit_note_number) {
+            existingCreditNoteRow = rpcRows[0];
+            finalCreditNoteNumber = rpcRows[0].credit_note_number;
+          } else {
+            return res.status(500).json({
+              success: false,
+              code: "CREDIT_NOTE_EMPTY_RESULT",
+              error: "Atomic credit note allocation returned empty or invalid row. Manual reconciliation required.",
+              reconciliation: {
+                status: "pending_manual_reconciliation",
+                refundId: rawRefundId,
+                paymentId: cleanPayId,
+                requestedAmount: requestedRefundAmount
+              }
+            });
+          }
+        } catch (rpcEx) {
+          console.error("[Credit Note] RPC call exception:", rpcEx.message);
+          const isLimitErr = rpcEx.message && (
+            rpcEx.message.includes("exceeds remaining") ||
+            rpcEx.message.includes("Invalid refund amount") ||
+            rpcEx.message.includes("not eligible")
+          );
+          if (isLimitErr) {
+            return res.status(400).json({
+              success: false,
+              code: "REFUND_LIMIT_EXCEEDED",
+              error: rpcEx.message
+            });
+          }
+          return res.status(500).json({
+            success: false,
+            code: "CREDIT_NOTE_RPC_FAILED",
+            error: `Credit note RPC execution failed: ${rpcEx.message}. Manual reconciliation required.`,
+            reconciliation: {
+              status: "pending_manual_reconciliation",
+              refundId: rawRefundId,
+              paymentId: cleanPayId,
+              requestedAmount: requestedRefundAmount
+            }
+          });
+        }
+
+        if (!finalCreditNoteNumber) {
+          return res.status(500).json({
+            success: false,
+            code: "CREDIT_NOTE_ALLOCATION_FAILED",
+            error: "Could not allocate authoritative credit note number. Direct insert fallback is forbidden for financial integrity.",
+            reconciliation: {
+              status: "pending_manual_reconciliation",
+              refundId: rawRefundId,
+              paymentId: cleanPayId,
+              requestedAmount: requestedRefundAmount
+            }
+          });
+        }
+      }
+
+      const effectiveRefundAmount = existingCreditNoteRow?.amount ? Number(existingCreditNoteRow.amount) : requestedRefundAmount;
+
       const creditNoteModel = buildAuthoritativeCreditNoteModel({
         paymentId: cleanPayId,
         orderId: cleanOrderId,
@@ -2686,14 +3030,14 @@ router.get("/invoice/:paymentId", async (req, res) => {
         enrollmentId,
         itemTitle,
         itemType: rawItemType,
-        amount,
+        amount: effectiveRefundAmount,
         currency,
         paymentDate,
-        refundDate: paymentRecord?.updated_at || new Date().toISOString(),
+        refundDate,
         invoiceNumber: paymentRecord?.invoice_number,
-        creditNoteNumber: paymentRecord?.credit_note_number,
-        refundId: paymentRecord?.refund_id || "RFND-AUTHORITATIVE",
-        reason: "Educational course enrolment cancellation & refund"
+        creditNoteNumber: finalCreditNoteNumber,
+        refundId: rawRefundId,
+        reason: existingCreditNoteRow?.reason || (isPartialRefund ? "Partial course fee adjustment & refund" : "Educational course enrolment cancellation & refund")
       });
 
       if (req.query.format === "json") {
@@ -2716,11 +3060,28 @@ router.get("/invoice/:paymentId", async (req, res) => {
 
     // 6. Payment Security Verification:
     // Reject pending, failed, cancelled, or unverified transactions
+    // Enforces actual gateway capture: pay_ prefix alone is NOT sufficient proof
+    if (rzpPayment && rzpPayment.status) {
+      if (rzpPayment.status !== "captured") {
+        return res.status(400).json({
+          success: false,
+          error: `Cannot generate tax invoice: Gateway payment status is '${rzpPayment.status}'. Invoices can only be issued for fully captured payments.`
+        });
+      }
+    }
+
     const isCaptured =
       rawStatus === "captured" ||
       rawStatus === "paid" ||
       rawStatus === "confirmed" ||
-      rawStatus === "completed";
+      rawStatus === "completed" ||
+      (rzpPayment && rzpPayment.status === "captured") ||
+      (rawStatus === "active" && Boolean(
+        paymentRecord?.status === "captured" ||
+        paymentRecord?.status === "paid" ||
+        (rzpPayment && rzpPayment.status === "captured") ||
+        (resourceRecord && resourceRecord.payment_verified === true)
+      ));
 
     if (!isCaptured) {
       return res.status(400).json({
@@ -2730,7 +3091,44 @@ router.get("/invoice/:paymentId", async (req, res) => {
     }
 
     // 7. Atomic Invoice Sequence Assignment & Persistence
-    let finalInvoiceNumber = paymentRecord?.invoice_number || null;
+    // Preserves pre-existing invoice numbers across payments, resource_purchases, and bookings
+    let finalInvoiceNumber =
+      paymentRecord?.invoice_number ||
+      resourceRecord?.invoice_number ||
+      bookingRecord?.invoice_number ||
+      null;
+
+    // If paymentRecord is missing (e.g. historical or guest resource checkout), create the authoritative ledger row
+    if (!paymentRecord && supabaseServer && (String(cleanPayId).startsWith("pay_") || String(cleanOrderId).startsWith("order_"))) {
+      try {
+        const { data: createdPayment } = await supabaseServer
+          .from("payments")
+          .upsert({
+            user_id: targetUserId || null,
+            item_type: rawItemType || (resourceRecord ? "resource" : bookingRecord ? "consultation" : "course"),
+            item_id: resourceRecord?.resource_id || bookingRecord?.id || "unknown",
+            item_title: itemTitle,
+            amount,
+            currency,
+            razorpay_order_id: cleanOrderId !== "N/A" ? cleanOrderId : null,
+            razorpay_payment_id: String(cleanPayId).startsWith("pay_") ? cleanPayId : null,
+            status: "captured",
+            created_at: paymentDate
+          }, { onConflict: "razorpay_payment_id" })
+          .select()
+          .maybeSingle();
+
+        if (createdPayment) {
+          paymentRecord = createdPayment;
+          if (createdPayment.invoice_number) {
+            finalInvoiceNumber = createdPayment.invoice_number;
+          }
+        }
+      } catch (upsertErr) {
+        console.warn("[Invoice Endpoint] Notice creating payments ledger row:", upsertErr?.message);
+      }
+    }
+
     if (!finalInvoiceNumber && paymentRecord?.id) {
       try {
         const { data: rpcNum } = await supabaseServer.rpc("get_next_invoice_number", {
@@ -2745,13 +3143,52 @@ router.get("/invoice/:paymentId", async (req, res) => {
         finalInvoiceNumber = formatInvoiceNumber(paymentDate, cleanPayId, null);
       }
 
-      // Lock invoice number into payments table so it is never changed
+      // Concurrency lock: update ONLY IF invoice_number is still null/empty in database
       try {
-        await supabaseServer
+        const { data: updatedPayment } = await supabaseServer
           .from("payments")
           .update({ invoice_number: finalInvoiceNumber })
-          .eq("id", paymentRecord.id);
+          .eq("id", paymentRecord.id)
+          .select("invoice_number")
+          .single();
+        if (updatedPayment?.invoice_number) {
+          finalInvoiceNumber = updatedPayment.invoice_number;
+        }
       } catch {}
+    } else if (!finalInvoiceNumber) {
+      // Fallback if paymentRecord is somehow unavailable
+      try {
+        const { data: rpcNum } = await supabaseServer.rpc("get_next_invoice_number", {
+          p_date: paymentDate
+        });
+        if (rpcNum && String(rpcNum).trim().length > 0) {
+          finalInvoiceNumber = rpcNum;
+        }
+      } catch {}
+
+      if (!finalInvoiceNumber) {
+        finalInvoiceNumber = formatInvoiceNumber(paymentDate, cleanPayId, null);
+      }
+    }
+
+    // Synchronize finalInvoiceNumber back to resource_purchases and bookings if records exist
+    if (finalInvoiceNumber && supabaseServer) {
+      if (resourceRecord?.id && !resourceRecord.invoice_number) {
+        try {
+          await supabaseServer
+            .from("resource_purchases")
+            .update({ invoice_number: finalInvoiceNumber })
+            .eq("id", resourceRecord.id);
+        } catch {}
+      }
+      if (bookingRecord?.id && !bookingRecord.invoice_number) {
+        try {
+          await supabaseServer
+            .from("bookings")
+            .update({ invoice_number: finalInvoiceNumber })
+            .eq("id", bookingRecord.id);
+        } catch {}
+      }
     }
 
     // 8. Assemble Authoritative Invoice Model
@@ -2802,7 +3239,7 @@ router.get("/invoice/:paymentId", async (req, res) => {
  * GET /api/payments/credit-note/:paymentId
  * Explicit endpoint for Section 34 CGST Act Credit Note generation.
  */
-router.get("/credit-note/:paymentId", (req, res) => {
+router.get("/credit-note/:paymentId", paymentRateLimiter, (req, res) => {
   req.query.type = "credit-note";
   return router.handle(req, res);
 });

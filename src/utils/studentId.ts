@@ -13,8 +13,23 @@
 export function getIndianFinancialYear(dateInput?: Date | string | null): string {
   const d = dateInput ? new Date(dateInput) : new Date();
   const validDate = !isNaN(d.getTime()) ? d : new Date();
-  const month = validDate.getMonth() + 1; // 1-12
-  const fullYear = validDate.getFullYear();
+
+  // Explicitly evaluate date in Asia/Kolkata (IST - UTC+05:30)
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric'
+  });
+
+  const parts = formatter.formatToParts(validDate);
+  const partMap: Record<string, string> = {};
+  for (const part of parts) {
+    partMap[part.type] = part.value;
+  }
+
+  const month = parseInt(partMap.month, 10);
+  const fullYear = parseInt(partMap.year, 10);
 
   let fyStartYear: number;
   let fyEndYear: number;
@@ -51,7 +66,8 @@ export function formatStudentId(
   }
 
   if (seqNumber && Number.isInteger(seqNumber) && seqNumber > 0) {
-    return `DM-STU-${String(seqNumber).padStart(6, '0')}`;
+    const numPart = seqNumber < 1000000 ? String(seqNumber).padStart(6, '0') : String(seqNumber);
+    return `DM-STU-${numPart}`;
   }
 
   if (!userId || typeof userId !== 'string') {
@@ -86,7 +102,8 @@ export function formatEnrollmentId(
   }
 
   if (seqNumber && Number.isInteger(seqNumber) && seqNumber > 0) {
-    return `DM-ENR-${String(seqNumber).padStart(6, '0')}`;
+    const numPart = seqNumber < 1000000 ? String(seqNumber).padStart(6, '0') : String(seqNumber);
+    return `DM-ENR-${numPart}`;
   }
 
   if (!enrollmentIdOrUuid || typeof enrollmentIdOrUuid !== 'string') {
@@ -122,7 +139,11 @@ export function formatInvoiceNumber(
   const fy = getIndianFinancialYear(paymentDate);
 
   if (seqNumber && Number.isInteger(seqNumber) && seqNumber > 0) {
-    return `DM/${fy}/${String(seqNumber).padStart(4, '0')}`;
+    if (seqNumber > 9999999) {
+      throw new Error(`Invoice sequence overflow for financial year ${fy}: sequence ${seqNumber} exceeds 16-character limit`);
+    }
+    const numPart = seqNumber < 10000 ? String(seqNumber).padStart(4, '0') : String(seqNumber);
+    return `DM/${fy}/${numPart}`;
   }
 
   // Fallback for unmigrated transactions: clean 4-char suffix from paymentId
@@ -134,7 +155,7 @@ export function formatInvoiceNumber(
 
 /**
  * Formats a Credit Note Number under Section 34 of the CGST Act (max 16 characters).
- * Format: CN/YY-YY/0001 (13 characters)
+ * Format: CN/YY-YY/0001 (13 characters) up to CN/YY-YY/9999999 (16 characters)
  *
  * @param creditNoteDate - Date of refund / credit note
  * @param existingCreditNoteNumber - Stored credit note number
@@ -151,9 +172,13 @@ export function formatCreditNoteNumber(
   }
 
   const fy = getIndianFinancialYear(creditNoteDate);
-  const numPart = seqNumber && Number.isInteger(seqNumber) && seqNumber > 0
-    ? String(seqNumber).padStart(4, '0')
-    : '0001';
+  if (seqNumber && Number.isInteger(seqNumber) && seqNumber > 0) {
+    if (seqNumber > 9999999) {
+      throw new Error(`Credit note sequence overflow for financial year ${fy}: sequence ${seqNumber} exceeds 16-character limit`);
+    }
+    const numPart = seqNumber < 10000 ? String(seqNumber).padStart(4, '0') : String(seqNumber);
+    return `CN/${fy}/${numPart}`;
+  }
 
-  return `CN/${fy}/${numPart}`;
+  return `CN/${fy}/0001`;
 }

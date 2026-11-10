@@ -56,6 +56,10 @@ function buildClientEnvScript(isProd: boolean): string {
 
 async function startServer() {
   const app = express();
+
+  // Configure reverse proxy trust for Cloud Run / Nginx / Load Balancer (SEC-05 Compliance)
+  app.set("trust proxy", 1);
+
   const portArgIndex = process.argv.indexOf("--port");
   const cliPort = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? process.argv[portArgIndex + 1] : null;
 

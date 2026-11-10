@@ -972,9 +972,9 @@ export async function fulfillResourcePurchase({
 
     // 4. Create payment ledger record in public.payments (authoritative ledger)
     let paymentRecord = null;
-    if (supabaseServer && resolvedUserId) {
+    if (supabaseServer) {
       const paymentPayload = {
-        user_id: resolvedUserId,
+        user_id: resolvedUserId || null,
         item_type: "resource",
         item_id: cleanResourceId,
         item_title: resourceTitle || "Digital Resource Toolkit",
@@ -989,12 +989,23 @@ export async function fulfillResourcePurchase({
       try {
         const { data: newPayment, error: paymentError } = await supabaseServer
           .from("payments")
-          .insert(paymentPayload)
+          .upsert(paymentPayload, { onConflict: "razorpay_payment_id" })
           .select()
           .maybeSingle();
 
         if (!paymentError && newPayment) {
           paymentRecord = newPayment;
+          // Synchronize invoice_number from payments trigger back to resource_purchases if row exists
+          if (newPayment.invoice_number && purchaseRecord?.id) {
+            try {
+              await supabaseServer
+                .from("resource_purchases")
+                .update({ invoice_number: newPayment.invoice_number })
+                .eq("id", purchaseRecord.id);
+            } catch (invSyncErr) {
+              console.warn("[Resource Fulfillment] Notice syncing invoice_number to resource_purchases:", invSyncErr?.message);
+            }
+          }
         } else if (paymentError) {
           console.warn("[Resource Fulfillment] Notice inserting payment ledger:", paymentError.message);
         }
