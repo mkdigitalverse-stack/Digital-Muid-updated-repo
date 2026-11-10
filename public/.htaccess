@@ -2,6 +2,8 @@
   RewriteEngine On
   RewriteBase /
 
+  DirectoryIndex index.html
+
   # -------------------------------------------------------------
   # 1. Canonical Domain (Force HTTPS and non-WWW)
   # -------------------------------------------------------------
@@ -21,6 +23,7 @@
   RewriteRule ^consultation/?$ /business-growth-consultation [R=301,L]
   RewriteRule ^courses/?$ /learn [R=301,L]
   RewriteRule ^web-(services|development|design)/?$ /web [R=301,L]
+  RewriteRule ^meta-ads?-campaign-(planner-)?bundle/?$ /meta_ad_campaign_bundle [R=301,L]
 
   # -------------------------------------------------------------
   # 4. WordPress Migration 301 Redirects & 410 Retirements

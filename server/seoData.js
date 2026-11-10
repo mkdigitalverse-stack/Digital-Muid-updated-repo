@@ -698,6 +698,30 @@ export const SEO_DATA = {
       name: 'Terms & Conditions — DigitalMUID',
       url: 'https://digitalmuid.in/terms'
     }
+  },
+
+  '/meta_ad_campaign_bundle': {
+    path: '/meta_ad_campaign_bundle',
+    canonicalUrl: 'https://digitalmuid.in/meta_ad_campaign_bundle',
+    title: 'Meta Ads Campaign Planner Bundle | Digital Muid',
+    description: 'Plan, calculate and launch smarter Facebook and Instagram ad campaigns with the Meta Ads Campaign Planner Bundle. Get the complete toolkit for ₹299.',
+    ogTitle: 'Meta Ads Campaign Planner Bundle | Digital Muid',
+    ogDescription: 'Plan, calculate and launch smarter Facebook and Instagram ad campaigns with the Meta Ads Campaign Planner Bundle. Get the complete toolkit for ₹299.',
+    ogType: 'product',
+    schema: {
+      '@context': 'https://schema.org',
+      '@type': 'Product',
+      name: 'Meta Ads Campaign Planner Bundle',
+      description: 'Plug-and-play Meta ad campaign planning system, budget break-even calculator, copy frameworks, and pre-launch audit checklist.',
+      image: 'https://digitalmuid.in/src/assets/images/meta_ads_bundle_mockup_1794291719275.jpg',
+      offers: {
+        '@type': 'Offer',
+        price: '299',
+        priceCurrency: 'INR',
+        availability: 'https://schema.org/InStock',
+        url: 'https://digitalmuid.in/meta_ad_campaign_bundle'
+      }
+    }
   }
 };
 
@@ -717,6 +741,9 @@ export function getPageSEO(pathname) {
   }
   if (clean === '/web-services' || clean === '/web-development' || clean === '/web-design') {
     return SEO_DATA['/web'];
+  }
+  if (clean === '/meta-ad-campaign-bundle' || clean === '/meta-ads-campaign-planner-bundle') {
+    return SEO_DATA['/meta_ad_campaign_bundle'];
   }
 
   return null;

@@ -20,6 +20,7 @@ test -f dist/web/index.html || { echo "ERROR: dist/web/index.html missing!"; exi
 test -f dist/learn/index.html || { echo "ERROR: dist/learn/index.html missing!"; exit 1; }
 test -f dist/contact/index.html || { echo "ERROR: dist/contact/index.html missing!"; exit 1; }
 test -f dist/business-growth-consultation/index.html || { echo "ERROR: dist/business-growth-consultation/index.html missing!"; exit 1; }
+test -f dist/meta_ad_campaign_bundle/index.html || { echo "ERROR: dist/meta_ad_campaign_bundle/index.html missing!"; exit 1; }
 test -f dist/sitemap.xml || { echo "ERROR: dist/sitemap.xml missing!"; exit 1; }
 test -f dist/robots.txt || { echo "ERROR: dist/robots.txt missing!"; exit 1; }
 test -f dist/_redirects || { echo "ERROR: dist/_redirects missing!"; exit 1; }

@@ -46,6 +46,10 @@
 /web-development                                                                                /web                          301!
 /web-design/                                                                                    /web                          301!
 /web-design                                                                                     /web                          301!
+/meta-ad-campaign-bundle/                                                                       /meta_ad_campaign_bundle      301!
+/meta-ad-campaign-bundle                                                                        /meta_ad_campaign_bundle      301!
+/meta-ads-campaign-planner-bundle/                                                              /meta_ad_campaign_bundle      301!
+/meta-ads-campaign-planner-bundle                                                               /meta_ad_campaign_bundle      301!
 
 # Trailing Slash Normalization
 /web/                                                                                           /web                          301!
@@ -55,6 +59,7 @@
 /services/                                                                                      /services                     301!
 /about/                                                                                         /about                        301!
 /terms/                                                                                         /terms                        301!
+/meta_ad_campaign_bundle/                                                                       /meta_ad_campaign_bundle      301!
 
 # =========================================================================
 # SPA Catch-all Fallback (Direct dynamic routes to React index.html)

@@ -23,6 +23,7 @@ import { ResourcesPage } from './pages/ResourcesPage';
 import { FreeResourceThankYouPage } from './pages/FreeResourceThankYouPage';
 import { PaidResourceThankYouPage } from './pages/PaidResourceThankYouPage';
 import { BundleAccessPage } from './pages/BundleAccessPage';
+import { MetaAdsCampaignBundlePage } from './pages/MetaAdsCampaignBundlePage';
 import { SpeakingPage } from './pages/SpeakingPage';
 import { ServicesPage } from './pages/ServicesPage';
 import { GrowthSystemsPage } from './pages/GrowthSystemsPage';
@@ -171,6 +172,13 @@ const MainApp: React.FC = () => {
     }
     if (path === '/resources/thank-you/paid') {
       return <PaidResourceThankYouPage navigate={navigate} />;
+    }
+    if (
+      path === '/meta_ad_campaign_bundle' ||
+      path === '/meta-ad-campaign-bundle' ||
+      path === '/meta-ads-campaign-planner-bundle'
+    ) {
+      return <MetaAdsCampaignBundlePage navigate={navigate} />;
     }
     if (path.startsWith('/resources/bundle/') || path === '/resources/bundle-access' || path === '/resources/bundle') {
       const slug = path.startsWith('/resources/bundle/') ? path.replace('/resources/bundle/', '') : 'meta-ads-campaign-planner-bundle';
@@ -329,11 +337,15 @@ const MainApp: React.FC = () => {
   const normalizedCurrentPath = currentPath.split('?')[0].split('#')[0].replace(/\/+$/, '') || '/';
   const isAdminView = normalizedCurrentPath === '/admin' || normalizedCurrentPath.startsWith('/admin/');
   const isPlayerView = (normalizedCurrentPath.startsWith('/learn/') || normalizedCurrentPath.startsWith('/courses/')) && normalizedCurrentPath.endsWith('/player');
+  const isSalesPage =
+    normalizedCurrentPath === '/meta_ad_campaign_bundle' ||
+    normalizedCurrentPath === '/meta-ad-campaign-bundle' ||
+    normalizedCurrentPath === '/meta-ads-campaign-planner-bundle';
 
   return (
-    <div className="min-h-screen bg-[#F7F9FC] text-[#172033] selection:bg-[#2457D6] selection:text-white relative flex flex-col justify-between">
+    <div className={`min-h-screen ${isSalesPage ? 'bg-[#070B14]' : 'bg-[#F7F9FC]'} text-[#172033] selection:bg-[#2457D6] selection:text-white relative flex flex-col justify-between`}>
       <SEOHead path={normalizedCurrentPath} />
-      {!isAdminView && !isPlayerView && (
+      {!isAdminView && !isPlayerView && !isSalesPage && (
         <Navbar
           currentPath={currentPath}
           navigate={navigate}
@@ -347,7 +359,7 @@ const MainApp: React.FC = () => {
         </ErrorBoundary>
       </main>
 
-      {!isAdminView && !isPlayerView && <Footer navigate={navigate} />}
+      {!isAdminView && !isPlayerView && !isSalesPage && <Footer navigate={navigate} />}
 
       {/* Modals & Overlays */}
       <GlobalSearchModal

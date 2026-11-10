@@ -157,6 +157,14 @@ export function seoRedirectMiddleware(req, res, next) {
     return res.redirect(301, '/web' + queryPart);
   }
 
+  // /meta-ad-campaign-bundle, /meta-ads-campaign-planner-bundle -> /meta_ad_campaign_bundle
+  if (
+    normalizedPath === '/meta-ad-campaign-bundle' ||
+    normalizedPath === '/meta-ads-campaign-planner-bundle'
+  ) {
+    return res.redirect(301, '/meta_ad_campaign_bundle' + queryPart);
+  }
+
   // -------------------------------------------------------------------------
   // 5. TRAILING SLASH NORMALIZATION (e.g. /web/ -> /web)
   // -------------------------------------------------------------------------
