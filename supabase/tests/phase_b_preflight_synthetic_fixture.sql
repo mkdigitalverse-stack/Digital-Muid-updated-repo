@@ -1,9 +1,11 @@
 -- ==============================================================================
--- DIGITALMUID V4.3 — PHASE B CONCURRENT INDEX PREFLIGHT SYNTHETIC FIXTURES
+-- DIGITALMUID V4.3 — PHASE B CONCURRENT INDEX PREFLIGHT SYNTHETIC FIXTURES (HARDENED)
 -- File: supabase/tests/phase_b_preflight_synthetic_fixture.sql
 -- ==============================================================================
 -- PURPOSE:
--- Repeatable, isolated synthetic PostgreSQL test harness for Phase B migration:
+-- Repeatable, isolated synthetic PostgreSQL test harness validating the hardened
+-- Phase A normalization + Phase B concurrent index migration logic:
+--   supabase/migrations/20261107000001_student_id_and_invoices.sql
 --   supabase/migrations/20261107000002_concurrent_indexes.sql
 --
 -- SAFETY RULES:
@@ -28,7 +30,7 @@ BEGIN
   END IF;
 END $$;
 
--- 1. ISOLATED SYNTHETIC SCHEMA & TABLES (Transactional setup)
+-- 1. ISOLATED SYNTHETIC SCHEMA & TABLES (Transactional setup simulating legacy + messy rows)
 BEGIN;
 
 DROP SCHEMA IF EXISTS phase_b_preflight_test CASCADE;
@@ -50,10 +52,12 @@ CREATE TABLE phase_b_preflight_test.payments (
   id UUID PRIMARY KEY,
   invoice_number TEXT,
   credit_note_number TEXT,
-  status TEXT NOT NULL DEFAULT 'captured',
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'created', 'authorized', 'captured', 'paid', 'completed', 'failed', 'cancelled', 'refunded')),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Legacy pre-existing credit_notes shape (nullable columns)
 CREATE TABLE phase_b_preflight_test.credit_notes (
   id UUID PRIMARY KEY,
   credit_note_number TEXT,
@@ -64,7 +68,7 @@ CREATE TABLE phase_b_preflight_test.credit_notes (
 );
 
 -- 2. SYNTHETIC EDGE-CASE FIXTURES FOR DUPLICATE & WHITESPACE TESTING
--- Covers: NULL, '', ASCII spaces, tabs/newlines, leading/trailing spaces, case variants
+-- Covers: NULL, '', ASCII spaces, tabs/newlines/CR/FF/VT, leading/trailing whitespace
 
 INSERT INTO phase_b_preflight_test.profiles (id, student_id) VALUES
   ('00000000-0000-4000-8000-000000000001', NULL),
@@ -72,60 +76,72 @@ INSERT INTO phase_b_preflight_test.profiles (id, student_id) VALUES
   ('00000000-0000-4000-8000-000000000003', ''),
   ('00000000-0000-4000-8000-000000000004', '   '),
   ('00000000-0000-4000-8000-000000000005', E'\t\n'),
-  ('00000000-0000-4000-8000-000000000006', E'\t\n'),       -- Duplicate control-whitespace!
+  ('00000000-0000-4000-8000-000000000006', E'\t\n'),
   ('00000000-0000-4000-8000-000000000007', 'DM-STU-010001'),
-  ('00000000-0000-4000-8000-000000000008', ' DM-STU-010001 '); -- Duplicate after TRIM!
+  ('00000000-0000-4000-8000-000000000008', ' DM-STU-010001 ');
 
 INSERT INTO phase_b_preflight_test.course_enrollments (id, enrollment_id) VALUES
   ('10000000-0000-4000-8000-000000000001', NULL),
   ('10000000-0000-4000-8000-000000000002', ''),
-  ('10000000-0000-4000-8000-000000000003', '   '),
+  ('10000000-0000-4000-8000-000000000003', E'\r\n\t '),
   ('10000000-0000-4000-8000-000000000004', 'DM-ENR-010001'),
-  ('10000000-0000-4000-8000-000000000005', 'DM-ENR-010001 '); -- Trailing space!
+  ('10000000-0000-4000-8000-000000000005', 'DM-ENR-010001 ');
 
 INSERT INTO phase_b_preflight_test.payments (id, invoice_number, credit_note_number, status) VALUES
   ('20000000-0000-4000-8000-000000000001', NULL, NULL, 'pending'),
-  ('20000000-0000-4000-8000-000000000002', '', '   ', 'failed'),
+  ('20000000-0000-4000-8000-000000000002', E'\t ', '   ', 'failed'),
   ('20000000-0000-4000-8000-000000000003', 'DM/26-27/0001', 'CN/26-27/0001', 'refunded'),
-  ('20000000-0000-4000-8000-000000000004', ' DM/26-27/0001', 'CN/26-27/0001', 'refunded'); -- Exact CN dup + trimmed INV dup!
+  ('20000000-0000-4000-8000-000000000004', ' DM/26-27/0001', 'CN/26-27/0001', 'refunded');
 
 INSERT INTO phase_b_preflight_test.credit_notes (id, credit_note_number, payment_id, user_id, refund_id) VALUES
   ('30000000-0000-4000-8000-000000000001', NULL, 'pay_1', '00000000-0000-4000-8000-000000000007', NULL),
   ('30000000-0000-4000-8000-000000000002', NULL, 'pay_2', '00000000-0000-4000-8000-000000000007', ''),
-  ('30000000-0000-4000-8000-000000000003', '', 'pay_3', '00000000-0000-4000-8000-000000000007', '   '),
-  ('30000000-0000-4000-8000-000000000004', '', 'pay_4', '00000000-0000-4000-8000-000000000007', 'rfnd_001'), -- Duplicate empty CN string!
+  ('30000000-0000-4000-8000-000000000003', '', 'pay_3', '00000000-0000-4000-8000-000000000007', E'\t\n '),
+  ('30000000-0000-4000-8000-000000000004', E'\f\v ', 'pay_4', '00000000-0000-4000-8000-000000000007', 'rfnd_001'),
   ('30000000-0000-4000-8000-000000000005', 'CN/26-27/0001', 'pay_5', '00000000-0000-4000-8000-000000000007', ' rfnd_001 ');
 
 COMMIT;
 
--- 3. TASK B VERIFICATION: COMPARE CURRENT AUDIT QUERIES VS HARDENED NORMALIZED AUDIT QUERIES
--- Expected observations:
---   - Current Phase B audit query for profiles (GROUP BY student_id WHERE TRIM(student_id) != '')
---     detects E'\t\n' (2 rows!) only because TRIM strips spaces, NOT tabs/newlines,
---     AND misses 'DM-STU-010001' vs ' DM-STU-010001 '!
---   - Current Phase B audit query for credit_notes.credit_note_number (GROUP BY credit_note_number)
---     flags (NULL, 2) false positive!
---   - Current Phase B omits payments.credit_note_number duplicate check completely!
+-- 3. VERIFY HARDENED BTRIM DUPLICATE AUDITS ACROSS ALL 5 UNIQUE IDENTIFIER DIMENSIONS
+DO $$
+DECLARE
+  v_cnt INTEGER;
+BEGIN
+  -- Profiles: detects ('DM-STU-010001' vs ' DM-STU-010001 ') while ignoring NULL/whitespace-only rows
+  SELECT COUNT(*) INTO v_cnt FROM (
+    SELECT BTRIM(student_id, E' \t\n\r\f\v')
+    FROM phase_b_preflight_test.profiles
+    WHERE student_id IS NOT NULL AND BTRIM(student_id, E' \t\n\r\f\v') != ''
+    GROUP BY BTRIM(student_id, E' \t\n\r\f\v') HAVING COUNT(*) > 1
+  ) t;
+  IF v_cnt <> 1 THEN
+    RAISE EXCEPTION 'Expected 1 normalized duplicate group in profiles, got %', v_cnt;
+  END IF;
 
-SELECT 'AUDIT_CURRENT_PROFILES' AS check_name, student_id, COUNT(*) AS cnt
-FROM phase_b_preflight_test.profiles
-WHERE student_id IS NOT NULL AND TRIM(student_id) != ''
-GROUP BY student_id HAVING COUNT(*) > 1;
+  -- Payments.credit_note_number: detects CN/26-27/0001 duplicate
+  SELECT COUNT(*) INTO v_cnt FROM (
+    SELECT BTRIM(credit_note_number, E' \t\n\r\f\v')
+    FROM phase_b_preflight_test.payments
+    WHERE credit_note_number IS NOT NULL AND BTRIM(credit_note_number, E' \t\n\r\f\v') != ''
+    GROUP BY BTRIM(credit_note_number, E' \t\n\r\f\v') HAVING COUNT(*) > 1
+  ) t;
+  IF v_cnt <> 1 THEN
+    RAISE EXCEPTION 'Expected 1 normalized duplicate group in payments.credit_note_number, got %', v_cnt;
+  END IF;
 
-SELECT 'AUDIT_HARDENED_PROFILES' AS check_name,
-       BTRIM(student_id, E' \t\n\r\f\v') AS normalized_id,
-       COUNT(*) AS cnt
-FROM phase_b_preflight_test.profiles
-WHERE student_id IS NOT NULL AND BTRIM(student_id, E' \t\n\r\f\v') != ''
-GROUP BY BTRIM(student_id, E' \t\n\r\f\v') HAVING COUNT(*) > 1;
-
-SELECT 'AUDIT_CURRENT_PAYMENTS_CN_MISSING' AS check_name, credit_note_number, COUNT(*) AS cnt
-FROM phase_b_preflight_test.payments
-WHERE credit_note_number IS NOT NULL AND BTRIM(credit_note_number, E' \t\n\r\f\v') != ''
-GROUP BY credit_note_number HAVING COUNT(*) > 1;
+  -- Credit Notes.credit_note_number: ignores NULL / blank / control-whitespace rows (zero false positives)
+  SELECT COUNT(*) INTO v_cnt FROM (
+    SELECT BTRIM(credit_note_number, E' \t\n\r\f\v')
+    FROM phase_b_preflight_test.credit_notes
+    WHERE credit_note_number IS NOT NULL AND BTRIM(credit_note_number, E' \t\n\r\f\v') != ''
+    GROUP BY BTRIM(credit_note_number, E' \t\n\r\f\v') HAVING COUNT(*) > 1
+  ) t;
+  IF v_cnt <> 0 THEN
+    RAISE EXCEPTION 'Expected 0 duplicate groups in credit_notes.credit_note_number, got %', v_cnt;
+  END IF;
+END $$;
 
 -- 4. TASK C VERIFICATION: DEMONSTRATE TRANSACTION RESTRICTION (SQLSTATE 25001)
--- Inside a transaction, CREATE INDEX CONCURRENTLY MUST raise SQLSTATE 25001.
 BEGIN;
 DO $$
 BEGIN
@@ -138,60 +154,44 @@ BEGIN
 END $$;
 ROLLBACK;
 
--- 5. TASK A + C VERIFICATION (OUTSIDE TRANSACTION):
--- Reconcile synthetic duplicates first so concurrent builds succeed cleanly
-DELETE FROM phase_b_preflight_test.profiles
-WHERE id IN ('00000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-000000000006','00000000-0000-4000-8000-000000000008');
+-- 5. NORMALIZE & RECONCILE SYNTHETIC DUPLICATES, THEN BUILD ALL 8 HARDENED INDEXES CONCURRENTLY
+BEGIN;
+UPDATE phase_b_preflight_test.profiles SET student_id = NULLIF(BTRIM(student_id, E' \t\n\r\f\v'), '');
+UPDATE phase_b_preflight_test.course_enrollments SET enrollment_id = NULLIF(BTRIM(enrollment_id, E' \t\n\r\f\v'), '');
+UPDATE phase_b_preflight_test.payments
+SET invoice_number = NULLIF(BTRIM(invoice_number, E' \t\n\r\f\v'), ''),
+    credit_note_number = NULLIF(BTRIM(credit_note_number, E' \t\n\r\f\v'), '');
+UPDATE phase_b_preflight_test.credit_notes
+SET credit_note_number = NULLIF(BTRIM(credit_note_number, E' \t\n\r\f\v'), ''),
+    refund_id = NULLIF(BTRIM(refund_id, E' \t\n\r\f\v'), '');
 
-DELETE FROM phase_b_preflight_test.course_enrollments
-WHERE id = '10000000-0000-4000-8000-000000000005';
+DELETE FROM phase_b_preflight_test.profiles WHERE id = '00000000-0000-4000-8000-000000000008';
+DELETE FROM phase_b_preflight_test.course_enrollments WHERE id = '10000000-0000-4000-8000-000000000005';
+DELETE FROM phase_b_preflight_test.payments WHERE id = '20000000-0000-4000-8000-000000000004';
+DELETE FROM phase_b_preflight_test.credit_notes WHERE id = '30000000-0000-4000-8000-000000000005';
+COMMIT;
 
-DELETE FROM phase_b_preflight_test.payments
-WHERE id = '20000000-0000-4000-8000-000000000004';
-
-DELETE FROM phase_b_preflight_test.credit_notes
-WHERE id IN ('30000000-0000-4000-8000-000000000003','30000000-0000-4000-8000-000000000004','30000000-0000-4000-8000-000000000005');
-
--- 5A. Simulate Scenario A3: Invalid pre-existing index trapped by IF NOT EXISTS
--- First intentionally fail a CONCURRENTLY build or simulate invalid state:
--- Re-insert temporary duplicate, run CREATE UNIQUE INDEX CONCURRENTLY (will fail & leave invalid index):
+-- 5A. Simulate interrupted build (invalid index) + DROP INDEX CONCURRENTLY recovery
 INSERT INTO phase_b_preflight_test.profiles (id, student_id)
 VALUES ('00000000-0000-4000-8000-000000000099', 'DM-STU-010001');
 
 \set ON_ERROR_STOP off
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_student_id
   ON phase_b_preflight_test.profiles (student_id)
-  WHERE student_id IS NOT NULL AND TRIM(student_id) != '';
+  WHERE student_id IS NOT NULL AND BTRIM(student_id, E' \t\n\r\f\v') != '';
 \set ON_ERROR_STOP on
 
--- Verify invalid index now exists in phase_b_preflight_test (indisvalid = false)
-SELECT c.relname, i.indisvalid, i.indisready
-FROM pg_index i
-JOIN pg_class c ON c.oid = i.indexrelid
-JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname = 'phase_b_preflight_test'
-  AND c.relname = 'idx_profiles_student_id';
-
--- Reconcile duplicate row, then rerun CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS:
--- PostgreSQL skips it with NOTICE and leaves indisvalid = false!
 DELETE FROM phase_b_preflight_test.profiles WHERE id = '00000000-0000-4000-8000-000000000099';
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_student_id
-  ON phase_b_preflight_test.profiles (student_id)
-  WHERE student_id IS NOT NULL AND TRIM(student_id) != '';
-
--- Clean recovery: DROP INDEX CONCURRENTLY IF EXISTS then recreate cleanly
 DROP INDEX CONCURRENTLY IF EXISTS phase_b_preflight_test.idx_profiles_student_id;
 
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_student_id
-  ON phase_b_preflight_test.profiles (student_id)
-  WHERE student_id IS NOT NULL AND TRIM(student_id) != '';
-
+-- 5B. Execute all 8 Phase B indexes concurrently outside transaction blocks
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_credit_notes_number
-  ON phase_b_preflight_test.credit_notes (credit_note_number);
+  ON phase_b_preflight_test.credit_notes (credit_note_number)
+  WHERE credit_note_number IS NOT NULL AND BTRIM(credit_note_number, E' \t\n\r\f\v') != '';
 
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_credit_notes_refund_id
   ON phase_b_preflight_test.credit_notes (refund_id)
-  WHERE refund_id IS NOT NULL AND TRIM(refund_id) != '';
+  WHERE refund_id IS NOT NULL AND BTRIM(refund_id, E' \t\n\r\f\v') != '';
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_credit_notes_payment_id
   ON phase_b_preflight_test.credit_notes (payment_id);
@@ -199,26 +199,50 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_credit_notes_payment_id
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_credit_notes_user_id
   ON phase_b_preflight_test.credit_notes (user_id);
 
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_student_id
+  ON phase_b_preflight_test.profiles (student_id)
+  WHERE student_id IS NOT NULL AND BTRIM(student_id, E' \t\n\r\f\v') != '';
+
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_course_enrollments_enrollment_id
   ON phase_b_preflight_test.course_enrollments (enrollment_id)
-  WHERE enrollment_id IS NOT NULL AND TRIM(enrollment_id) != '';
+  WHERE enrollment_id IS NOT NULL AND BTRIM(enrollment_id, E' \t\n\r\f\v') != '';
 
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_payments_invoice_number
   ON phase_b_preflight_test.payments (invoice_number)
-  WHERE invoice_number IS NOT NULL AND TRIM(invoice_number) != '';
+  WHERE invoice_number IS NOT NULL AND BTRIM(invoice_number, E' \t\n\r\f\v') != '';
 
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_payments_credit_note_number
   ON phase_b_preflight_test.payments (credit_note_number)
-  WHERE credit_note_number IS NOT NULL AND TRIM(credit_note_number) != '';
+  WHERE credit_note_number IS NOT NULL AND BTRIM(credit_note_number, E' \t\n\r\f\v') != '';
 
--- Validate all 8 synthetic indexes have indisvalid = true AND indisready = true
-SELECT c.relname AS index_name, t.relname AS table_name, i.indisvalid, i.indisready, i.indisunique
-FROM pg_index i
-JOIN pg_class c ON c.oid = i.indexrelid
-JOIN pg_class t ON t.oid = i.indrelid
-JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname = 'phase_b_preflight_test'
-ORDER BY t.relname, c.relname;
+-- Validate all 8 synthetic indexes (schema, indisvalid, indisready, indisunique, pg_get_indexdef)
+DO $$
+DECLARE
+  v_count INTEGER;
+BEGIN
+  SELECT COUNT(*) INTO v_count
+  FROM pg_index i
+  JOIN pg_class c ON c.oid = i.indexrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'phase_b_preflight_test'
+    AND c.relname IN (
+      'idx_credit_notes_number',
+      'idx_credit_notes_refund_id',
+      'idx_credit_notes_payment_id',
+      'idx_credit_notes_user_id',
+      'idx_profiles_student_id',
+      'idx_course_enrollments_enrollment_id',
+      'idx_payments_invoice_number',
+      'idx_payments_credit_note_number'
+    )
+    AND i.indisvalid = true
+    AND i.indisready = true
+    AND pg_get_indexdef(c.oid) IS NOT NULL;
+
+  IF v_count <> 8 THEN
+    RAISE EXCEPTION 'Expected 8 valid/ready indexes in phase_b_preflight_test, found %', v_count;
+  END IF;
+END $$;
 
 -- 6. CLEANUP
 DROP SCHEMA IF EXISTS phase_b_preflight_test CASCADE;

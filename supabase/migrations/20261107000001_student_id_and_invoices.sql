@@ -27,15 +27,54 @@ ALTER TABLE public.profiles
 ALTER TABLE public.course_enrollments
   ADD COLUMN IF NOT EXISTS enrollment_id TEXT;
 
--- Payments: Persistent Invoice Number, Credit Note Number, and Tax Details
+-- Payments: Persistent Invoice Number, Credit Note Number, Tax Details, and Audit Timestamp
 ALTER TABLE public.payments
   ADD COLUMN IF NOT EXISTS invoice_number TEXT,
   ADD COLUMN IF NOT EXISTS credit_note_number TEXT,
-  ADD COLUMN IF NOT EXISTS tax_details JSONB;
+  ADD COLUMN IF NOT EXISTS tax_details JSONB,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 -- Ensure payments.user_id allows NULL for guest checkouts (metadata-only)
 ALTER TABLE public.payments
   ALTER COLUMN user_id DROP NOT NULL;
+
+-- Fail-closed default: payments inserted without explicit status never default to 'captured'
+ALTER TABLE public.payments
+  ALTER COLUMN status SET DEFAULT 'pending';
+
+-- Normalize existing payment status values and drop legacy restrictive CHECK constraints
+-- (e.g. staging_baseline_review's anonymous status CHECK allowing only captured/refunded/failed)
+UPDATE public.payments
+SET status = LOWER(BTRIM(status, E' \t\n\r\f\v'))
+WHERE status IS NOT NULL
+  AND status IS DISTINCT FROM LOWER(BTRIM(status, E' \t\n\r\f\v'));
+
+UPDATE public.payments
+SET status = 'pending'
+WHERE status IS NULL
+   OR status NOT IN ('pending', 'created', 'authorized', 'captured', 'paid', 'completed', 'failed', 'cancelled', 'refunded');
+
+DO $$
+DECLARE
+  v_con RECORD;
+BEGIN
+  FOR v_con IN
+    SELECT c.conname
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = 'public'
+      AND t.relname = 'payments'
+      AND c.contype = 'c'
+      AND pg_get_constraintdef(c.oid) ~* '\mstatus\M'
+  LOOP
+    EXECUTE format('ALTER TABLE public.payments DROP CONSTRAINT IF EXISTS %I', v_con.conname);
+  END LOOP;
+
+  ALTER TABLE public.payments
+    ADD CONSTRAINT chk_payments_status
+    CHECK (status IN ('pending', 'created', 'authorized', 'captured', 'paid', 'completed', 'failed', 'cancelled', 'refunded'));
+END $$;
 
 -- Resource Purchases: Persistent Invoice Number
 ALTER TABLE public.resource_purchases
@@ -97,27 +136,25 @@ ALTER TABLE public.credit_notes
   ADD COLUMN IF NOT EXISTS base_amount NUMERIC(10, 2),
   ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR',
   ADD COLUMN IF NOT EXISTS is_partial BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
   ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
 
 -- ==============================================================================
 -- ZERO-DOWNTIME TWO-PHASE DEPLOYMENT ARCHITECTURE (F-03 Audit Compliance):
--- In Postgres, creating unique indexes inside a transactional block acquires ShareLock,
+-- In Postgres, creating indexes inside a transactional block acquires ShareLock,
 -- blocking concurrent writes. To guarantee strict zero-downtime during deployment:
--- 1. Phase A (this file) performs table creation, metadata updates, RPC functions, and triggers.
--- 2. Phase B (20261107000002_concurrent_indexes.sql) executes CREATE UNIQUE INDEX CONCURRENTLY
---    outside transaction blocks, eliminating table lock contention on production.
+-- 1. Phase A (this file) performs table creation, metadata updates, normalization,
+--    RPC functions, and triggers — ZERO index DDL executes in Phase A.
+-- 2. Phase B (20261107000002_concurrent_indexes.sql) executes all 8 indexes
+--    (including idx_credit_notes_payment_id and idx_credit_notes_user_id) via
+--    CREATE [UNIQUE] INDEX CONCURRENTLY outside transaction blocks.
 --
 -- Target Concurrent Indexes executed in Phase B:
---   CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_notes_number ON public.credit_notes (credit_note_number);
---   CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_notes_refund_id ON public.credit_notes (refund_id) WHERE refund_id IS NOT NULL AND TRIM(refund_id) != '';
+--   CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_notes_number ON public.credit_notes (credit_note_number) WHERE credit_note_number IS NOT NULL AND BTRIM(credit_note_number, E' \t\n\r\f\v') != '';
+--   CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_notes_refund_id ON public.credit_notes (refund_id) WHERE refund_id IS NOT NULL AND BTRIM(refund_id, E' \t\n\r\f\v') != '';
+--   idx_credit_notes_payment_id, idx_credit_notes_user_id, idx_profiles_student_id,
+--   idx_course_enrollments_enrollment_id, idx_payments_invoice_number, idx_payments_credit_note_number
 -- ==============================================================================
-
--- Non-blocking query performance indexes for credit notes:
-CREATE INDEX IF NOT EXISTS idx_credit_notes_payment_id 
-  ON public.credit_notes (payment_id);
-
-CREATE INDEX IF NOT EXISTS idx_credit_notes_user_id 
-  ON public.credit_notes (user_id);
 
 -- ==============================================================================
 -- 3. EXPLICIT SQL TABLE PRIVILEGES & ROW LEVEL SECURITY (RLS)
@@ -142,12 +179,12 @@ GRANT SELECT ON public.credit_notes TO authenticated;
 -- Trusted backend service_role and postgres retain full operational access
 GRANT ALL ON public.credit_notes TO service_role, postgres;
 
--- RLS Policies for credit_notes
+-- RLS Policies for credit_notes (owner or verified admin via public.is_admin())
 DROP POLICY IF EXISTS "Users can view their own credit notes" ON public.credit_notes;
 CREATE POLICY "Users can view their own credit notes"
   ON public.credit_notes FOR SELECT
   TO authenticated
-  USING (auth.uid() = user_id);
+  USING (auth.uid() = user_id OR public.is_admin());
 
 DROP POLICY IF EXISTS "Service role full access on credit notes" ON public.credit_notes;
 CREATE POLICY "Service role full access on credit notes"
@@ -362,13 +399,17 @@ END;
 $$;
 
 -- ==============================================================================
--- 5B. ATOMIC FINANCIAL LIMIT & CREDIT NOTE ISSUANCE FUNCTION (F-01 P0 Audit Fix)
--- Concurrency & Accounting Guarantees:
--- 1. Row-level locking (FOR UPDATE) on payments table serializes concurrent requests.
--- 2. Calculates cumulative credit notes for payment_id; rejects any request exceeding remaining balance.
--- 3. Never silently clamps; raises detailed exception with reconciliation figures.
--- 4. Idempotency: Duplicate calls with identical refund_id return existing credit note record.
--- 5. Updates payments.status to 'refunded' upon full exhaustion of payment balance.
+-- 5B. ATOMIC FINANCIAL LIMIT & CREDIT NOTE ISSUANCE FUNCTION (F-01 P0 Audit Fix + V4.3 Hardened)
+-- Concurrency, Ownership & Accounting Guarantees:
+-- 1. Unambiguous payment resolution + row-level locking (FOR UPDATE) BEFORE idempotency checks.
+-- 2. Normalizes identifiers cleanly; uses one canonical payment identifier (razorpay_payment_id
+--    or id::TEXT fallback) while aggregating cumulative refunds across both legacy representations.
+-- 3. Rejects cross-payment refund_id reuse rather than returning another payment's credit note.
+-- 4. Enforces authoritative v_payment.user_id ownership (never lets caller p_user_id hijack owner).
+-- 5. Never silently clamps; raises detailed exception with reconciliation figures.
+-- 6. Subtransaction-protected INSERT with unique_violation recovery rolls back aborted sequence
+--    allocations and returns the committed idempotent record for the same payment.
+-- 7. Updates payments.status = 'refunded' and payments.updated_at = NOW() upon full exhaustion.
 -- ==============================================================================
 CREATE OR REPLACE FUNCTION public.record_credit_note_with_limit(
   p_payment_id TEXT,
@@ -397,7 +438,9 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
+  v_candidate RECORD;
   v_payment RECORD;
+  v_match_count INTEGER := 0;
   v_existing_cn RECORD;
   v_prior_refund_total NUMERIC(10, 2) := 0.00;
   v_remaining NUMERIC(10, 2);
@@ -405,37 +448,91 @@ DECLARE
   v_base_amount NUMERIC(10, 2);
   v_tax_amount NUMERIC(10, 2);
   v_is_partial BOOLEAN;
-  v_clean_pay_id TEXT := TRIM(p_payment_id);
-  v_clean_rfnd_id TEXT := TRIM(p_refund_id);
+  v_clean_pay_id TEXT := NULLIF(BTRIM(p_payment_id, E' \t\n\r\f\v'), '');
+  v_clean_rfnd_id TEXT := NULLIF(BTRIM(p_refund_id, E' \t\n\r\f\v'), '');
+  v_pay_uuid UUID := NULL;
+  v_canonical_pay_id TEXT;
+  v_payment_uuid_text TEXT;
+  v_owner_user_id UUID;
   v_new_id UUID;
   v_orig_inv_num TEXT;
+  v_effective_currency TEXT;
 BEGIN
   -- 1. Validate input parameters
   IF p_refund_amount IS NULL OR p_refund_amount <= 0 THEN
     RAISE EXCEPTION 'Invalid refund amount %: Amount must be a positive, non-zero number.', p_refund_amount;
   END IF;
 
-  IF v_clean_rfnd_id IS NULL OR v_clean_rfnd_id = '' THEN
+  IF v_clean_pay_id IS NULL THEN
+    RAISE EXCEPTION 'Missing payment_id: Credit note issuance requires a non-empty payment_id.';
+  END IF;
+
+  IF v_clean_rfnd_id IS NULL THEN
     RAISE EXCEPTION 'Missing refund_id: Database idempotency requires a non-empty refund_id.';
   END IF;
 
-  -- 2. Check Idempotency: Return existing credit note if refund_id was already processed
+  -- Parse UUID safely only when input is syntactically a UUID
+  IF v_clean_pay_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+    v_pay_uuid := v_clean_pay_id::UUID;
+  END IF;
+
+  -- 2. Resolve unambiguously and acquire row-level FOR UPDATE lock BEFORE idempotency checks
+  FOR v_candidate IN
+    SELECT p.id, p.razorpay_payment_id, p.amount, p.status, p.invoice_number, p.user_id, p.credit_note_number
+    FROM public.payments p
+    WHERE BTRIM(COALESCE(p.razorpay_payment_id, ''), E' \t\n\r\f\v') = v_clean_pay_id
+       OR (v_pay_uuid IS NOT NULL AND p.id = v_pay_uuid)
+    ORDER BY p.id ASC
+    FOR UPDATE
+  LOOP
+    v_match_count := v_match_count + 1;
+    IF v_match_count = 1 THEN
+      v_payment := v_candidate;
+    ELSE
+      RAISE EXCEPTION 'Ambiguous payment identifier % matched multiple payment records.', v_clean_pay_id;
+    END IF;
+  END LOOP;
+
+  IF v_match_count = 0 THEN
+    RAISE EXCEPTION 'Payment record % not found in ledger.', v_clean_pay_id;
+  END IF;
+
+  -- Canonical payment identifier (prefer gateway razorpay_payment_id; retain UUID string for legacy sum matching)
+  v_canonical_pay_id := COALESCE(
+    NULLIF(BTRIM(v_payment.razorpay_payment_id, E' \t\n\r\f\v'), ''),
+    v_payment.id::TEXT
+  );
+  v_payment_uuid_text := v_payment.id::TEXT;
+
+  -- Enforce authoritative payment ownership: caller p_user_id may never override v_payment.user_id
+  IF p_user_id IS NOT NULL AND v_payment.user_id IS NOT NULL AND p_user_id IS DISTINCT FROM v_payment.user_id THEN
+    RAISE EXCEPTION 'Ownership mismatch: caller user_id % does not match authoritative payment owner % for payment %.',
+      p_user_id, v_payment.user_id, v_canonical_pay_id;
+  END IF;
+  v_owner_user_id := COALESCE(v_payment.user_id, p_user_id);
+
+  -- 3. Post-lock idempotency check (same payment required; reject cross-payment refund_id reuse)
   SELECT cn.id, cn.credit_note_number, cn.original_invoice_number, cn.payment_id,
          cn.refund_id, cn.amount, cn.base_amount, cn.tax_amount, cn.is_partial
   INTO v_existing_cn
   FROM public.credit_notes cn
-  WHERE cn.refund_id = v_clean_rfnd_id
+  WHERE BTRIM(cn.refund_id, E' \t\n\r\f\v') = v_clean_rfnd_id
   LIMIT 1;
 
   IF FOUND THEN
-    SELECT COALESCE(p.amount, 0) - COALESCE(SUM(c.amount), 0)
-    INTO v_remaining
-    FROM public.payments p
-    LEFT JOIN public.credit_notes c ON c.payment_id = v_clean_pay_id
-    WHERE p.razorpay_payment_id = v_clean_pay_id OR p.id::TEXT = v_clean_pay_id
-    GROUP BY p.amount;
+    IF BTRIM(COALESCE(v_existing_cn.payment_id, ''), E' \t\n\r\f\v') NOT IN (v_canonical_pay_id, v_payment_uuid_text) THEN
+      RAISE EXCEPTION 'Refund ID % is already associated with another payment (%) and cannot be reused for payment %.',
+        v_clean_rfnd_id, v_existing_cn.payment_id, v_canonical_pay_id;
+    END IF;
 
-    RETURN QUERY SELECT 
+    SELECT COALESCE(SUM(c.amount), 0.00)
+    INTO v_prior_refund_total
+    FROM public.credit_notes c
+    WHERE BTRIM(COALESCE(c.payment_id, ''), E' \t\n\r\f\v') IN (v_canonical_pay_id, v_payment_uuid_text);
+
+    v_remaining := GREATEST(0.00, COALESCE(v_payment.amount, 0.00) - v_prior_refund_total);
+
+    RETURN QUERY SELECT
       v_existing_cn.id,
       v_existing_cn.credit_note_number,
       v_existing_cn.original_invoice_number,
@@ -445,32 +542,21 @@ BEGIN
       v_existing_cn.base_amount,
       v_existing_cn.tax_amount,
       v_existing_cn.is_partial,
-      COALESCE(v_remaining, 0.00),
+      v_remaining,
       TRUE;
     RETURN;
   END IF;
 
-  -- 3. Row-level locking on payments record to serialize concurrent refund requests
-  SELECT p.id, p.amount, p.status, p.invoice_number, p.user_id, p.credit_note_number
-  INTO v_payment
-  FROM public.payments p
-  WHERE p.razorpay_payment_id = v_clean_pay_id OR p.id::TEXT = v_clean_pay_id
-  FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Payment record % not found in ledger.', v_clean_pay_id;
-  END IF;
-
   -- Verify payment status is eligible for refund
-  IF v_payment.status NOT IN ('captured', 'paid', 'completed', 'refunded') THEN
-    RAISE EXCEPTION 'Payment % is in status %, which is not eligible for refund or credit note issuance.', v_clean_pay_id, v_payment.status;
+  IF LOWER(COALESCE(v_payment.status, '')) NOT IN ('captured', 'paid', 'completed', 'refunded') THEN
+    RAISE EXCEPTION 'Payment % is in status %, which is not eligible for refund or credit note issuance.', v_canonical_pay_id, v_payment.status;
   END IF;
 
-  -- 4. Calculate cumulative prior refunds
+  -- 4. Calculate cumulative prior refunds across canonical & legacy UUID keys
   SELECT COALESCE(SUM(cn.amount), 0.00)
   INTO v_prior_refund_total
   FROM public.credit_notes cn
-  WHERE cn.payment_id = v_clean_pay_id;
+  WHERE BTRIM(COALESCE(cn.payment_id, ''), E' \t\n\r\f\v') IN (v_canonical_pay_id, v_payment_uuid_text);
 
   v_remaining := v_payment.amount - v_prior_refund_total;
 
@@ -484,46 +570,90 @@ BEGIN
   v_base_amount := ROUND((p_refund_amount / 1.18), 2);
   v_tax_amount := p_refund_amount - v_base_amount;
   v_is_partial := (v_prior_refund_total + p_refund_amount) < v_payment.amount;
-  v_orig_inv_num := COALESCE(v_payment.invoice_number, 'DM-INV-' || SUBSTRING(v_clean_pay_id FROM 5));
+  v_orig_inv_num := COALESCE(
+    NULLIF(BTRIM(v_payment.invoice_number, E' \t\n\r\f\v'), ''),
+    'DM-INV-' || SUBSTRING(v_canonical_pay_id FROM 5)
+  );
+  v_effective_currency := COALESCE(NULLIF(BTRIM(p_currency, E' \t\n\r\f\v'), ''), 'INR');
 
-  -- 7. Allocate consecutive credit note number atomically
-  v_new_cn_num := public.get_next_credit_note_number(COALESCE(p_date, NOW()));
+  -- 7-8. Allocate consecutive credit note number and insert inside subtransaction savepoint.
+  -- If unique_violation occurs on refund_id, Postgres rolls back the sequence update too,
+  -- preventing burned credit note numbers and safely returning the matching idempotent row.
+  BEGIN
+    v_new_cn_num := public.get_next_credit_note_number(COALESCE(p_date, NOW()));
 
-  -- 8. Insert record into credit_notes
-  INSERT INTO public.credit_notes (
-    credit_note_number,
-    original_invoice_number,
-    payment_id,
-    user_id,
-    refund_id,
-    reason,
-    amount,
-    base_amount,
-    tax_amount,
-    currency,
-    is_partial,
-    created_at
-  ) VALUES (
-    v_new_cn_num,
-    v_orig_inv_num,
-    v_clean_pay_id,
-    COALESCE(p_user_id, v_payment.user_id),
-    v_clean_rfnd_id,
-    p_reason,
-    p_refund_amount,
-    v_base_amount,
-    v_tax_amount,
-    COALESCE(p_currency, 'INR'),
-    v_is_partial,
-    COALESCE(p_date, NOW())
-  )
-  RETURNING credit_notes.id INTO v_new_id;
+    INSERT INTO public.credit_notes (
+      credit_note_number,
+      original_invoice_number,
+      payment_id,
+      user_id,
+      refund_id,
+      reason,
+      amount,
+      base_amount,
+      tax_amount,
+      currency,
+      is_partial,
+      created_at
+    ) VALUES (
+      v_new_cn_num,
+      v_orig_inv_num,
+      v_canonical_pay_id,
+      v_owner_user_id,
+      v_clean_rfnd_id,
+      COALESCE(NULLIF(BTRIM(p_reason, E' \t\n\r\f\v'), ''), 'Educational course fee refund'),
+      p_refund_amount,
+      v_base_amount,
+      v_tax_amount,
+      v_effective_currency,
+      v_is_partial,
+      COALESCE(p_date, NOW())
+    )
+    RETURNING credit_notes.id INTO v_new_id;
+  EXCEPTION WHEN unique_violation THEN
+    SELECT cn.id, cn.credit_note_number, cn.original_invoice_number, cn.payment_id,
+           cn.refund_id, cn.amount, cn.base_amount, cn.tax_amount, cn.is_partial
+    INTO v_existing_cn
+    FROM public.credit_notes cn
+    WHERE BTRIM(cn.refund_id, E' \t\n\r\f\v') = v_clean_rfnd_id
+    LIMIT 1;
+
+    IF NOT FOUND THEN
+      RAISE;
+    END IF;
+
+    IF BTRIM(COALESCE(v_existing_cn.payment_id, ''), E' \t\n\r\f\v') NOT IN (v_canonical_pay_id, v_payment_uuid_text) THEN
+      RAISE EXCEPTION 'Refund ID % is already associated with another payment (%) and cannot be reused for payment %.',
+        v_clean_rfnd_id, v_existing_cn.payment_id, v_canonical_pay_id;
+    END IF;
+
+    SELECT COALESCE(SUM(c.amount), 0.00)
+    INTO v_prior_refund_total
+    FROM public.credit_notes c
+    WHERE BTRIM(COALESCE(c.payment_id, ''), E' \t\n\r\f\v') IN (v_canonical_pay_id, v_payment_uuid_text);
+
+    v_remaining := GREATEST(0.00, COALESCE(v_payment.amount, 0.00) - v_prior_refund_total);
+
+    RETURN QUERY SELECT
+      v_existing_cn.id,
+      v_existing_cn.credit_note_number,
+      v_existing_cn.original_invoice_number,
+      v_existing_cn.payment_id,
+      v_existing_cn.refund_id,
+      v_existing_cn.amount,
+      v_existing_cn.base_amount,
+      v_existing_cn.tax_amount,
+      v_existing_cn.is_partial,
+      v_remaining,
+      TRUE;
+    RETURN;
+  END;
 
   -- 9. Update payment record if balance fully refunded
   IF (v_prior_refund_total + p_refund_amount) >= v_payment.amount THEN
     UPDATE public.payments
     SET status = 'refunded',
-        credit_note_number = COALESCE(credit_note_number, v_new_cn_num),
+        credit_note_number = COALESCE(NULLIF(BTRIM(credit_note_number, E' \t\n\r\f\v'), ''), v_new_cn_num),
         updated_at = NOW()
     WHERE id = v_payment.id;
   END IF;
@@ -533,7 +663,7 @@ BEGIN
     v_new_id,
     v_new_cn_num,
     v_orig_inv_num,
-    v_clean_pay_id,
+    v_canonical_pay_id,
     v_clean_rfnd_id,
     p_refund_amount,
     v_base_amount,
@@ -559,8 +689,69 @@ GRANT EXECUTE ON FUNCTION public.generate_enrollment_id() TO service_role, postg
 GRANT EXECUTE ON FUNCTION public.record_credit_note_with_limit(TEXT, TEXT, NUMERIC, TEXT, UUID, TEXT, TIMESTAMPTZ) TO service_role, postgres;
 
 -- ==============================================================================
--- 6. HISTORICAL RECONCILIATION (INSPECTING BOTH CREDIT_NOTES AND PAYMENTS)
+-- 6. WHITESPACE NORMALIZATION & HISTORICAL RECONCILIATION (CREDIT_NOTES + PAYMENTS)
+-- Normalize control/ASCII whitespace (spaces, tabs, newlines, CR, FF, VT) across all
+-- unique identifier columns BEFORE sequence reconciliation and deduplication so untrimmed
+-- legacy rows are never skipped and hidden whitespace duplicates cannot break Phase B.
 -- ==============================================================================
+
+UPDATE public.profiles
+SET student_id = NULLIF(BTRIM(student_id, E' \t\n\r\f\v'), '')
+WHERE student_id IS NOT NULL
+  AND student_id IS DISTINCT FROM NULLIF(BTRIM(student_id, E' \t\n\r\f\v'), '');
+
+UPDATE public.course_enrollments
+SET enrollment_id = NULLIF(BTRIM(enrollment_id, E' \t\n\r\f\v'), '')
+WHERE enrollment_id IS NOT NULL
+  AND enrollment_id IS DISTINCT FROM NULLIF(BTRIM(enrollment_id, E' \t\n\r\f\v'), '');
+
+UPDATE public.payments
+SET invoice_number = NULLIF(BTRIM(invoice_number, E' \t\n\r\f\v'), ''),
+    credit_note_number = NULLIF(BTRIM(credit_note_number, E' \t\n\r\f\v'), '')
+WHERE (invoice_number IS NOT NULL AND invoice_number IS DISTINCT FROM NULLIF(BTRIM(invoice_number, E' \t\n\r\f\v'), ''))
+   OR (credit_note_number IS NOT NULL AND credit_note_number IS DISTINCT FROM NULLIF(BTRIM(credit_note_number, E' \t\n\r\f\v'), ''));
+
+-- Safely normalize legacy credit_notes columns (preserving NOT NULL constraints where enforced)
+DO $$
+DECLARE
+  v_cn_num_nullable BOOLEAN;
+  v_rfnd_nullable BOOLEAN;
+BEGIN
+  SELECT (is_nullable = 'YES') INTO v_cn_num_nullable
+  FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'credit_notes' AND column_name = 'credit_note_number';
+
+  SELECT (is_nullable = 'YES') INTO v_rfnd_nullable
+  FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'credit_notes' AND column_name = 'refund_id';
+
+  UPDATE public.credit_notes
+  SET payment_id = BTRIM(payment_id, E' \t\n\r\f\v')
+  WHERE payment_id IS NOT NULL
+    AND payment_id IS DISTINCT FROM BTRIM(payment_id, E' \t\n\r\f\v');
+
+  UPDATE public.credit_notes
+  SET credit_note_number = CASE
+    WHEN v_cn_num_nullable THEN NULLIF(BTRIM(credit_note_number, E' \t\n\r\f\v'), '')
+    ELSE BTRIM(credit_note_number, E' \t\n\r\f\v')
+  END
+  WHERE credit_note_number IS NOT NULL
+    AND credit_note_number IS DISTINCT FROM CASE
+      WHEN v_cn_num_nullable THEN NULLIF(BTRIM(credit_note_number, E' \t\n\r\f\v'), '')
+      ELSE BTRIM(credit_note_number, E' \t\n\r\f\v')
+    END;
+
+  UPDATE public.credit_notes
+  SET refund_id = CASE
+    WHEN v_rfnd_nullable THEN NULLIF(BTRIM(refund_id, E' \t\n\r\f\v'), '')
+    ELSE BTRIM(refund_id, E' \t\n\r\f\v')
+  END
+  WHERE refund_id IS NOT NULL
+    AND refund_id IS DISTINCT FROM CASE
+      WHEN v_rfnd_nullable THEN NULLIF(BTRIM(refund_id, E' \t\n\r\f\v'), '')
+      ELSE BTRIM(refund_id, E' \t\n\r\f\v')
+    END;
+END $$;
 
 -- A. Align invoice_series from existing payments.invoice_number
 DO $$
@@ -626,7 +817,7 @@ BEGIN
   FOR dup IN 
     SELECT student_id, COUNT(*) as cnt 
     FROM public.profiles 
-    WHERE student_id IS NOT NULL AND TRIM(student_id) != '' 
+    WHERE student_id IS NOT NULL AND BTRIM(student_id, E' \t\n\r\f\v') != '' 
     GROUP BY student_id HAVING COUNT(*) > 1
   LOOP
     FOR dup_row IN 
@@ -644,7 +835,7 @@ DO $$
 DECLARE
   r RECORD;
 BEGIN
-  FOR r IN SELECT id FROM public.profiles WHERE student_id IS NULL OR TRIM(student_id) = '' ORDER BY created_at ASC NULLS LAST, id ASC LOOP
+  FOR r IN SELECT id FROM public.profiles WHERE student_id IS NULL OR BTRIM(student_id, E' \t\n\r\f\v') = '' ORDER BY created_at ASC NULLS LAST, id ASC LOOP
     UPDATE public.profiles SET student_id = public.generate_student_id() WHERE id = r.id;
   END LOOP;
 END $$;
@@ -664,7 +855,7 @@ BEGIN
   FOR dup IN 
     SELECT enrollment_id, COUNT(*) as cnt 
     FROM public.course_enrollments 
-    WHERE enrollment_id IS NOT NULL AND TRIM(enrollment_id) != '' 
+    WHERE enrollment_id IS NOT NULL AND BTRIM(enrollment_id, E' \t\n\r\f\v') != '' 
     GROUP BY enrollment_id HAVING COUNT(*) > 1
   LOOP
     FOR dup_row IN 
@@ -682,7 +873,7 @@ DO $$
 DECLARE
   r RECORD;
 BEGIN
-  FOR r IN SELECT id FROM public.course_enrollments WHERE enrollment_id IS NULL OR TRIM(enrollment_id) = '' ORDER BY created_at ASC NULLS LAST, id ASC LOOP
+  FOR r IN SELECT id FROM public.course_enrollments WHERE enrollment_id IS NULL OR BTRIM(enrollment_id, E' \t\n\r\f\v') = '' ORDER BY created_at ASC NULLS LAST, id ASC LOOP
     UPDATE public.course_enrollments SET enrollment_id = public.generate_enrollment_id() WHERE id = r.id;
   END LOOP;
 END $$;
@@ -703,13 +894,59 @@ BEGIN
     SELECT id, created_at 
     FROM public.payments 
     WHERE status IN ('captured', 'paid', 'completed') 
-      AND (invoice_number IS NULL OR TRIM(invoice_number) = '') 
+      AND (invoice_number IS NULL OR BTRIM(invoice_number, E' \t\n\r\f\v') = '') 
     ORDER BY created_at ASC NULLS LAST, id ASC 
   LOOP
     UPDATE public.payments 
     SET invoice_number = public.get_next_invoice_number(r.created_at) 
-    WHERE id = r.id AND (invoice_number IS NULL OR TRIM(invoice_number) = '');
+    WHERE id = r.id AND (invoice_number IS NULL OR BTRIM(invoice_number, E' \t\n\r\f\v') = '');
   END LOOP;
+END $$;
+
+-- F. Pre-Phase-B Financial Duplicate Safety Check (fail fast rather than half-completing concurrent indexes)
+DO $$
+DECLARE
+  v_dup_count INTEGER;
+BEGIN
+  SELECT COUNT(*) INTO v_dup_count
+  FROM (
+    SELECT invoice_number FROM public.payments
+    WHERE invoice_number IS NOT NULL AND BTRIM(invoice_number, E' \t\n\r\f\v') != ''
+    GROUP BY invoice_number HAVING COUNT(*) > 1
+  ) d;
+  IF v_dup_count > 0 THEN
+    RAISE EXCEPTION 'Phase A halt: Found % duplicate payments.invoice_number value(s). Reconcile financial ledger before proceeding to Phase B.', v_dup_count;
+  END IF;
+
+  SELECT COUNT(*) INTO v_dup_count
+  FROM (
+    SELECT credit_note_number FROM public.payments
+    WHERE credit_note_number IS NOT NULL AND BTRIM(credit_note_number, E' \t\n\r\f\v') != ''
+    GROUP BY credit_note_number HAVING COUNT(*) > 1
+  ) d;
+  IF v_dup_count > 0 THEN
+    RAISE EXCEPTION 'Phase A halt: Found % duplicate payments.credit_note_number value(s). Reconcile financial ledger before proceeding to Phase B.', v_dup_count;
+  END IF;
+
+  SELECT COUNT(*) INTO v_dup_count
+  FROM (
+    SELECT credit_note_number FROM public.credit_notes
+    WHERE credit_note_number IS NOT NULL AND BTRIM(credit_note_number, E' \t\n\r\f\v') != ''
+    GROUP BY credit_note_number HAVING COUNT(*) > 1
+  ) d;
+  IF v_dup_count > 0 THEN
+    RAISE EXCEPTION 'Phase A halt: Found % duplicate credit_notes.credit_note_number value(s). Reconcile financial ledger before proceeding to Phase B.', v_dup_count;
+  END IF;
+
+  SELECT COUNT(*) INTO v_dup_count
+  FROM (
+    SELECT refund_id FROM public.credit_notes
+    WHERE refund_id IS NOT NULL AND BTRIM(refund_id, E' \t\n\r\f\v') != ''
+    GROUP BY refund_id HAVING COUNT(*) > 1
+  ) d;
+  IF v_dup_count > 0 THEN
+    RAISE EXCEPTION 'Phase A halt: Found % duplicate credit_notes.refund_id value(s). Reconcile financial ledger before proceeding to Phase B.', v_dup_count;
+  END IF;
 END $$;
 
 -- ZERO-DOWNTIME MIGRATION (SEC-01 Compliance):
@@ -763,31 +1000,52 @@ CREATE TRIGGER set_enrollment_id
   EXECUTE FUNCTION public.trigger_set_enrollment_id();
 
 -- Trigger: Payment security & invoice lifecycle enforcement
--- 1. If an invoice number exists historically, it is permanently locked and can NEVER be overwritten or wiped.
--- 2. If status is refunded, failed, pending, or cancelled, an invoice number is NEVER generated.
--- 3. If status becomes captured/paid and invoice_number is empty, an invoice number is atomically minted.
+-- 1. If an invoice number exists historically (non-blank), it is permanently locked and can NEVER be overwritten or wiped.
+-- 2. If status is unverified/unpaid/refunded (pending, created, authorized, failed, cancelled, refunded),
+--    an invoice number is NEVER generated AND any forged invoice_number supplied on INSERT is cleared to NULL.
+-- 3. Note: Database triggers CANNOT verify Razorpay signatures or gateway capture; server-side
+--    cryptographic verification and gateway API capture checks in paymentRoutes/paymentWebhook remain mandatory.
 CREATE OR REPLACE FUNCTION public.trigger_set_payment_invoice()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
+DECLARE
+  v_norm_status TEXT := LOWER(BTRIM(COALESCE(NEW.status, ''), E' \t\n\r\f\v'));
+  v_has_old_inv BOOLEAN := (
+    TG_OP = 'UPDATE'
+    AND OLD.invoice_number IS NOT NULL
+    AND BTRIM(OLD.invoice_number, E' \t\n\r\f\v') != ''
+  );
 BEGIN
-  -- Permanent audit lock: Never allow altering or erasing an already-issued invoice_number
-  IF TG_OP = 'UPDATE' AND OLD.invoice_number IS NOT NULL AND TRIM(OLD.invoice_number) != '' THEN
+  -- Permanent audit lock: Never allow altering or erasing an already-issued non-blank invoice_number
+  IF v_has_old_inv THEN
     IF NEW.invoice_number IS DISTINCT FROM OLD.invoice_number THEN
       NEW.invoice_number := OLD.invoice_number;
     END IF;
+  ELSE
+    NEW.invoice_number := NULLIF(BTRIM(NEW.invoice_number, E' \t\n\r\f\v'), '');
   END IF;
 
-  -- Security: Reject minting an invoice number for unverified, pending, failed, cancelled, or refunded status
+  -- Security: Never mint OR retain forged invoice numbers on unpaid, refunded, or unverified statuses
   IF NEW.status IN ('refunded', 'failed', 'cancelled', 'pending') THEN
+    IF NOT v_has_old_inv THEN
+      NEW.invoice_number := NULL;
+    END IF;
     RETURN NEW;
   END IF;
 
-  -- Only mint invoice for verified captured/paid status if not already set
-  IF (NEW.status IN ('captured', 'paid', 'completed')) 
-     AND (NEW.invoice_number IS NULL OR TRIM(NEW.invoice_number) = '') THEN
+  IF v_norm_status NOT IN ('captured', 'paid', 'completed') THEN
+    IF NOT v_has_old_inv THEN
+      NEW.invoice_number := NULL;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- Only mint invoice for verified captured/paid/completed status if not already set
+  IF v_norm_status IN ('captured', 'paid', 'completed')
+     AND (NEW.invoice_number IS NULL OR BTRIM(NEW.invoice_number, E' \t\n\r\f\v') = '') THEN
     NEW.invoice_number := public.get_next_invoice_number(COALESCE(NEW.created_at, NOW()));
   END IF;
 
@@ -802,17 +1060,21 @@ CREATE TRIGGER set_payment_invoice_number
   EXECUTE FUNCTION public.trigger_set_payment_invoice();
 
 -- Trigger: Protect payment status from client-side tampering (INSERT & UPDATE)
--- Blocks unauthorized client sessions (authenticated/anon) from inserting or mutating payment status to captured/paid/completed
+-- Blocks unauthorized client sessions (authenticated/anon) from inserting or mutating payment status to captured/paid/completed.
+-- IMPORTANT: Triggers cannot verify Razorpay gateway capture or HMAC signatures; server-side authorization is mandatory.
 CREATE OR REPLACE FUNCTION public.protect_payment_status_transitions()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
+DECLARE
+  v_new_status TEXT := LOWER(BTRIM(COALESCE(NEW.status, ''), E' \t\n\r\f\v'));
+  v_old_status TEXT := LOWER(BTRIM(COALESCE(OLD.status, ''), E' \t\n\r\f\v'));
 BEGIN
   -- Defense-in-depth: Block unprivileged client roles from setting captured/paid/completed status on INSERT or UPDATE
-  IF NEW.status IN ('captured', 'paid', 'completed') THEN
-    IF (TG_OP = 'INSERT') OR (TG_OP = 'UPDATE' AND OLD.status IS DISTINCT FROM NEW.status) THEN
+  IF v_new_status IN ('captured', 'paid', 'completed') THEN
+    IF (TG_OP = 'INSERT') OR (TG_OP = 'UPDATE' AND v_old_status IS DISTINCT FROM v_new_status) THEN
       -- In Supabase PostgREST, client sessions run with auth.role() = 'authenticated' or 'anon'
       IF auth.role() IN ('authenticated', 'anon') THEN
         RAISE EXCEPTION 'Unauthorized: Status % cannot be set directly by client roles. Payment must be verified via server-side Razorpay webhook or verification handler.', NEW.status;
