@@ -100,7 +100,8 @@ BEGIN
     RAISE EXCEPTION 'Phase B preflight failed: % duplicate credit_notes.refund_id group(s) detected. Reconcile before indexing.', v_dups;
   END IF;
 
-  -- B. Inspect pg_index / pg_class / pg_namespace for invalid, not-ready, wrong-def, or alias indexes
+  -- B. Inspect pg_index / pg_class / pg_namespace / pg_attribute / pg_get_expr for invalid,
+  --    not-ready, wrong-table, wrong-column, non-unique, wrong-predicate, or alias indexes
   FOR v_spec IN
     SELECT * FROM (VALUES
       ('idx_credit_notes_number',              'credit_notes',       true,  'credit_note_number', true),
@@ -113,55 +114,90 @@ BEGIN
       ('idx_payments_credit_note_number',      'payments',           true,  'credit_note_number', true)
     ) AS s(idx_name, tbl_name, expect_unique, col_name, expect_partial)
   LOOP
-    SELECT
-      c.oid,
-      t.relname AS actual_table,
-      i.indisvalid,
-      i.indisready,
-      i.indisunique,
-      pg_get_indexdef(c.oid) AS idx_def
-    INTO v_idx
-    FROM pg_index i
-    JOIN pg_class c ON c.oid = i.indexrelid
-    JOIN pg_class t ON t.oid = i.indrelid
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public'
-      AND c.relname = v_spec.idx_name;
+    DECLARE
+      v_attnum SMALLINT;
+      v_pred_regex TEXT;
+    BEGIN
+      SELECT a.attnum INTO v_attnum
+      FROM pg_catalog.pg_attribute a
+      JOIN pg_catalog.pg_class tbl ON tbl.oid = a.attrelid
+      JOIN pg_catalog.pg_namespace ns ON ns.oid = tbl.relnamespace
+      WHERE ns.nspname = 'public'
+        AND tbl.relname = v_spec.tbl_name
+        AND a.attname = v_spec.col_name
+        AND NOT a.attisdropped;
 
-    IF FOUND THEN
-      IF NOT v_idx.indisvalid OR NOT v_idx.indisready THEN
-        RAISE EXCEPTION 'Phase B preflight failed: Index public.% exists in INVALID/UNREADY state (indisvalid=%, indisready=%). IF NOT EXISTS would skip rebuild. Run DROP INDEX CONCURRENTLY IF EXISTS public.% first.',
-          v_spec.idx_name, v_idx.indisvalid, v_idx.indisready, v_spec.idx_name;
+      IF v_attnum IS NULL THEN
+        RAISE EXCEPTION 'Phase B preflight failed: Expected column public.%.% not found.', v_spec.tbl_name, v_spec.col_name;
       END IF;
 
-      IF v_idx.actual_table IS DISTINCT FROM v_spec.tbl_name
-         OR v_idx.indisunique IS DISTINCT FROM v_spec.expect_unique
-         OR position('(' || v_spec.col_name || ')' in v_idx.idx_def) = 0
-         OR (v_spec.expect_partial AND v_idx.idx_def !~* '\mWHERE\M') THEN
-        RAISE EXCEPTION 'Phase B preflight failed: Existing index public.% has mismatched definition (%). Drop with DROP INDEX CONCURRENTLY IF EXISTS public.% before rerunning Phase B.',
-          v_spec.idx_name, v_idx.idx_def, v_spec.idx_name;
-      END IF;
-    ELSE
-      -- Check for redundant alias index with a different name covering the same table & column
-      SELECT c.relname AS alias_name, pg_get_indexdef(c.oid) AS alias_def
-      INTO v_alias
-      FROM pg_index i
-      JOIN pg_class c ON c.oid = i.indexrelid
-      JOIN pg_class t ON t.oid = i.indrelid
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname = 'public'
-        AND t.relname = v_spec.tbl_name
-        AND c.relname <> v_spec.idx_name
-        AND i.indisvalid = true
-        AND i.indisunique = v_spec.expect_unique
-        AND position('(' || v_spec.col_name || ')' in pg_get_indexdef(c.oid)) > 0
-      LIMIT 1;
+      SELECT
+        c.oid,
+        nt.nspname AS actual_table_schema,
+        t.relname AS actual_table,
+        i.indisvalid,
+        i.indisready,
+        i.indisunique,
+        i.indkey,
+        i.indexprs,
+        i.indpred,
+        pg_catalog.pg_get_expr(i.indpred, i.indrelid) AS pred_expr,
+        pg_get_indexdef(c.oid) AS idx_def
+      INTO v_idx
+      FROM pg_catalog.pg_index i
+      JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
+      JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
+      JOIN pg_catalog.pg_namespace nc ON nc.oid = c.relnamespace
+      JOIN pg_catalog.pg_namespace nt ON nt.oid = t.relnamespace
+      WHERE nc.nspname = 'public'
+        AND c.relname = v_spec.idx_name;
 
       IF FOUND THEN
-        RAISE WARNING 'Phase B preflight notice: Table public.% already has an equivalent alias index public.% (%).',
-          v_spec.tbl_name, v_alias.alias_name, v_alias.alias_def;
+        IF NOT v_idx.indisvalid OR NOT v_idx.indisready THEN
+          RAISE EXCEPTION 'Phase B preflight failed: Index public.% exists in INVALID/UNREADY state (indisvalid=%, indisready=%). IF NOT EXISTS would skip rebuild. Run DROP INDEX CONCURRENTLY IF EXISTS public.% first.',
+            v_spec.idx_name, v_idx.indisvalid, v_idx.indisready, v_spec.idx_name;
+        END IF;
+
+        v_pred_regex :=
+          '^\s*\(*\s*' || v_spec.col_name || '\s+IS\s+NOT\s+NULL\s*\)*\s+AND\s+\(*\s*(?:pg_catalog\.)?btrim\(\s*\(*\s*'
+          || v_spec.col_name
+          || '(?:\)*(?:::text)?)\s*,\s*E?'' (?:\t|\\t|\\x09|\\011)(?:\n|\\n|\\x0a|\\012)(?:\r|\\r|\\x0d|\\015)(?:\f|\\f|\\x0c|\\014)(?:\v|\\v|\\x0b|\\013)''(?:::text)?\s*\)\s*(?:<>|!=)\s*''''(?:::text)?\s*\)*\s*$';
+
+        IF v_idx.actual_table_schema IS DISTINCT FROM 'public'
+           OR v_idx.actual_table IS DISTINCT FROM v_spec.tbl_name
+           OR v_idx.indisunique IS DISTINCT FROM v_spec.expect_unique
+           OR v_idx.indexprs IS NOT NULL
+           OR v_idx.indkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_attnum]
+           OR (v_spec.expect_partial AND (v_idx.indpred IS NULL OR v_idx.pred_expr IS NULL OR v_idx.pred_expr !~* v_pred_regex))
+           OR (NOT v_spec.expect_partial AND v_idx.indpred IS NOT NULL) THEN
+          RAISE EXCEPTION 'Phase B preflight failed: Existing index public.% has mismatched table/column/uniqueness/predicate (%). Drop with DROP INDEX CONCURRENTLY IF EXISTS public.% before rerunning Phase B.',
+            v_spec.idx_name, v_idx.idx_def, v_spec.idx_name;
+        END IF;
+      ELSE
+        -- Check for redundant alias index with a different name covering the same table & column
+        SELECT c.relname AS alias_name, pg_get_indexdef(c.oid) AS alias_def
+        INTO v_alias
+        FROM pg_catalog.pg_index i
+        JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
+        JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
+        JOIN pg_catalog.pg_namespace nc ON nc.oid = c.relnamespace
+        JOIN pg_catalog.pg_namespace nt ON nt.oid = t.relnamespace
+        WHERE nc.nspname = 'public'
+          AND nt.nspname = 'public'
+          AND t.relname = v_spec.tbl_name
+          AND c.relname <> v_spec.idx_name
+          AND i.indisvalid = true
+          AND i.indisunique = v_spec.expect_unique
+          AND i.indexprs IS NULL
+          AND i.indkey::SMALLINT[] = ARRAY[v_attnum]
+        LIMIT 1;
+
+        IF FOUND THEN
+          RAISE WARNING 'Phase B preflight notice: Table public.% already has an equivalent alias index public.% (%).',
+            v_spec.tbl_name, v_alias.alias_name, v_alias.alias_def;
+        END IF;
       END IF;
-    END IF;
+    END;
   END LOOP;
 END $$;
 
@@ -209,22 +245,25 @@ CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_payments_credit_note_number
 
 -- ------------------------------------------------------------------------------
 -- 3. POST-DEPLOYMENT INDEX VALIDATION QUERY (SEC-06 Compliance)
--- Verifies schema (public), indisvalid = true, indisready = true, indisunique,
--- and canonical pg_get_indexdef for all 8 indexes. Fails loudly if any defect exists.
+-- Verifies schema (public), table, single indexed column, indisunique, indisvalid,
+-- indisready, exact partial BTRIM predicate (indpred), and pg_get_indexdef for all 8 indexes.
 -- ------------------------------------------------------------------------------
 SELECT
-  n.nspname AS schema_name,
+  nc.nspname AS schema_name,
   c.relname AS index_name,
+  nt.nspname AS table_schema,
   t.relname AS table_name,
   i.indisvalid AS is_valid,
   i.indisready AS is_ready,
   i.indisunique AS is_unique,
+  pg_catalog.pg_get_expr(i.indpred, i.indrelid) AS partial_predicate,
   pg_get_indexdef(c.oid) AS index_definition
-FROM pg_index i
-JOIN pg_class c ON c.oid = i.indexrelid
-JOIN pg_class t ON t.oid = i.indrelid
-JOIN pg_namespace n ON n.oid = c.relnamespace
-WHERE n.nspname = 'public'
+FROM pg_catalog.pg_index i
+JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
+JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
+JOIN pg_catalog.pg_namespace nc ON nc.oid = c.relnamespace
+JOIN pg_catalog.pg_namespace nt ON nt.oid = t.relnamespace
+WHERE nc.nspname = 'public'
   AND c.relname IN (
     'idx_credit_notes_number',
     'idx_credit_notes_refund_id',
@@ -241,6 +280,8 @@ DO $$
 DECLARE
   v_spec RECORD;
   v_row RECORD;
+  v_attnum SMALLINT;
+  v_pred_regex TEXT;
   v_verified INTEGER := 0;
 BEGIN
   FOR v_spec IN
@@ -255,19 +296,38 @@ BEGIN
       ('idx_payments_credit_note_number',      'payments',           true,  'credit_note_number', true)
     ) AS s(idx_name, tbl_name, expect_unique, col_name, expect_partial)
   LOOP
+    SELECT a.attnum INTO v_attnum
+    FROM pg_catalog.pg_attribute a
+    JOIN pg_catalog.pg_class tbl ON tbl.oid = a.attrelid
+    JOIN pg_catalog.pg_namespace ns ON ns.oid = tbl.relnamespace
+    WHERE ns.nspname = 'public'
+      AND tbl.relname = v_spec.tbl_name
+      AND a.attname = v_spec.col_name
+      AND NOT a.attisdropped;
+
+    IF v_attnum IS NULL THEN
+      RAISE EXCEPTION 'Phase B validation failed: Expected column public.%.% not found.', v_spec.tbl_name, v_spec.col_name;
+    END IF;
+
     SELECT
       c.relname AS index_name,
+      nt.nspname AS table_schema,
       t.relname AS table_name,
       i.indisvalid AS is_valid,
       i.indisready AS is_ready,
       i.indisunique AS is_unique,
+      i.indkey,
+      i.indexprs,
+      i.indpred,
+      pg_catalog.pg_get_expr(i.indpred, i.indrelid) AS pred_expr,
       pg_get_indexdef(c.oid) AS index_def
     INTO v_row
-    FROM pg_index i
-    JOIN pg_class c ON c.oid = i.indexrelid
-    JOIN pg_class t ON t.oid = i.indrelid
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'public'
+    FROM pg_catalog.pg_index i
+    JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
+    JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
+    JOIN pg_catalog.pg_namespace nc ON nc.oid = c.relnamespace
+    JOIN pg_catalog.pg_namespace nt ON nt.oid = t.relnamespace
+    WHERE nc.nspname = 'public'
       AND c.relname = v_spec.idx_name;
 
     IF NOT FOUND THEN
@@ -279,11 +339,20 @@ BEGIN
         v_spec.idx_name, v_row.is_valid, v_row.is_ready;
     END IF;
 
-    IF v_row.table_name IS DISTINCT FROM v_spec.tbl_name
+    v_pred_regex :=
+      '^\s*\(*\s*' || v_spec.col_name || '\s+IS\s+NOT\s+NULL\s*\)*\s+AND\s+\(*\s*(?:pg_catalog\.)?btrim\(\s*\(*\s*'
+      || v_spec.col_name
+      || '(?:\)*(?:::text)?)\s*,\s*E?'' (?:\t|\\t|\\x09|\\011)(?:\n|\\n|\\x0a|\\012)(?:\r|\\r|\\x0d|\\015)(?:\f|\\f|\\x0c|\\014)(?:\v|\\v|\\x0b|\\013)''(?:::text)?\s*\)\s*(?:<>|!=)\s*''''(?:::text)?\s*\)*\s*$';
+
+    IF v_row.table_schema IS DISTINCT FROM 'public'
+       OR v_row.table_name IS DISTINCT FROM v_spec.tbl_name
        OR v_row.is_unique IS DISTINCT FROM v_spec.expect_unique
-       OR position('(' || v_spec.col_name || ')' in v_row.index_def) = 0
-       OR (v_spec.expect_partial AND v_row.index_def !~* '\mWHERE\M') THEN
-      RAISE EXCEPTION 'Phase B validation failed: Index public.% definition mismatch (%).', v_spec.idx_name, v_row.index_def;
+       OR v_row.indexprs IS NOT NULL
+       OR v_row.indkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_attnum]
+       OR (v_spec.expect_partial AND (v_row.indpred IS NULL OR v_row.pred_expr IS NULL OR v_row.pred_expr !~* v_pred_regex))
+       OR (NOT v_spec.expect_partial AND v_row.indpred IS NOT NULL) THEN
+      RAISE EXCEPTION 'Phase B validation failed: Index public.% definition mismatch (% | predicate=%).',
+        v_spec.idx_name, v_row.index_def, COALESCE(v_row.pred_expr, '<none>');
     END IF;
 
     v_verified := v_verified + 1;

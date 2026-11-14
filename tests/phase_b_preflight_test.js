@@ -114,16 +114,27 @@ function runTest(name, fn) {
 function simulateHardenedPhaseBExecution(catalog, spec) {
   const shortTable = spec.table.replace(/^public\./, "");
   const existing = catalog.find((idx) => idx.schema === "public" && idx.relname === spec.name);
+  const expectedCol = spec.columns[0];
+  const canonicalExpr = `((${expectedCol} IS NOT NULL) AND (btrim(${expectedCol}, E' \\t\\n\\r\\f\\v'::text) <> ''::text))`;
+  const predRegex = new RegExp(
+    `^\\s*\\(*\\s*${expectedCol}\\s+IS\\s+NOT\\s+NULL\\s*\\)*\\s+AND\\s+\\(*\\s*(?:pg_catalog\\.)?btrim\\(\\s*\\(*\\s*${expectedCol}(?:\\)*(?:::text)?)\\s*,\\s*E?' (?:\\t|\\\\t|\\\\x09|\\\\011)(?:\\n|\\\\n|\\\\x0a|\\\\012)(?:\\r|\\\\r|\\\\x0d|\\\\015)(?:\\f|\\\\f|\\\\x0c|\\\\014)(?:\\v|\\\\v|\\\\x0b|\\\\013)'(?:::text)?\\s*\\)\\s*(?:<>|!=)\\s*''(?:::text)?\\s*\\)*\\s*$`,
+    "i"
+  );
 
   if (existing) {
     if (!existing.indisvalid || !existing.indisready) {
       return { action: "PREFLIGHT_HALT", reason: "INVALID_OR_UNREADY_INDEX" };
     }
+    const partialOk = spec.hasPartialBtrimPredicate
+      ? Boolean(existing.partialExpr && predRegex.test(existing.partialExpr))
+      : !existing.partialExpr && !existing.partial;
     const defMatches =
+      (existing.tableSchema || "public") === "public" &&
       existing.table === shortTable &&
       existing.indisunique === spec.unique &&
+      !existing.isExpression &&
       JSON.stringify(existing.columns) === JSON.stringify(spec.columns) &&
-      Boolean(existing.partial) === spec.hasPartialBtrimPredicate;
+      partialOk;
     if (!defMatches) {
       return { action: "PREFLIGHT_HALT", reason: "DEFINITION_MISMATCH" };
     }
@@ -142,11 +153,14 @@ function simulateHardenedPhaseBExecution(catalog, spec) {
 
   const created = {
     schema: "public",
+    tableSchema: "public",
     relname: spec.name,
     table: shortTable,
     indisunique: spec.unique,
+    isExpression: false,
     columns: spec.columns,
     partial: spec.hasPartialBtrimPredicate,
+    partialExpr: spec.hasPartialBtrimPredicate ? canonicalExpr : null,
     indisvalid: true,
     indisready: true
   };
@@ -208,28 +222,42 @@ runTest("A.3 Preflight gate halts cleanly on invalid/not-ready/mismatched indexe
 
   for (const idx of INTENDED_INDEXES) {
     const shortTable = idx.table.replace(/^public\./, "");
+    const col = idx.columns[0];
+    const validPartialExpr = idx.hasPartialBtrimPredicate
+      ? `((${col} IS NOT NULL) AND (btrim(${col}, E' \\t\\n\\r\\f\\v'::text) <> ''::text))`
+      : null;
+
     const validRes = simulateHardenedPhaseBExecution(
-      [{ schema: "public", relname: idx.name, table: shortTable, indisunique: idx.unique, columns: idx.columns, partial: idx.hasPartialBtrimPredicate, indisvalid: true, indisready: true }],
+      [{ schema: "public", tableSchema: "public", relname: idx.name, table: shortTable, indisunique: idx.unique, isExpression: false, columns: idx.columns, partial: idx.hasPartialBtrimPredicate, partialExpr: validPartialExpr, indisvalid: true, indisready: true }],
       idx
     );
     assert.strictEqual(validRes.action, "SKIPPED_VALID");
 
     const invalidRes = simulateHardenedPhaseBExecution(
-      [{ schema: "public", relname: idx.name, table: shortTable, indisunique: idx.unique, columns: idx.columns, partial: idx.hasPartialBtrimPredicate, indisvalid: false, indisready: true }],
+      [{ schema: "public", tableSchema: "public", relname: idx.name, table: shortTable, indisunique: idx.unique, isExpression: false, columns: idx.columns, partial: idx.hasPartialBtrimPredicate, partialExpr: validPartialExpr, indisvalid: false, indisready: true }],
       idx
     );
     assert.strictEqual(invalidRes.action, "PREFLIGHT_HALT");
     assert.strictEqual(invalidRes.reason, "INVALID_OR_UNREADY_INDEX");
 
     const wrongDefRes = simulateHardenedPhaseBExecution(
-      [{ schema: "public", relname: idx.name, table: shortTable, indisunique: !idx.unique, columns: ["wrong_col"], partial: false, indisvalid: true, indisready: true }],
+      [{ schema: "public", tableSchema: "public", relname: idx.name, table: shortTable, indisunique: !idx.unique, isExpression: false, columns: ["wrong_col"], partial: false, partialExpr: null, indisvalid: true, indisready: true }],
       idx
     );
     assert.strictEqual(wrongDefRes.action, "PREFLIGHT_HALT");
     assert.strictEqual(wrongDefRes.reason, "DEFINITION_MISMATCH");
 
+    if (idx.hasPartialBtrimPredicate) {
+      const weakPredRes = simulateHardenedPhaseBExecution(
+        [{ schema: "public", tableSchema: "public", relname: idx.name, table: shortTable, indisunique: idx.unique, isExpression: false, columns: idx.columns, partial: true, partialExpr: `(${col} IS NOT NULL)`, indisvalid: true, indisready: true }],
+        idx
+      );
+      assert.strictEqual(weakPredRes.action, "PREFLIGHT_HALT", `Weak IS NOT NULL predicate must halt for ${idx.name}`);
+      assert.strictEqual(weakPredRes.reason, "DEFINITION_MISMATCH");
+    }
+
     const aliasRes = simulateHardenedPhaseBExecution(
-      [{ schema: "public", relname: `legacy_${idx.name}`, table: shortTable, indisunique: idx.unique, columns: idx.columns, partial: idx.hasPartialBtrimPredicate, indisvalid: true, indisready: true }],
+      [{ schema: "public", tableSchema: "public", relname: `legacy_${idx.name}`, table: shortTable, indisunique: idx.unique, isExpression: false, columns: idx.columns, partial: idx.hasPartialBtrimPredicate, partialExpr: validPartialExpr, indisvalid: true, indisready: true }],
       idx
     );
     assert.strictEqual(aliasRes.action, "CREATED");
@@ -292,10 +320,12 @@ runTest("C.1 Phase B contains ZERO BEGIN; or COMMIT; statements and no DO $$ wra
 });
 
 runTest("C.2 Phase B executes post-deployment schema/uniqueness/indexdef/indisvalid/indisready checks", () => {
-  assert.ok(activePhaseB.includes("n.nspname = 'public'"));
+  assert.ok(activePhaseB.includes("n.nspname = 'public'") || activePhaseB.includes("nc.nspname = 'public'"));
   assert.ok(activePhaseB.includes("i.indisvalid AS is_valid"));
   assert.ok(activePhaseB.includes("i.indisready AS is_ready"));
   assert.ok(activePhaseB.includes("i.indisunique AS is_unique"));
+  assert.ok(activePhaseB.includes("pg_catalog.pg_attribute"));
+  assert.ok(activePhaseB.includes("pg_catalog.pg_get_expr(i.indpred, i.indrelid)"));
   assert.ok(activePhaseB.includes("pg_get_indexdef(c.oid)"));
   assert.ok(activePhaseB.includes("IF v_verified <> 8 THEN"));
   for (const idx of INTENDED_INDEXES) {
