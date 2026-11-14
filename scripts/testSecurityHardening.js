@@ -42,7 +42,8 @@ function markNotRun(testName, reason) {
 function getRouteHandler(path, method) {
   for (const layer of paymentRouter.stack) {
     if (layer.route && layer.route.path === path && layer.route.methods[method.toLowerCase()]) {
-      return layer.route.stack[0].handle;
+      const stack = layer.route.stack || [];
+      return stack[stack.length - 1].handle;
     }
   }
   throw new Error(`Handler not found for ${method} ${path}`);
@@ -194,6 +195,7 @@ async function runTests() {
     const trustedAdmin1 = {
       id: "admin-uuid-1",
       email: "mkdigitalverse@gmail.com",
+      email_confirmed_at: "2026-01-01T00:00:00Z",
       user_metadata: {}
     };
     assert(
@@ -205,6 +207,7 @@ async function runTests() {
     const trustedAdmin2 = {
       id: "admin-uuid-2",
       email: "ADMIN@DIGITALMUID.COM",
+      email_confirmed_at: "2026-01-01T00:00:00Z",
       user_metadata: {}
     };
     assert(
@@ -1026,6 +1029,7 @@ async function runTests() {
       "token-admin-email": {
         id: "usr-admin-allowlist",
         email: "admin@digitalmuid.com",
+        email_confirmed_at: "2026-01-01T00:00:00Z",
         app_metadata: {},
         user_metadata: {}
       },

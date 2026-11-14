@@ -36,68 +36,19 @@ import {
   getIndianFinancialYear
 } from "./studentId.js";
 
-// ==============================================================================
-// GUEST INVOICE TOKEN CRYPTOGRAPHIC HARDENING (SEC-03 Compliance)
-// High-entropy HMAC-SHA256 tokens protect guest invoices from sequential enumeration.
-// Supports dedicated INVOICE_TOKEN_HMAC_SECRET or falls back to server payment/asset secrets.
-// Fails closed if HMAC secret is missing or has < 32 bytes of entropy.
-// ==============================================================================
-export function getInvoiceTokenHmacSecret() {
-  const candidates = [
-    process.env.INVOICE_TOKEN_HMAC_SECRET,
-    process.env.PAYMENT_VERIFICATION_SECRET,
-    process.env.ASSET_TOKEN_HMAC_SECRET,
-    process.env.RAZORPAY_KEY_SECRET
-  ];
+import {
+  getInvoiceTokenHmacSecret,
+  generateSignedInvoiceToken,
+  verifySignedInvoiceToken,
+  tryGenerateSignedInvoiceToken,
+  buildSignedInvoiceUrl
+} from "./invoiceToken.js";
 
-  for (const candidate of candidates) {
-    if (candidate && typeof candidate === "string") {
-      const clean = candidate.trim();
-      if (clean !== "undefined" && clean !== "null" && Buffer.byteLength(clean, "utf8") >= 32) {
-        return clean;
-      }
-    }
-  }
-
-  return null;
-}
-
-export function generateSignedInvoiceToken(paymentId, expiresInMs = 24 * 60 * 60 * 1000) {
-  if (!paymentId) throw new Error("Payment ID is required to generate signed invoice token");
-  const secret = getInvoiceTokenHmacSecret();
-  if (!secret) {
-    throw new Error("Invoice HMAC secret missing or insufficient entropy (requires >= 32 bytes). Server configuration error.");
-  }
-  const exp = Date.now() + expiresInMs;
-  const signature = crypto
-    .createHmac("sha256", secret)
-    .update(`${paymentId}:${exp}`)
-    .digest("hex");
-  return `${exp}.${signature}`;
-}
-
-export function verifySignedInvoiceToken(paymentId, token) {
-  if (!paymentId || !token || typeof token !== "string" || !token.includes(".")) return false;
-  const [expStr, sig] = token.split(".");
-  const exp = Number(expStr);
-  if (!exp || isNaN(exp) || Date.now() > exp) return false;
-
-  const secret = getInvoiceTokenHmacSecret();
-  if (!secret) return false;
-
-  try {
-    const expected = crypto
-      .createHmac("sha256", secret)
-      .update(`${paymentId}:${exp}`)
-      .digest("hex");
-    const a = Buffer.from(sig, "hex");
-    const b = Buffer.from(expected, "hex");
-    if (a.length !== b.length) return false;
-    return crypto.timingSafeEqual(a, b);
-  } catch {
-    return false;
-  }
-}
+export {
+  getInvoiceTokenHmacSecret,
+  generateSignedInvoiceToken,
+  verifySignedInvoiceToken
+};
 
 // ==============================================================================
 // RATE LIMITING FOR SENSITIVE BILLING & ASSET DOWNLOAD ENDPOINTS (SEC-05 Compliance)
@@ -896,10 +847,15 @@ router.post("/verify-consultation-payment", async (req, res) => {
       bookingDetails
     } = req.body || {};
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    if (
+      !razorpay_order_id || typeof razorpay_order_id !== "string" || !razorpay_order_id.trim() ||
+      !razorpay_payment_id || typeof razorpay_payment_id !== "string" || !razorpay_payment_id.trim() ||
+      !razorpay_signature || typeof razorpay_signature !== "string" || !razorpay_signature.trim()
+    ) {
       return res.status(400).json({
         success: false,
         verified: false,
+        fulfilled: false,
         error: "Missing required Razorpay payment credentials for verification."
       });
     }
@@ -908,6 +864,7 @@ router.post("/verify-consultation-payment", async (req, res) => {
       return res.status(503).json({
         success: false,
         verified: false,
+        fulfilled: false,
         error: "Payment gateway credentials are not configured on the server."
       });
     }
@@ -918,6 +875,16 @@ router.post("/verify-consultation-payment", async (req, res) => {
       razorpay_payment_id.trim(),
       razorpay_signature.trim()
     );
+
+    if (!isSignatureValid) {
+      console.warn(`[Consultation Verification] Invalid signature rejected for order ${razorpay_order_id}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Payment verification failed: Invalid cryptographic signature."
+      });
+    }
 
     // 2. Authoritative Gateway Verification: Validate captured status, amount, and order relationship
     const razorpay = getRazorpayClient();
@@ -1015,6 +982,10 @@ router.post("/verify-consultation-payment", async (req, res) => {
       });
     }
 
+    const cleanPaymentId = razorpay_payment_id.trim();
+    const invoiceToken = tryGenerateSignedInvoiceToken(cleanPaymentId);
+    const invoiceDownloadUrl = invoiceToken ? buildSignedInvoiceUrl(cleanPaymentId, invoiceToken) : null;
+
     return res.json({
       success: true,
       verified: true,
@@ -1023,7 +994,8 @@ router.post("/verify-consultation-payment", async (req, res) => {
       booking: fulfillment.booking,
       payment: fulfillment.payment,
       orderId: razorpay_order_id.trim(),
-      paymentId: razorpay_payment_id.trim()
+      paymentId: cleanPaymentId,
+      ...(invoiceToken ? { invoiceToken, invoiceDownloadUrl } : {})
     });
   } catch (err) {
     console.error("[Consultation Verification] Unexpected error:", err);
@@ -1207,10 +1179,15 @@ router.post("/verify-resource-payment", async (req, res) => {
       customerDetails
     } = req.body || {};
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    if (
+      !razorpay_order_id || typeof razorpay_order_id !== "string" || !razorpay_order_id.trim() ||
+      !razorpay_payment_id || typeof razorpay_payment_id !== "string" || !razorpay_payment_id.trim() ||
+      !razorpay_signature || typeof razorpay_signature !== "string" || !razorpay_signature.trim()
+    ) {
       return res.status(400).json({
         success: false,
         verified: false,
+        fulfilled: false,
         error: "Missing required Razorpay payment credentials for verification."
       });
     }
@@ -1371,6 +1348,10 @@ router.post("/verify-resource-payment", async (req, res) => {
       });
     }
 
+    const cleanPaymentId = razorpay_payment_id.trim();
+    const invoiceToken = tryGenerateSignedInvoiceToken(cleanPaymentId);
+    const invoiceDownloadUrl = invoiceToken ? buildSignedInvoiceUrl(cleanPaymentId, invoiceToken) : null;
+
     return res.json({
       success: true,
       verified: true,
@@ -1381,8 +1362,9 @@ router.post("/verify-resource-payment", async (req, res) => {
       lead_status: fulfillment.lead_status || 'saved',
       lead_id: fulfillment.lead_id || null,
       orderId: razorpay_order_id.trim(),
-      paymentId: razorpay_payment_id.trim(),
-      resourceId: resourceRecord?.id || resourceId.trim()
+      paymentId: cleanPaymentId,
+      resourceId: resourceRecord?.id || resourceId.trim(),
+      ...(invoiceToken ? { invoiceToken, invoiceDownloadUrl } : {})
     });
   } catch (err) {
     console.error("[Resource Verification] Unexpected error:", err);
@@ -2623,6 +2605,242 @@ router.post("/admin/update-consultation-pricing", async (req, res) => {
 });
 
 /**
+ * Evaluates access authorization for invoice downloads.
+ * Strictly enforces hierarchy:
+ * 1. Admin -> Allowed
+ * 2. Valid signed HMAC token -> Allowed
+ * 3. Authenticated user matching record user_id -> Allowed
+ * 4. Guest checkout with confirmed email matching record email -> Allowed
+ * 5. Cross-account access -> Rejected (403)
+ * 6. Unconfirmed email on guest checkout -> Rejected (403 UNCONFIRMED_EMAIL)
+ * 7. Unauthenticated without signed token -> Rejected (401/403)
+ */
+export function evaluateInvoiceAccessAuthorization({
+  user = null,
+  isAdmin = false,
+  isSignedTokenValid = false,
+  paymentRecord = null,
+  bookingRecord = null,
+  resourceRecord = null,
+  rzpPayment = null
+}) {
+  if (isAdmin) {
+    return { isAuthorized: true };
+  }
+  if (isSignedTokenValid) {
+    return { isAuthorized: true };
+  }
+  if (user) {
+    const userId = user.id;
+    const userEmail = (user.email || "").toLowerCase().trim();
+    const isEmailConfirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
+
+    const recordUserId = paymentRecord?.user_id || bookingRecord?.user_id || resourceRecord?.user_id || null;
+    const recordCustomerEmail = (
+      paymentRecord?.customer_email ||
+      bookingRecord?.customer_email ||
+      resourceRecord?.customer_email ||
+      rzpPayment?.email ||
+      ""
+    ).toLowerCase().trim();
+
+    if (recordUserId) {
+      if (recordUserId === userId) {
+        return { isAuthorized: true };
+      }
+      return {
+        isAuthorized: false,
+        statusCode: 403,
+        error: "Forbidden: This invoice is assigned to a different user account. Cross-account access denied."
+      };
+    }
+
+    if (recordCustomerEmail && userEmail && recordCustomerEmail === userEmail) {
+      if (isEmailConfirmed) {
+        return { isAuthorized: true };
+      }
+      return {
+        isAuthorized: false,
+        statusCode: 403,
+        code: "UNCONFIRMED_EMAIL",
+        error: "Forbidden: Your email address is unconfirmed. Please verify your email before accessing guest invoices."
+      };
+    }
+
+    return {
+      isAuthorized: false,
+      statusCode: 403,
+      error: "Forbidden: You are not authorized to access this guest invoice."
+    };
+  }
+
+  return {
+    isAuthorized: false,
+    statusCode: 403,
+    error: "Forbidden: You are not authorized to access this invoice."
+  };
+}
+
+/**
+ * Evaluates authoritative financial evidence for invoice generation.
+ * Separates operational appointment/booking status from authoritative financial payment evidence.
+ * 
+ * Authoritative evidence sources:
+ * - paymentRecord.status: 'captured' | 'paid'
+ * - bookingRecord.payment_status: 'captured' | 'paid'
+ * - rzpPayment.status: 'captured' (verified directly from Razorpay gateway)
+ * 
+ * Gateway checks when rzpPayment is provided:
+ * - Gateway status must be 'captured'
+ * - Expected order ID must match gateway order_id
+ * - Expected amount must match gateway amount (in paise)
+ * - Expected currency must match gateway currency
+ * - Customer email must match gateway email if present
+ * 
+ * Non-financial operational states (confirmed, completed, active, pending, failed)
+ * can NEVER authorize invoice generation.
+ */
+export function verifyInvoicePaymentAuthorization({
+  paymentRecord = null,
+  bookingRecord = null,
+  resourceRecord = null,
+  rzpPayment = null
+}) {
+  const normPaymentStatus = String(paymentRecord?.status || "").toLowerCase();
+  const normBookingPaymentStatus = String(bookingRecord?.payment_status || "").toLowerCase();
+  const normRzpStatus = String(rzpPayment?.status || "").toLowerCase();
+
+  const rawStatus = (
+    normPaymentStatus ||
+    normBookingPaymentStatus ||
+    normRzpStatus ||
+    ""
+  );
+
+  // Gateway Security Verification: Fail-closed validation for Razorpay gateway payments
+  if (rzpPayment) {
+    // 1. Payment status must be exactly 'captured'
+    if (!normRzpStatus || normRzpStatus !== "captured") {
+      return {
+        authorized: false,
+        statusCode: 400,
+        error: `Cannot generate tax invoice: Gateway payment status is '${rzpPayment.status || "unverified"}'. Invoices can only be issued for fully captured payments.`
+      };
+    }
+
+    // 2. Expected Order ID verification: reject when missing, empty, or mismatched
+    const expectedOrderId = paymentRecord?.razorpay_order_id || bookingRecord?.razorpay_order_id || resourceRecord?.razorpay_order_id;
+    if (expectedOrderId && expectedOrderId !== "N/A") {
+      const cleanGatewayOrderId = (rzpPayment.order_id !== null && rzpPayment.order_id !== undefined)
+        ? String(rzpPayment.order_id).trim()
+        : "";
+      if (!cleanGatewayOrderId || cleanGatewayOrderId !== expectedOrderId) {
+        return {
+          authorized: false,
+          statusCode: 400,
+          error: `Cannot generate tax invoice: Payment order ID mismatch (gateway: ${cleanGatewayOrderId || "missing"}, expected: ${expectedOrderId}).`
+        };
+      }
+    }
+
+    // 3. Expected Amount verification: require a valid, positive expected amount before using gateway capture
+    const rawExpectedAmount = paymentRecord?.amount ?? bookingRecord?.total_amount ?? resourceRecord?.amount;
+    const expectedAmount = Number(rawExpectedAmount);
+    if (rawExpectedAmount === null || rawExpectedAmount === undefined || isNaN(expectedAmount) || !isFinite(expectedAmount) || expectedAmount <= 0) {
+      return {
+        authorized: false,
+        statusCode: 400,
+        error: "Cannot generate tax invoice: Missing or invalid expected payment amount for gateway verification."
+      };
+    }
+
+    // 4. Gateway Amount verification: reject when missing, null, non-numeric, invalid, or mismatched
+    if (rzpPayment.amount === null || rzpPayment.amount === undefined || typeof rzpPayment.amount === "boolean" || String(rzpPayment.amount).trim() === "") {
+      return {
+        authorized: false,
+        statusCode: 400,
+        error: "Cannot generate tax invoice: Missing or null gateway payment amount."
+      };
+    }
+
+    const rzpAmountPaise = Number(rzpPayment.amount);
+    if (isNaN(rzpAmountPaise) || !isFinite(rzpAmountPaise) || rzpAmountPaise <= 0) {
+      return {
+        authorized: false,
+        statusCode: 400,
+        error: `Cannot generate tax invoice: Invalid or non-numeric gateway payment amount (${rzpPayment.amount}).`
+      };
+    }
+
+    const rzpAmountInRupees = rzpAmountPaise / 100;
+    if (Math.abs(rzpAmountInRupees - expectedAmount) > 0.01) {
+      return {
+        authorized: false,
+        statusCode: 400,
+        error: `Cannot generate tax invoice: Payment amount mismatch (gateway: ₹${rzpAmountInRupees}, expected: ₹${expectedAmount}).`
+      };
+    }
+
+    // 5. Currency verification: require gateway currency and reject when missing, empty, or mismatched
+    const expectedCurrency = (paymentRecord?.currency || bookingRecord?.currency || resourceRecord?.currency || "INR").toUpperCase();
+    const gatewayCurrency = (rzpPayment.currency !== null && rzpPayment.currency !== undefined)
+      ? String(rzpPayment.currency).trim().toUpperCase()
+      : "";
+
+    if (!gatewayCurrency) {
+      return {
+        authorized: false,
+        statusCode: 400,
+        error: "Cannot generate tax invoice: Missing gateway payment currency."
+      };
+    }
+
+    if (gatewayCurrency !== expectedCurrency) {
+      return {
+        authorized: false,
+        statusCode: 400,
+        error: `Cannot generate tax invoice: Payment currency mismatch (gateway: ${gatewayCurrency}, expected: ${expectedCurrency}).`
+      };
+    }
+
+    // 6. Gateway Customer / Ownership verification
+    const expectedCustomerEmail = (paymentRecord?.customer_email || bookingRecord?.customer_email || resourceRecord?.customer_email || "").toLowerCase().trim();
+    if (expectedCustomerEmail && rzpPayment.email) {
+      const rzpEmail = String(rzpPayment.email).toLowerCase().trim();
+      if (rzpEmail && rzpEmail !== expectedCustomerEmail) {
+        return {
+          authorized: false,
+          statusCode: 400,
+          error: `Cannot generate tax invoice: Payment customer mismatch (gateway: ${rzpEmail}, expected: ${expectedCustomerEmail}).`
+        };
+      }
+    }
+  }
+
+  const hasAuthoritativeLedger =
+    ["captured", "paid"].includes(normPaymentStatus) ||
+    ["captured", "paid"].includes(normBookingPaymentStatus);
+
+  const hasVerifiedGatewayCapture = Boolean(rzpPayment && normRzpStatus === "captured");
+
+  const isCaptured = hasAuthoritativeLedger || hasVerifiedGatewayCapture;
+
+  if (!isCaptured) {
+    return {
+      authorized: false,
+      statusCode: 400,
+      error: `Cannot generate tax invoice: Payment is not verified or captured (current status: ${rawStatus || "unverified"}).`
+    };
+  }
+
+  return {
+    authorized: true,
+    rawStatus,
+    isCaptured: true
+  };
+}
+
+/**
  * GET /api/payments/invoice/:paymentId
  * Generates and streams an authoritative PDF tax invoice/receipt for a verified payment.
  * Security & Authorization:
@@ -2631,7 +2849,7 @@ router.post("/admin/update-consultation-pricing", async (req, res) => {
  * - Non-owners receive 403 Forbidden.
  * - Unauthenticated requests receive 401 Unauthorized.
  */
-router.get("/invoice/:paymentId", paymentRateLimiter, async (req, res) => {
+async function handleInvoiceOrCreditNoteRequest(req, res, { forceCreditNote = false } = {}) {
   try {
     const rawPaymentId = String(req.params.paymentId || "").trim();
     if (!rawPaymentId) {
@@ -2709,6 +2927,7 @@ router.get("/invoice/:paymentId", paymentRateLimiter, async (req, res) => {
     let rzpPayment = null;
     const gatewayPayId = (rawPaymentId.startsWith("pay_") ? rawPaymentId : null) ||
                          paymentRecord?.razorpay_payment_id ||
+                         bookingRecord?.payment_id ||
                          resourceRecord?.razorpay_payment_id;
 
     if (gatewayPayId && gatewayPayId.startsWith("pay_")) {
@@ -2727,88 +2946,35 @@ router.get("/invoice/:paymentId", paymentRateLimiter, async (req, res) => {
     }
 
     // 2. Authorization check: Strict Hierarchy (F-02 & F-05 Audit Compliance)
-    // Case A: payments.user_id === authenticated_user.id -> ALLOW
-    // Case B: payments.user_id IS NULL -> ALLOW ONLY if user email matches customer_email AND email_confirmed_at is verified
-    // Case C: payments.user_id IS NOT NULL and != auth.uid() -> DENY (email match NEVER overrides different user_id)
-    // Case D: Unverified email attempting to claim guest invoice -> DENY with 403 UNCONFIRMED_EMAIL
-    // Case E: Administrator -> ALLOW
-    // Signed Token: Cryptographic HMAC valid token -> ALLOW
-    let isAuthorized = false;
-    let authDenialReason = "Forbidden: You are not authorized to access this invoice.";
+    const accessCheck = evaluateInvoiceAccessAuthorization({
+      user,
+      isAdmin,
+      isSignedTokenValid,
+      paymentRecord,
+      bookingRecord,
+      resourceRecord,
+      rzpPayment
+    });
 
-    if (isAdmin) {
-      // Case E: Server-verified administrator access
-      isAuthorized = true;
-    } else if (isSignedTokenValid) {
-      // F-05: Valid HMAC signed guest token
-      isAuthorized = true;
-    } else if (user) {
-      const userId = user.id;
-      const userEmail = (user.email || "").toLowerCase().trim();
-      const isEmailConfirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
-
-      // Determine primary owner user_id from records
-      const recordUserId = paymentRecord?.user_id || bookingRecord?.user_id || resourceRecord?.user_id || null;
-      const recordCustomerEmail = (
-        paymentRecord?.customer_email ||
-        bookingRecord?.customer_email ||
-        resourceRecord?.customer_email ||
-        rzpPayment?.email ||
-        ""
-      ).toLowerCase().trim();
-
-      if (recordUserId) {
-        // Record has an assigned account user_id
-        if (recordUserId === userId) {
-          // Case A: Authenticated user matches assigned user_id
-          isAuthorized = true;
-        } else {
-          // Case C: Record belongs to a different user account.
-          // STRICT RULE: Email match must NEVER override a different assigned user_id!
-          isAuthorized = false;
-          authDenialReason = "Forbidden: This invoice is assigned to a different user account. Cross-account access denied.";
-        }
-      } else {
-        // Record is a guest checkout (user_id IS NULL)
-        if (recordCustomerEmail && userEmail && recordCustomerEmail === userEmail) {
-          if (isEmailConfirmed) {
-            // Case B: Guest purchase claimed by user with confirmed, matching email
-            isAuthorized = true;
-          } else {
-            // Case D: Unverified email attempting to claim guest invoice
-            isAuthorized = false;
-            return res.status(403).json({
-              success: false,
-              code: "UNCONFIRMED_EMAIL",
-              error: "Forbidden: Your email address is unconfirmed. Please verify your email before accessing guest invoices."
-            });
-          }
-        } else {
-          isAuthorized = false;
-          authDenialReason = "Forbidden: You are not authorized to access this guest invoice.";
-        }
-      }
-    }
-
-    if (!isAuthorized) {
-      return res.status(403).json({
+    if (!accessCheck.isAuthorized) {
+      const errPayload = {
         success: false,
-        error: authDenialReason
-      });
+        error: accessCheck.error
+      };
+      if (accessCheck.code) errPayload.code = accessCheck.code;
+      return res.status(accessCheck.statusCode || 403).json(errPayload);
     }
 
     // 3. Authoritative Payment Status Verification
     const rawStatus = (
       paymentRecord?.status ||
       bookingRecord?.payment_status ||
-      bookingRecord?.status ||
-      resourceRecord?.status ||
       rzpPayment?.status ||
       ""
     ).toLowerCase();
 
     // 4. Obtain Student Profile & Enrollment data for persistent IDs & Billing Address
-    const targetUserId = paymentRecord?.user_id || bookingRecord?.user_id || resourceRecord?.user_id || userId;
+    const targetUserId = paymentRecord?.user_id || bookingRecord?.user_id || resourceRecord?.user_id || user?.id || null;
     let profileData = null;
     try {
       if (targetUserId) {
@@ -2823,7 +2989,7 @@ router.get("/invoice/:paymentId", paymentRateLimiter, async (req, res) => {
 
     // Find course enrollment if course purchase
     let enrollmentId = null;
-    if (paymentRecord?.item_type === "course" && paymentRecord?.item_id) {
+    if (targetUserId && paymentRecord?.item_type === "course" && paymentRecord?.item_id) {
       try {
         const { data: enrData } = await supabaseServer
           .from("course_enrollments")
@@ -2840,9 +3006,9 @@ router.get("/invoice/:paymentId", paymentRateLimiter, async (req, res) => {
     // Common transaction fields
     const cleanPayId = paymentRecord?.razorpay_payment_id || bookingRecord?.payment_id || resourceRecord?.razorpay_payment_id || (rzpPayment?.id || rawPaymentId);
     const cleanOrderId = paymentRecord?.razorpay_order_id || bookingRecord?.razorpay_order_id || resourceRecord?.razorpay_order_id || (rzpPayment?.order_id || "N/A");
-    const customerName = profileData?.full_name || bookingRecord?.customer_name || user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "Valued Student";
-    const customerEmail = bookingRecord?.customer_email || resourceRecord?.customer_email || rzpPayment?.email || user.email || "";
-    const customerPhone = profileData?.phone || bookingRecord?.customer_phone || rzpPayment?.contact || "N/A";
+    const customerName = profileData?.full_name || bookingRecord?.customer_name || resourceRecord?.customer_name || user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split("@")[0] || "Valued Student";
+    const customerEmail = paymentRecord?.customer_email || bookingRecord?.customer_email || resourceRecord?.customer_email || rzpPayment?.email || user?.email || "";
+    const customerPhone = profileData?.phone || bookingRecord?.customer_phone || resourceRecord?.customer_phone || rzpPayment?.contact || "N/A";
     const customerState = profileData?.state || bookingRecord?.customer_state || paymentRecord?.customer_state || "";
     const customerBillingAddress = profileData?.billing_address || "";
     const itemTitle = paymentRecord?.item_title || (bookingRecord ? "Business Growth Strategy Consultation" : (resourceRecord ? "Digital Resource Toolkit / Asset" : "Digital Growth Masterclass"));
@@ -2852,37 +3018,28 @@ router.get("/invoice/:paymentId", paymentRateLimiter, async (req, res) => {
     const paymentDate = paymentRecord?.created_at || bookingRecord?.created_at || resourceRecord?.created_at || new Date().toISOString();
 
     // 5. Handle Refunded Transaction => Issue / Retrieve Credit Note (Section 34 CGST Act)
-    if (rawStatus === "refunded" || req.query.type === "credit-note") {
+    const isCreditNoteRequested = forceCreditNote || req.query.type === "credit-note";
+    const isGatewayRefunded = Boolean(
+      rzpPayment &&
+      (String(rzpPayment.status || "").toLowerCase() === "refunded" || Number(rzpPayment.amount_refunded || 0) > 0)
+    );
+    const isLedgerRefunded =
+      rawStatus === "refunded" ||
+      Boolean(paymentRecord?.refund_id || paymentRecord?.credit_note_number);
+
+    if (rawStatus === "refunded" || isCreditNoteRequested) {
       let finalCreditNoteNumber = null;
       let existingCreditNoteRow = null;
 
-      const rawRefundId = String(
-        req.query.refundId ||
-        req.body?.refundId ||
-        paymentRecord?.refund_id ||
-        `rfnd_${cleanPayId}`
-      ).trim();
-
-      const rawRequestedAmount = req.query.refundAmount ?? req.body?.refundAmount;
-      const requestedRefundAmount = rawRequestedAmount !== undefined ? Number(rawRequestedAmount) : amount;
-
-      // F-01: Validate requested refund amount is a positive, finite number
-      if (isNaN(requestedRefundAmount) || !isFinite(requestedRefundAmount) || requestedRefundAmount <= 0) {
-        return res.status(400).json({
-          success: false,
-          error: `Invalid refund amount: "${rawRequestedAmount}". Refund amount must be a positive finite number greater than zero.`
-        });
-      }
-
-      // Check payment status is eligible for credit note/refund
+      // Reject explicitly ineligible statuses immediately
       if (["failed", "cancelled", "pending"].includes(rawStatus)) {
         return res.status(400).json({
           success: false,
-          error: `Cannot issue credit note for transaction with status '${rawStatus}'. Only captured or settled payments can be refunded.`
+          error: `Cannot issue credit note for transaction with status '${rawStatus}'. Only verified refunded or settled payments can generate credit notes.`
         });
       }
 
-      // F-01: Check cumulative credit notes against original payment amount
+      // Query existing credit notes first to support safe retrieval without unauthorized minting
       let priorCreditNotes = [];
       try {
         const { data: priorCns } = await supabaseServer
@@ -2894,11 +3051,79 @@ router.get("/invoice/:paymentId", paymentRateLimiter, async (req, res) => {
         console.warn("[Credit Note] Could not fetch prior credit notes:", e.message);
       }
 
+      const hasPriorCreditNote = priorCreditNotes.length > 0;
+
+      // If not already marked refunded on ledger/gateway/prior credit notes, verify underlying capture AND require admin privilege to mint
+      if (!isLedgerRefunded && !isGatewayRefunded && !hasPriorCreditNote) {
+        const authCheckForCreditNote = verifyInvoicePaymentAuthorization({
+          paymentRecord,
+          bookingRecord,
+          resourceRecord,
+          rzpPayment
+        });
+
+        if (!authCheckForCreditNote.authorized) {
+          return res.status(authCheckForCreditNote.statusCode || 400).json({
+            success: false,
+            error: authCheckForCreditNote.error
+          });
+        }
+
+        if (!isAdmin) {
+          return res.status(403).json({
+            success: false,
+            code: "CREDIT_NOTE_NOT_AUTHORIZED",
+            error: "Forbidden: Credit note generation requires a verified refund on the payment ledger or gateway."
+          });
+        }
+      }
+
+      const requestedRefundIdParam = req.query.refundId || req.body?.refundId;
+      const rawRefundId = String(
+        (isAdmin || isGatewayRefunded || hasPriorCreditNote ? requestedRefundIdParam : null) ||
+        paymentRecord?.refund_id ||
+        `rfnd_${cleanPayId}`
+      ).trim();
+
+      const rawRequestedAmount = (isAdmin || isGatewayRefunded) ? (req.query.refundAmount ?? req.body?.refundAmount) : undefined;
+      const gatewayRefundedRupees = isGatewayRefunded && Number(rzpPayment?.amount_refunded || 0) > 0
+        ? Number((Number(rzpPayment.amount_refunded) / 100).toFixed(2))
+        : null;
+      const requestedRefundAmount = rawRequestedAmount !== undefined
+        ? Number(rawRequestedAmount)
+        : (gatewayRefundedRupees || amount);
+
+      // F-01: Validate requested refund amount is a positive, finite number
+      if (isNaN(requestedRefundAmount) || !isFinite(requestedRefundAmount) || requestedRefundAmount <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid refund amount: "${rawRequestedAmount}". Refund amount must be a positive finite number greater than zero.`
+        });
+      }
+
       // Check if refund_id was already processed (Idempotency)
       const existingForRefundId = priorCreditNotes.find(cn => cn.refund_id === rawRefundId);
       if (existingForRefundId) {
         existingCreditNoteRow = existingForRefundId;
         finalCreditNoteNumber = existingForRefundId.credit_note_number;
+      } else if (!isAdmin && !isLedgerRefunded && !isGatewayRefunded && hasPriorCreditNote) {
+        // Non-admin user on a partially refunded payment can retrieve an existing credit note, never mint a new unverified one
+        if (requestedRefundIdParam) {
+          return res.status(403).json({
+            success: false,
+            code: "CREDIT_NOTE_NOT_AUTHORIZED",
+            error: "Forbidden: Cannot issue a new credit note without a verified refund."
+          });
+        }
+        existingCreditNoteRow = priorCreditNotes[0];
+        finalCreditNoteNumber = priorCreditNotes[0].credit_note_number;
+      }
+
+      if (!isAdmin && isGatewayRefunded && gatewayRefundedRupees !== null && requestedRefundAmount > gatewayRefundedRupees) {
+        return res.status(400).json({
+          success: false,
+          error: `Requested refund amount ₹${requestedRefundAmount} exceeds gateway verified refunded amount ₹${gatewayRefundedRupees}.`
+        });
       }
 
       const priorRefundTotal = priorCreditNotes
@@ -3061,34 +3286,21 @@ router.get("/invoice/:paymentId", paymentRateLimiter, async (req, res) => {
     // 6. Payment Security Verification:
     // Reject pending, failed, cancelled, or unverified transactions
     // Enforces actual gateway capture: pay_ prefix alone is NOT sufficient proof
-    if (rzpPayment && rzpPayment.status) {
-      if (rzpPayment.status !== "captured") {
-        return res.status(400).json({
-          success: false,
-          error: `Cannot generate tax invoice: Gateway payment status is '${rzpPayment.status}'. Invoices can only be issued for fully captured payments.`
-        });
-      }
-    }
+    const authCheck = verifyInvoicePaymentAuthorization({
+      paymentRecord,
+      bookingRecord,
+      resourceRecord,
+      rzpPayment
+    });
 
-    const isCaptured =
-      rawStatus === "captured" ||
-      rawStatus === "paid" ||
-      rawStatus === "confirmed" ||
-      rawStatus === "completed" ||
-      (rzpPayment && rzpPayment.status === "captured") ||
-      (rawStatus === "active" && Boolean(
-        paymentRecord?.status === "captured" ||
-        paymentRecord?.status === "paid" ||
-        (rzpPayment && rzpPayment.status === "captured") ||
-        (resourceRecord && resourceRecord.payment_verified === true)
-      ));
-
-    if (!isCaptured) {
-      return res.status(400).json({
+    if (!authCheck.authorized) {
+      return res.status(authCheck.statusCode || 400).json({
         success: false,
-        error: `Cannot generate tax invoice: Payment is not verified or captured (current status: ${rawStatus || "unverified"}).`
+        error: authCheck.error
       });
     }
+
+    const isCaptured = authCheck.isCaptured;
 
     // 7. Atomic Invoice Sequence Assignment & Persistence
     // Preserves pre-existing invoice numbers across payments, resource_purchases, and bookings
@@ -3099,7 +3311,7 @@ router.get("/invoice/:paymentId", paymentRateLimiter, async (req, res) => {
       null;
 
     // If paymentRecord is missing (e.g. historical or guest resource checkout), create the authoritative ledger row
-    if (!paymentRecord && supabaseServer && (String(cleanPayId).startsWith("pay_") || String(cleanOrderId).startsWith("order_"))) {
+    if (!paymentRecord && isCaptured && supabaseServer && (String(cleanPayId).startsWith("pay_") || String(cleanOrderId).startsWith("order_"))) {
       try {
         const { data: createdPayment } = await supabaseServer
           .from("payments")
@@ -3233,6 +3445,10 @@ router.get("/invoice/:paymentId", paymentRateLimiter, async (req, res) => {
     console.error("[Invoice Endpoint] Error generating invoice:", err);
     return res.status(500).json({ success: false, error: "Internal server error generating tax invoice." });
   }
+}
+
+router.get("/invoice/:paymentId", paymentRateLimiter, (req, res) => {
+  return handleInvoiceOrCreditNoteRequest(req, res);
 });
 
 /**
@@ -3240,8 +3456,7 @@ router.get("/invoice/:paymentId", paymentRateLimiter, async (req, res) => {
  * Explicit endpoint for Section 34 CGST Act Credit Note generation.
  */
 router.get("/credit-note/:paymentId", paymentRateLimiter, (req, res) => {
-  req.query.type = "credit-note";
-  return router.handle(req, res);
+  return handleInvoiceOrCreditNoteRequest(req, res, { forceCreditNote: true });
 });
 
 /**

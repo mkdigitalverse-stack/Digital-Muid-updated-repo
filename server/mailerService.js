@@ -15,6 +15,7 @@ import { getSupabaseServerClient } from "./supabaseServer.js";
 import { generateAuthoritativeInvoicePdf } from "./invoiceService.js";
 import { generateConsultationIcsBuffer } from "./calendarService.js";
 import { assertSideEffectAllowed } from "./developmentSafetyGate.js";
+import { tryGenerateSignedInvoiceToken, buildSignedInvoiceUrl } from "./invoiceToken.js";
 
 // In-memory deduplication set to block concurrent duplicate requests (e.g. concurrent webhook + client verify)
 const inMemorySentCache = new Map();
@@ -428,6 +429,135 @@ export async function sendCourseAccessEmail({
  * @param {string} params.paymentId - Razorpay payment ID
  * @returns {Promise<{ success: boolean, skipped?: boolean, messageId?: string, error?: string }>}
  */
+export function buildConsultationConfirmationEmailHtml({
+  customerName = "Valued Client",
+  bookingCode,
+  bookingDate,
+  bookingTime,
+  durationMinutes = 30,
+  meetUrl = "https://meet.google.com",
+  primaryChallenge = "Business Growth Strategy",
+  amount,
+  currency = "INR",
+  paymentId,
+  invoiceToken = null
+}) {
+  const effectiveToken = invoiceToken || tryGenerateSignedInvoiceToken(paymentId, 7 * 24 * 60 * 60 * 1000);
+  const signedInvoiceUrl = effectiveToken
+    ? buildSignedInvoiceUrl(paymentId, effectiveToken, "https://digitalmuid.in")
+    : null;
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Consultation Booking Confirmed</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 32px 16px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+          <!-- Header -->
+          <tr>
+            <td style="background-color: #0b132b; padding: 32px; text-align: left; border-bottom: 3px solid #ff6b00;">
+              <span style="color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">DIGITAL<span style="color: #ff6b00;">MUID</span></span>
+              <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Strategic Growth Advisory · Powered by MK Digitalverse</p>
+            </td>
+          </tr>
+          <!-- Body -->
+          <tr>
+            <td style="padding: 36px 32px;">
+              <div style="display: inline-block; padding: 4px 12px; background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 9999px; color: #047857; font-size: 12px; font-weight: 700; text-transform: uppercase; margin-bottom: 16px;">
+                Payment Verified · Booking Confirmed
+              </div>
+              <h1 style="margin: 0 0 16px 0; font-size: 24px; font-weight: 800; color: #0f172a; line-height: 1.3;">
+                Your Consultation is Confirmed, ${customerName}!
+              </h1>
+              <p style="margin: 0 0 24px 0; font-size: 15px; line-height: 1.6; color: #475569;">
+                Your 1-on-1 strategic growth session has been locked into our calendar. An official calendar invitation (.ics) and tax receipt are attached to this email.
+              </p>
+
+              <!-- Appointment Schedule Card -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 28px; padding: 20px;">
+                <tr>
+                  <td style="padding: 8px 12px; font-size: 13px; color: #64748b;">Booking Reference:</td>
+                  <td style="padding: 8px 12px; font-size: 14px; font-weight: 800; color: #ff6b00; text-align: right; font-family: monospace;">${bookingCode}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 12px; font-size: 13px; color: #64748b;">Date:</td>
+                  <td style="padding: 8px 12px; font-size: 14px; font-weight: 700; color: #0f172a; text-align: right;">${bookingDate}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 12px; font-size: 13px; color: #64748b;">Time:</td>
+                  <td style="padding: 8px 12px; font-size: 14px; font-weight: 700; color: #0f172a; text-align: right;">${bookingTime} IST (${durationMinutes} Minutes)</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 12px; font-size: 13px; color: #64748b;">Platform:</td>
+                  <td style="padding: 8px 12px; font-size: 13px; font-weight: 700; color: #1877f2; text-align: right;">Google Meet HD</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 12px; font-size: 13px; color: #64748b;">Total Paid (incl. 18% GST):</td>
+                  <td style="padding: 8px 12px; font-size: 14px; font-weight: 800; color: #059669; text-align: right;">₹${amount} ${currency}</td>
+                </tr>
+              </table>
+
+              <!-- Google Meet CTA -->
+              ${meetUrl ? `
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px;">
+                <tr>
+                  <td align="center">
+                    <a href="${meetUrl}" style="display: inline-block; padding: 14px 32px; background-color: #1877f2; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 700; border-radius: 10px; box-shadow: 0 4px 6px -1px rgba(24,119,242,0.3);">
+                      Open Google Meet Room &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              ` : ""}
+
+              ${signedInvoiceUrl ? `
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 28px;">
+                <tr>
+                  <td align="center">
+                    <a href="${signedInvoiceUrl}" style="display: inline-block; padding: 10px 22px; background-color: #f8fafc; color: #0f172a; border: 1px solid #cbd5e1; text-decoration: none; font-size: 13px; font-weight: 600; border-radius: 8px;">
+                      Download Official GST Invoice (PDF)
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              ` : ""}
+
+              <!-- Preparation Checklist -->
+              <h3 style="margin: 0 0 12px 0; font-size: 15px; font-weight: 700; color: #0f172a;">How to prepare for your session:</h3>
+              <ul style="margin: 0 0 24px 0; padding-left: 20px; font-size: 14px; line-height: 1.6; color: #475569;">
+                <li style="margin-bottom: 6px;"><strong>Add to Calendar:</strong> Open the attached <code>.ics</code> file to immediately sync this meeting with Google Calendar, Outlook, or Apple Calendar.</li>
+                <li style="margin-bottom: 6px;"><strong>Primary Focus:</strong> We will be reviewing: <em>"${primaryChallenge}"</em>.</li>
+                <li style="margin-bottom: 6px;"><strong>Metrics Ready:</strong> Please have your current ad accounts, website analytics, or funnel metrics accessible if you would like a live audit during the call.</li>
+              </ul>
+
+              <div style="background-color: #f1f5f9; border-radius: 8px; padding: 14px 16px; font-size: 13px; color: #64748b; line-height: 1.5;">
+                <strong>Attached:</strong> Official Tax Invoice / Payment Receipt (PDF) and Calendar Invitation (.ics).
+              </div>
+            </td>
+          </tr>
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 24px 32px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 12px; color: #94a3b8; line-height: 1.5;">
+              <p style="margin: 0 0 6px 0;">Need to reschedule? Please email <a href="mailto:support@digitalmuid.in" style="color: #ff6b00; text-decoration: none;">support@digitalmuid.in</a> at least 24 hours prior to your scheduled time.</p>
+              <p style="margin: 0;">&copy; ${new Date().getFullYear()} DigitalMUID (Powered by MK Digitalverse). All rights reserved.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`;
+}
+
 export async function sendConsultationConfirmationEmail({
   to,
   customerName = "Valued Client",
@@ -442,7 +572,8 @@ export async function sendConsultationConfirmationEmail({
   baseAmount,
   gstAmount,
   orderId,
-  paymentId
+  paymentId,
+  invoiceToken = null
 }) {
   const templateType = "consultation_confirmation";
   const recipient = (to || "").trim();
@@ -502,103 +633,19 @@ export async function sendConsultationConfirmationEmail({
     console.error("[Mailer Service] Failed to generate consultation .ics calendar buffer:", icsErr);
   }
 
-  const emailHtml = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Consultation Booking Confirmed</title>
-</head>
-<body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; padding: 32px 16px;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-          <!-- Header -->
-          <tr>
-            <td style="background-color: #0b132b; padding: 32px; text-align: left; border-bottom: 3px solid #ff6b00;">
-              <span style="color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">DIGITAL<span style="color: #ff6b00;">MUID</span></span>
-              <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">Strategic Growth Advisory · Powered by MK Digitalverse</p>
-            </td>
-          </tr>
-          <!-- Body -->
-          <tr>
-            <td style="padding: 36px 32px;">
-              <div style="display: inline-block; padding: 4px 12px; background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 9999px; color: #047857; font-size: 12px; font-weight: 700; text-transform: uppercase; margin-bottom: 16px;">
-                Payment Verified · Booking Confirmed
-              </div>
-              <h1 style="margin: 0 0 16px 0; font-size: 24px; font-weight: 800; color: #0f172a; line-height: 1.3;">
-                Your Consultation is Confirmed, ${customerName}!
-              </h1>
-              <p style="margin: 0 0 24px 0; font-size: 15px; line-height: 1.6; color: #475569;">
-                Your 1-on-1 strategic growth session has been locked into our calendar. An official calendar invitation (.ics) and tax receipt are attached to this email.
-              </p>
-
-              <!-- Appointment Schedule Card -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 28px; padding: 20px;">
-                <tr>
-                  <td style="padding: 8px 12px; font-size: 13px; color: #64748b;">Booking Reference:</td>
-                  <td style="padding: 8px 12px; font-size: 14px; font-weight: 800; color: #ff6b00; text-align: right; font-family: monospace;">${bookingCode}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 12px; font-size: 13px; color: #64748b;">Date:</td>
-                  <td style="padding: 8px 12px; font-size: 14px; font-weight: 700; color: #0f172a; text-align: right;">${bookingDate}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 12px; font-size: 13px; color: #64748b;">Time:</td>
-                  <td style="padding: 8px 12px; font-size: 14px; font-weight: 700; color: #0f172a; text-align: right;">${bookingTime} IST (${durationMinutes} Minutes)</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 12px; font-size: 13px; color: #64748b;">Platform:</td>
-                  <td style="padding: 8px 12px; font-size: 13px; font-weight: 700; color: #1877f2; text-align: right;">Google Meet HD</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 12px; font-size: 13px; color: #64748b;">Total Paid (incl. 18% GST):</td>
-                  <td style="padding: 8px 12px; font-size: 14px; font-weight: 800; color: #059669; text-align: right;">₹${amount} ${currency}</td>
-                </tr>
-              </table>
-
-              <!-- Google Meet CTA -->
-              ${meetUrl ? `
-              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 28px;">
-                <tr>
-                  <td align="center">
-                    <a href="${meetUrl}" style="display: inline-block; padding: 14px 32px; background-color: #1877f2; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 700; border-radius: 10px; box-shadow: 0 4px 6px -1px rgba(24,119,242,0.3);">
-                      Open Google Meet Room &rarr;
-                    </a>
-                  </td>
-                </tr>
-              </table>
-              ` : ""}
-
-              <!-- Preparation Checklist -->
-              <h3 style="margin: 0 0 12px 0; font-size: 15px; font-weight: 700; color: #0f172a;">How to prepare for your session:</h3>
-              <ul style="margin: 0 0 24px 0; padding-left: 20px; font-size: 14px; line-height: 1.6; color: #475569;">
-                <li style="margin-bottom: 6px;"><strong>Add to Calendar:</strong> Open the attached <code>.ics</code> file to immediately sync this meeting with Google Calendar, Outlook, or Apple Calendar.</li>
-                <li style="margin-bottom: 6px;"><strong>Primary Focus:</strong> We will be reviewing: <em>"${primaryChallenge}"</em>.</li>
-                <li style="margin-bottom: 6px;"><strong>Metrics Ready:</strong> Please have your current ad accounts, website analytics, or funnel metrics accessible if you would like a live audit during the call.</li>
-              </ul>
-
-              <div style="background-color: #f1f5f9; border-radius: 8px; padding: 14px 16px; font-size: 13px; color: #64748b; line-height: 1.5;">
-                <strong>Attached:</strong> Official Tax Invoice / Payment Receipt (PDF) and Calendar Invitation (.ics).
-              </div>
-            </td>
-          </tr>
-          <!-- Footer -->
-          <tr>
-            <td style="background-color: #f8fafc; padding: 24px 32px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 12px; color: #94a3b8; line-height: 1.5;">
-              <p style="margin: 0 0 6px 0;">Need to reschedule? Please email <a href="mailto:support@digitalmuid.in" style="color: #ff6b00; text-decoration: none;">support@digitalmuid.in</a> at least 24 hours prior to your scheduled time.</p>
-              <p style="margin: 0;">&copy; ${new Date().getFullYear()} DigitalMUID (Powered by MK Digitalverse). All rights reserved.</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-`;
+  const emailHtml = buildConsultationConfirmationEmailHtml({
+    customerName,
+    bookingCode,
+    bookingDate,
+    bookingTime,
+    durationMinutes,
+    meetUrl,
+    primaryChallenge,
+    amount,
+    currency,
+    paymentId,
+    invoiceToken
+  });
 
   const attachments = [];
   if (invoiceBuffer) {
@@ -695,59 +742,24 @@ export async function sendConsultationConfirmationEmail({
  * @param {string} params.paymentId - Razorpay payment ID
  * @returns {Promise<{ success: boolean, skipped?: boolean, messageId?: string, error?: string }>}
  */
-export async function sendResourceDeliveryEmail({
-  to,
+export function buildResourceDeliveryEmailHtml({
   customerName = "Valued Customer",
   resourceTitle,
   resourceId,
   amount,
   currency = "INR",
   orderId,
-  paymentId
+  paymentId,
+  invoiceToken = null
 }) {
-  const templateType = "resource_delivery";
-  const recipient = (to || "").trim();
-
-  if (!recipient || !recipient.includes("@")) {
-    console.warn(`[Mailer Service] Skipped resource email: Invalid recipient address "${recipient}".`);
-    await recordEmailLog({
-      paymentId,
-      orderId,
-      recipientEmail: recipient || "unknown",
-      templateType,
-      status: "failed",
-      errorMessage: "Recipient email is missing or malformed."
-    });
-    return { success: false, error: "Invalid recipient email address." };
-  }
-
-  // Idempotency Check
-  if (await hasAlreadySent(paymentId, templateType)) {
-    console.log(`[Mailer Service] Deduplicated: Resource delivery email already sent for payment ${paymentId}.`);
-    return { success: true, skipped: true, reason: "ALREADY_SENT" };
-  }
-
-  // Generate authoritative tax invoice PDF buffer
-  let invoiceBuffer = null;
-  try {
-    invoiceBuffer = generateAuthoritativeInvoicePdf({
-      paymentId,
-      orderId,
-      customerName,
-      customerEmail: recipient,
-      itemTitle: resourceTitle,
-      itemType: "resource",
-      amount,
-      currency
-    });
-  } catch (pdfErr) {
-    console.error("[Mailer Service] Failed to generate resource invoice PDF:", pdfErr);
-  }
-
   const accessUrl = `https://digitalmuid.in/resources/thank-you?resourceId=${encodeURIComponent(resourceId)}&orderId=${encodeURIComponent(orderId)}&paymentId=${encodeURIComponent(paymentId)}`;
   const dashboardUrl = "https://digitalmuid.in/dashboard";
+  const effectiveToken = invoiceToken || tryGenerateSignedInvoiceToken(paymentId, 7 * 24 * 60 * 60 * 1000);
+  const signedInvoiceUrl = effectiveToken
+    ? buildSignedInvoiceUrl(paymentId, effectiveToken, "https://digitalmuid.in")
+    : null;
 
-  const emailHtml = `
+  return `
 <!DOCTYPE html>
 <html>
 <head>
@@ -797,7 +809,7 @@ export async function sendResourceDeliveryEmail({
               </table>
 
               <!-- Action CTA -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 28px;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px;">
                 <tr>
                   <td align="center">
                     <a href="${accessUrl}" style="display: inline-block; padding: 14px 32px; background-color: #ff6b00; color: #ffffff; text-decoration: none; font-size: 15px; font-weight: 700; border-radius: 10px; box-shadow: 0 4px 6px -1px rgba(255,107,0,0.3);">
@@ -806,6 +818,18 @@ export async function sendResourceDeliveryEmail({
                   </td>
                 </tr>
               </table>
+
+              ${signedInvoiceUrl ? `
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 28px;">
+                <tr>
+                  <td align="center">
+                    <a href="${signedInvoiceUrl}" style="display: inline-block; padding: 10px 22px; background-color: #f8fafc; color: #0f172a; border: 1px solid #cbd5e1; text-decoration: none; font-size: 13px; font-weight: 600; border-radius: 8px;">
+                      Download Official GST Invoice (PDF)
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              ` : ""}
 
               <p style="margin: 0 0 24px 0; font-size: 14px; line-height: 1.6; color: #475569;">
                 You can also re-download this resource anytime by logging into your student dashboard at <a href="${dashboardUrl}" style="color: #1877f2; text-decoration: none;">digitalmuid.in/dashboard</a> with this email address.
@@ -830,6 +854,68 @@ export async function sendResourceDeliveryEmail({
 </body>
 </html>
 `;
+}
+
+export async function sendResourceDeliveryEmail({
+  to,
+  customerName = "Valued Customer",
+  resourceTitle,
+  resourceId,
+  amount,
+  currency = "INR",
+  orderId,
+  paymentId,
+  invoiceToken = null
+}) {
+  const templateType = "resource_delivery";
+  const recipient = (to || "").trim();
+
+  if (!recipient || !recipient.includes("@")) {
+    console.warn(`[Mailer Service] Skipped resource email: Invalid recipient address "${recipient}".`);
+    await recordEmailLog({
+      paymentId,
+      orderId,
+      recipientEmail: recipient || "unknown",
+      templateType,
+      status: "failed",
+      errorMessage: "Recipient email is missing or malformed."
+    });
+    return { success: false, error: "Invalid recipient email address." };
+  }
+
+  // Idempotency Check
+  if (await hasAlreadySent(paymentId, templateType)) {
+    console.log(`[Mailer Service] Deduplicated: Resource delivery email already sent for payment ${paymentId}.`);
+    return { success: true, skipped: true, reason: "ALREADY_SENT" };
+  }
+
+  // Generate authoritative tax invoice PDF buffer
+  let invoiceBuffer = null;
+  try {
+    invoiceBuffer = generateAuthoritativeInvoicePdf({
+      paymentId,
+      orderId,
+      customerName,
+      customerEmail: recipient,
+      itemTitle: resourceTitle,
+      itemType: "resource",
+      amount,
+      currency
+    });
+  } catch (pdfErr) {
+    console.error("[Mailer Service] Failed to generate resource invoice PDF:", pdfErr);
+  }
+
+  const emailHtml = buildResourceDeliveryEmailHtml({
+    customerName,
+    resourceTitle,
+    resourceId,
+    amount,
+    currency,
+    orderId,
+    paymentId,
+    invoiceToken
+  });
 
   const attachments = [];
   if (invoiceBuffer) {
