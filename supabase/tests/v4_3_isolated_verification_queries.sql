@@ -25,9 +25,24 @@
 --    ONLY and DO NOT BY THEMSELVES GUARANTEE SAFETY. Always verify target host,
 --    port, and PGDATABASE/connection URI before invoking psql.
 -- 4. NEVER apply fresh and legacy fixtures to the same database.
--- 5. Single-session SQL CANNOT test true concurrent locking/races; Section 5
---    provides the mandatory two-session concurrency test plan.
+-- 5. Single-session automated tests (Sections 1–4) CANNOT observe lock waits,
+--    uncommitted MVCC snapshots, or concurrent unique-index collisions; Section 5
+--    provides the SEPARATE MANUAL two-session concurrency test plan.
 -- 6. NOT EXECUTED automatically.
+-- 7. LOCAL DOCKER BRIDGE OPT-IN (Optional, disabled by default):
+--    By default ONLY Unix domain sockets or loopback (127.0.0.0/8, ::1) pass;
+--    private RFC1918 VPC/RDS/cloud IPs are REJECTED fail-closed.
+--    For local Docker bridge ONLY, pass BOTH flags explicitly:
+--      -v allow_local_docker_bridge=true -v local_docker_cidr=172.17.0.0/16
+--
+-- SCOPE & NON-CLAIMS DISCLOSURE:
+-- Passing pre_a, post_a, post_b, and Section 5 manual concurrency tests verifies
+-- PostgreSQL schema constraints, sequences, SECURITY DEFINER functions, indexes,
+-- RLS, SQL grants, triggers, and credit-note accounting limits ONLY. PostgreSQL
+-- verification DOES NOT prove live Razorpay gateway capture/refund calls, webhook
+-- signature verification or HTTP endpoints (server/paymentRoutes.js), signed
+-- invoice/asset token authorization (invoiceToken.js), email dispatch, or
+-- browser/UI integration.
 -- ==============================================================================
 
 \set ON_ERROR_STOP on
@@ -42,62 +57,277 @@
 
 SELECT pg_catalog.set_config('digitalmuid.verify_stage', :'verify_stage', false) AS configured_verify_stage;
 
+\if :{?allow_local_docker_bridge}
+  SELECT pg_catalog.set_config('digitalmuid.allow_local_docker_bridge', :'allow_local_docker_bridge', false) AS docker_bridge_opt_in;
+\else
+  SELECT pg_catalog.set_config('digitalmuid.allow_local_docker_bridge', 'false', false) AS docker_bridge_opt_in;
+\endif
+
+\if :{?local_docker_cidr}
+  SELECT pg_catalog.set_config('digitalmuid.local_docker_cidr', :'local_docker_cidr', false) AS docker_bridge_cidr;
+\else
+  SELECT pg_catalog.set_config('digitalmuid.local_docker_cidr', '', false) AS docker_bridge_cidr;
+\endif
+
 -- ==============================================================================
 -- 0. DATABASE IDENTITY & ENVIRONMENT SAFEGUARDS (Runs on every stage)
 -- NOTE: Defense-in-depth only; does NOT replace operator verification of psql URI.
 -- ==============================================================================
 DO $$
 DECLARE
-  v_db_name TEXT := current_database();
-  v_cur_user TEXT := current_user;
-  v_sess_user TEXT := session_user;
-  v_srv_addr INET := inet_server_addr();
-  v_srv_port INTEGER := inet_server_port();
-  v_cluster TEXT := COALESCE(NULLIF(current_setting('cluster_name', true), ''), '<unset>');
+  v_db_name TEXT := NULLIF(pg_catalog.btrim(pg_catalog.current_database()::text), '');
+  v_cur_user TEXT := NULLIF(pg_catalog.btrim(current_user::text), '');
+  v_sess_user TEXT := NULLIF(pg_catalog.btrim(session_user::text), '');
+  v_srv_version TEXT := NULLIF(pg_catalog.btrim(pg_catalog.version()), '');
+  v_srv_addr INET := pg_catalog.inet_server_addr();
+  v_srv_port INTEGER := pg_catalog.inet_server_port();
+  v_client_addr INET;
+  v_backend_type TEXT;
+  v_cluster TEXT := COALESCE(NULLIF(pg_catalog.btrim(pg_catalog.current_setting('cluster_name', true)), ''), '<unset>');
   v_stage TEXT := pg_catalog.current_setting('digitalmuid.verify_stage', true);
+  v_allow_docker TEXT := pg_catalog.current_setting('digitalmuid.allow_local_docker_bridge', true);
+  v_docker_cidr_txt TEXT := NULLIF(pg_catalog.btrim(pg_catalog.current_setting('digitalmuid.local_docker_cidr', true)), '');
+  v_docker_cidr CIDR := NULL;
+  v_cur_rolsuper BOOLEAN;
+  v_cur_canlogin BOOLEAN;
+  v_role_spec RECORD;
+  v_role_row RECORD;
 BEGIN
+  -- 0A. Fail closed if required session or server identity cannot be established
+  IF v_db_name IS NULL OR v_cur_user IS NULL OR v_sess_user IS NULL OR v_srv_version IS NULL THEN
+    RAISE EXCEPTION 'SAFETY HALT: Cannot establish required PostgreSQL identity (db=%, current_user=%, session_user=%, version=%).',
+      COALESCE(v_db_name, '<null>'), COALESCE(v_cur_user, '<null>'), COALESCE(v_sess_user, '<null>'), COALESCE(v_srv_version, '<null>');
+  END IF;
+
+  IF v_srv_version !~ '^PostgreSQL ' THEN
+    RAISE EXCEPTION 'SAFETY HALT: Unexpected server version "%".', v_srv_version;
+  END IF;
+
   IF v_stage IS NULL OR v_stage NOT IN ('pre_a', 'post_a', 'post_b') THEN
     RAISE EXCEPTION 'USAGE ERROR: Invalid verify_stage=%. Expected pre_a, post_a, or post_b.', COALESCE(v_stage, '<null>');
   END IF;
 
-  -- 0A. Require explicit disposable test database name (rejects Supabase default 'postgres' DB)
+  IF v_allow_docker IS NULL OR v_allow_docker NOT IN ('true', 'false') THEN
+    RAISE EXCEPTION 'SAFETY HALT: Transport policy (digitalmuid.allow_local_docker_bridge=%) missing or invalid. Run via psql with ON_ERROR_STOP=1.',
+      COALESCE(v_allow_docker, '<null>');
+  END IF;
+
+  SELECT sa.client_addr, sa.backend_type
+  INTO v_client_addr, v_backend_type
+  FROM pg_catalog.pg_stat_activity sa
+  WHERE sa.pid = pg_catalog.pg_backend_pid();
+
+  IF NOT FOUND OR v_backend_type IS NULL OR v_backend_type <> 'client backend' THEN
+    RAISE EXCEPTION 'SAFETY HALT: Cannot verify current backend identity in pg_catalog.pg_stat_activity (pid=%).',
+      pg_catalog.pg_backend_pid();
+  END IF;
+
+  -- 0B. Require explicit disposable test database name (rejects Supabase default 'postgres' DB)
   IF v_db_name NOT IN ('digitalmuid_v43_fresh_test', 'digitalmuid_v43_legacy_test') THEN
     RAISE EXCEPTION 'SAFETY HALT: Refusing execution on database "%". Allowed isolated test databases: digitalmuid_v43_fresh_test, digitalmuid_v43_legacy_test.', v_db_name;
   END IF;
 
-  -- 0B. Reject known hosted Supabase namespaces, roles, or project identifiers
-  IF EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'supabase_migrations')
+  -- 0C. Reject known hosted Supabase namespaces, roles, or project identifiers
+  IF EXISTS (
+       SELECT 1 FROM pg_catalog.pg_namespace
+       WHERE nspname IN (
+         'supabase_migrations', 'supabase_functions', 'realtime',
+         'storage', 'vault', 'graphql', 'graphql_public', 'pgsodium'
+       )
+     )
      OR EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles
-       WHERE rolname IN ('supabase_auth_admin', 'supabase_storage_admin', 'supabase_realtime_admin', 'authenticator', 'pgbouncer')
+       WHERE rolname IN (
+         'supabase_auth_admin', 'supabase_storage_admin', 'supabase_realtime_admin',
+         'supabase_read_only_user', 'supabase_replication_admin', 'authenticator',
+         'pgbouncer', 'cli_login_postgres'
+       )
      )
-     OR v_db_name ~* 'kpuxtsworzkueyffjaaz'
+     OR v_db_name ~* 'kpuxtsworzkueyffjaaz|supabase'
      OR v_cur_user ~* 'kpuxtsworzkueyffjaaz'
      OR v_sess_user ~* 'kpuxtsworzkueyffjaaz'
      OR v_cluster ~* 'supabase|kpuxtsworzkueyffjaaz' THEN
     RAISE EXCEPTION 'SAFETY HALT: Hosted Supabase environment or forbidden project reference detected (db=%, user=%, cluster=%).', v_db_name, v_cur_user, v_cluster;
   END IF;
 
-  -- 0C. Server network identity check: reject public/non-local routable server IPs
-  --     (NULL = local Unix socket; loopback / RFC1918 permitted for local Docker/VM Postgres)
-  IF v_srv_addr IS NOT NULL
-     AND NOT (
-       v_srv_addr << '127.0.0.0/8'::inet
-       OR v_srv_addr << '::1/128'::inet
-       OR v_srv_addr << '10.0.0.0/8'::inet
-       OR v_srv_addr << '172.16.0.0/12'::inet
-       OR v_srv_addr << '192.168.0.0/16'::inet
-     ) THEN
-    RAISE EXCEPTION 'SAFETY HALT: Non-local server IP %:% rejected for isolated verification.', v_srv_addr, v_srv_port;
+  -- 0D. Strict server identity check (Unix socket or loopback ONLY; no automatic RFC1918 trust)
+  IF (v_srv_addr IS NULL) IS DISTINCT FROM (v_srv_port IS NULL) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Inconsistent server endpoint identity (addr=%, port=%).',
+      COALESCE(v_srv_addr::text, '<null>'), COALESCE(v_srv_port::text, '<null>');
   END IF;
 
-  -- 0D. Verify current database user has sufficient privilege (and is not anon/authenticated)
-  IF v_cur_user IN ('anon', 'authenticated') THEN
+  IF v_srv_addr IS NULL THEN
+    IF v_client_addr IS NOT NULL THEN
+      RAISE EXCEPTION 'SAFETY HALT: Inconsistent Unix socket identity (server addr NULL, client_addr=%).', v_client_addr;
+    END IF;
+  ELSE
+    IF v_srv_port < 1 OR v_srv_port > 65535 THEN
+      RAISE EXCEPTION 'SAFETY HALT: Invalid server TCP port %.', v_srv_port;
+    END IF;
+
+    IF v_srv_addr << '127.0.0.0/8'::inet OR v_srv_addr = '::1'::inet THEN
+      IF v_client_addr IS NULL OR NOT (v_client_addr << '127.0.0.0/8'::inet OR v_client_addr = '::1'::inet) THEN
+        RAISE EXCEPTION 'SAFETY HALT: Loopback server %:% received non-loopback client_addr %.',
+          v_srv_addr, v_srv_port, COALESCE(v_client_addr::text, '<null>');
+      END IF;
+    ELSIF v_allow_docker = 'true' THEN
+      IF v_docker_cidr_txt IS NULL THEN
+        RAISE EXCEPTION 'SAFETY HALT: allow_local_docker_bridge=true requires explicit -v local_docker_cidr=<CIDR> (e.g. 172.17.0.0/16).';
+      END IF;
+
+      BEGIN
+        v_docker_cidr := v_docker_cidr_txt::cidr;
+      EXCEPTION WHEN OTHERS THEN
+        RAISE EXCEPTION 'SAFETY HALT: Invalid local_docker_cidr "%" (%).', v_docker_cidr_txt, SQLERRM;
+      END;
+
+      IF pg_catalog.masklen(v_docker_cidr) < 16
+         OR NOT (
+           v_docker_cidr <<= '172.16.0.0/12'::inet
+           OR v_docker_cidr <<= '192.168.0.0/16'::inet
+           OR v_docker_cidr <<= '10.0.0.0/8'::inet
+         ) THEN
+        RAISE EXCEPTION 'SAFETY HALT: local_docker_cidr "%" must be an explicit RFC1918 subnet with prefix >= /16.', v_docker_cidr;
+      END IF;
+
+      IF NOT (v_srv_addr <<= v_docker_cidr) THEN
+        RAISE EXCEPTION 'SAFETY HALT: Server IP %:% is outside approved local_docker_cidr %.',
+          v_srv_addr, v_srv_port, v_docker_cidr;
+      END IF;
+
+      IF v_client_addr IS NULL
+         OR NOT (
+           v_client_addr << '127.0.0.0/8'::inet
+           OR v_client_addr = '::1'::inet
+           OR v_client_addr <<= v_docker_cidr
+         ) THEN
+        RAISE EXCEPTION 'SAFETY HALT: Docker bridge server %:% rejected non-local client_addr %.',
+          v_srv_addr, v_srv_port, COALESCE(v_client_addr::text, '<null>');
+      END IF;
+    ELSE
+      RAISE EXCEPTION 'SAFETY HALT: Server IP %:% is NOT Unix socket or loopback (127.0.0.0/8, ::1). Private RFC1918 IPs are blocked by default. For local Docker bridge only, pass -v allow_local_docker_bridge=true -v local_docker_cidr=<subnet/prefix>.',
+        v_srv_addr, v_srv_port;
+    END IF;
+  END IF;
+
+  -- 0E. Positively verify execution role permissions & role-switching capability (fail closed)
+  IF v_cur_user IN ('anon', 'authenticated', 'service_role') THEN
     RAISE EXCEPTION 'SAFETY HALT: Run verification as disposable local superuser/postgres role, not "%".', v_cur_user;
   END IF;
 
-  RAISE NOTICE 'ISOLATED ENV CHECK: db=%, stage=%, current_user=%, session_user=%, server=%:%, cluster=% (NOT a standalone safety guarantee).',
-    v_db_name, v_stage, v_cur_user, v_sess_user, COALESCE(v_srv_addr::text, 'unix-socket'), COALESCE(v_srv_port::text, 'local'), v_cluster;
+  SELECT r.rolsuper, r.rolcanlogin INTO v_cur_rolsuper, v_cur_canlogin
+  FROM pg_catalog.pg_roles r
+  WHERE r.rolname = v_cur_user;
+
+  IF NOT FOUND OR v_cur_canlogin IS DISTINCT FROM TRUE THEN
+    RAISE EXCEPTION 'SAFETY HALT: Execution role "%" missing or lacks LOGIN privilege.', v_cur_user;
+  END IF;
+
+  -- Validate fixture test roles exist with exact expected attributes
+  FOR v_role_spec IN
+    SELECT * FROM (
+      VALUES
+        ('anon',           FALSE, FALSE, FALSE),
+        ('authenticated',  FALSE, FALSE, FALSE),
+        ('service_role',   FALSE, FALSE, TRUE),
+        ('supabase_admin', FALSE, FALSE, TRUE)
+    ) AS t(role_name, exp_login, exp_super, exp_bypassrls)
+  LOOP
+    SELECT r.rolcanlogin, r.rolsuper, r.rolbypassrls
+    INTO v_role_row
+    FROM pg_catalog.pg_roles r
+    WHERE r.rolname = v_role_spec.role_name;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'SAFETY HALT: Required test role "%" does not exist. Run the isolated bootstrap/legacy fixture first.', v_role_spec.role_name;
+    END IF;
+
+    IF v_role_row.rolcanlogin IS DISTINCT FROM v_role_spec.exp_login
+       OR v_role_row.rolsuper IS DISTINCT FROM v_role_spec.exp_super
+       OR v_role_row.rolbypassrls IS DISTINCT FROM v_role_spec.exp_bypassrls THEN
+      RAISE EXCEPTION 'SAFETY HALT: Role "%" has incompatible attributes (login=%, super=%, bypassrls=%). Expected (%, %, %).',
+        v_role_spec.role_name,
+        v_role_row.rolcanlogin, v_role_row.rolsuper, v_role_row.rolbypassrls,
+        v_role_spec.exp_login, v_role_spec.exp_super, v_role_spec.exp_bypassrls;
+    END IF;
+  END LOOP;
+
+  -- Positively verify SET LOCAL ROLE capability required by Section 4D RLS/grant tests
+  IF NOT v_cur_rolsuper THEN
+    IF NOT (
+      pg_catalog.pg_has_role(v_cur_user, 'authenticated', 'MEMBER')
+      AND pg_catalog.pg_has_role(v_cur_user, 'anon', 'MEMBER')
+      AND pg_catalog.pg_has_role(v_cur_user, 'service_role', 'MEMBER')
+    ) THEN
+      RAISE EXCEPTION 'SAFETY HALT: Non-superuser execution role "%" lacks membership/SET privilege on anon/authenticated/service_role for Section 4D tests.',
+        v_cur_user;
+    END IF;
+  END IF;
+
+  BEGIN
+    SET LOCAL ROLE authenticated;
+    IF current_user::text IS DISTINCT FROM 'authenticated' THEN
+      RAISE EXCEPTION 'SET LOCAL ROLE authenticated did not switch current_user (got "%").', current_user::text;
+    END IF;
+    RESET ROLE;
+
+    SET LOCAL ROLE anon;
+    IF current_user::text IS DISTINCT FROM 'anon' THEN
+      RAISE EXCEPTION 'SET LOCAL ROLE anon did not switch current_user (got "%").', current_user::text;
+    END IF;
+    RESET ROLE;
+
+    IF current_user::text IS DISTINCT FROM v_cur_user THEN
+      RAISE EXCEPTION 'RESET ROLE did not restore "%", got "%".', v_cur_user, current_user::text;
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RESET ROLE;
+    RAISE EXCEPTION 'SAFETY HALT: Execution role "%" failed role-switching precheck (% [%]).',
+      v_cur_user, SQLERRM, SQLSTATE;
+  END;
+
+  -- Positively verify required table/function privileges for the requested verification stage
+  IF pg_catalog.to_regclass('public.payments') IS NULL THEN
+    RAISE EXCEPTION 'SAFETY HALT: public.payments table missing on "%". Initialize fixture before running verification.', v_db_name;
+  END IF;
+
+  IF NOT (
+    pg_catalog.has_table_privilege(v_cur_user, 'public.payments', 'SELECT')
+    AND pg_catalog.has_table_privilege(v_cur_user, 'public.payments', 'INSERT')
+    AND pg_catalog.has_table_privilege(v_cur_user, 'public.payments', 'UPDATE')
+  ) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Execution role "%" lacks SELECT/INSERT/UPDATE privileges on public.payments.', v_cur_user;
+  END IF;
+
+  IF v_stage IN ('post_a', 'post_b') THEN
+    IF pg_catalog.to_regclass('public.credit_notes') IS NULL
+       OR pg_catalog.to_regclass('public.student_id_seq') IS NULL
+       OR pg_catalog.to_regclass('public.enrollment_id_seq') IS NULL THEN
+      RAISE EXCEPTION 'SAFETY HALT: Required Phase A tables/sequences missing for verify_stage=%.', v_stage;
+    END IF;
+
+    IF NOT (
+      pg_catalog.has_table_privilege(v_cur_user, 'public.credit_notes', 'SELECT')
+      AND pg_catalog.has_sequence_privilege(v_cur_user, 'public.student_id_seq', 'SELECT')
+      AND pg_catalog.has_sequence_privilege(v_cur_user, 'public.enrollment_id_seq', 'SELECT')
+    ) THEN
+      RAISE EXCEPTION 'SAFETY HALT: Execution role "%" lacks SELECT privileges on public.credit_notes or Phase A sequences.', v_cur_user;
+    END IF;
+
+    IF pg_catalog.to_regprocedure('public.record_credit_note_with_limit(text,text,numeric,text,uuid,text,timestamp with time zone)') IS NULL
+       OR NOT pg_catalog.has_function_privilege(
+         v_cur_user,
+         'public.record_credit_note_with_limit(text,text,numeric,text,uuid,text,timestamp with time zone)',
+         'EXECUTE'
+       ) THEN
+      RAISE EXCEPTION 'SAFETY HALT: Execution role "%" lacks EXECUTE privilege on public.record_credit_note_with_limit.', v_cur_user;
+    END IF;
+  END IF;
+
+  RAISE NOTICE 'ISOLATED ENV CHECK PASSED: db=%, stage=%, current_user=%, superuser=%, session_user=%, server=%:%, client=%, docker_opt_in=%, cluster=% (PostgreSQL-only scope; does NOT prove HTTP/Razorpay/browser integration).',
+    v_db_name, v_stage, v_cur_user, v_cur_rolsuper, v_sess_user,
+    COALESCE(v_srv_addr::text, 'unix-socket'), COALESCE(v_srv_port::text, 'local'),
+    COALESCE(v_client_addr::text, 'unix-socket'), v_allow_docker, v_cluster;
 END $$;
 
 SELECT
@@ -161,46 +391,112 @@ ORDER BY c.conname;
 
 DO $$
 DECLARE
-  v_chk_valid BOOLEAN;
+  v_payments_oid OID := 'public.payments'::regclass;
+  v_status_attnum SMALLINT;
+  v_amount_attnum SMALLINT;
+  v_chk RECORD;
+  v_amt RECORD;
+  v_expected_status_regex CONSTANT TEXT :=
+    '^CHECK\s*\(\s*\(*\s*status(?:::text)?\s*(?:=\s*ANY\s*\(\s*\(*ARRAY\[\s*'
+    '''pending''(?:::text)?,\s*''created''(?:::text)?,\s*''authorized''(?:::text)?,\s*''captured''(?:::text)?,\s*''paid''(?:::text)?,\s*''completed''(?:::text)?,\s*''failed''(?:::text)?,\s*''cancelled''(?:::text)?,\s*''refunded''(?:::text)?\s*\]\)*\s*\)|IN\s*\(\s*'
+    '''pending''(?:::text)?,\s*''created''(?:::text)?,\s*''authorized''(?:::text)?,\s*''captured''(?:::text)?,\s*''paid''(?:::text)?,\s*''completed''(?:::text)?,\s*''failed''(?:::text)?,\s*''cancelled''(?:::text)?,\s*''refunded''(?:::text)?\s*\))\s*\)*\s*\)$';
+  v_expected_amt_name TEXT := CASE
+    WHEN current_database() = 'digitalmuid_v43_legacy_test' THEN 'chk_payments_amount_positive'
+    ELSE 'payments_amount_check'
+  END;
   v_legacy_cnt INTEGER;
-  v_amt_cnt INTEGER;
+  v_extra_status_cnt INTEGER;
+  v_user_notnull BOOLEAN;
+  v_status_default TEXT;
+  v_cn_nullable_cnt INTEGER;
 BEGIN
-  SELECT c.convalidated INTO v_chk_valid
-  FROM pg_catalog.pg_constraint c
-  JOIN pg_catalog.pg_class t ON t.oid = c.conrelid
-  JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
-  WHERE n.nspname = 'public' AND t.relname = 'payments' AND c.conname = 'chk_payments_status';
+  SELECT attnum INTO v_status_attnum
+  FROM pg_catalog.pg_attribute
+  WHERE attrelid = v_payments_oid AND attname = 'status' AND NOT attisdropped;
 
-  IF v_chk_valid IS DISTINCT FROM TRUE THEN
-    RAISE EXCEPTION '2A FAILURE: chk_payments_status missing or not validated (convalidated=%).', v_chk_valid;
+  SELECT attnum INTO v_amount_attnum
+  FROM pg_catalog.pg_attribute
+  WHERE attrelid = v_payments_oid AND attname = 'amount' AND NOT attisdropped;
+
+  ASSERT v_status_attnum IS NOT NULL AND v_amount_attnum IS NOT NULL,
+    '2A FAILURE: Missing public.payments status or amount attnum.';
+
+  -- 1. Verify chk_payments_status exact definition, single-column scope, and convalidated = true
+  SELECT c.convalidated, c.conkey, pg_catalog.pg_get_constraintdef(c.oid) AS def
+  INTO v_chk
+  FROM pg_catalog.pg_constraint c
+  WHERE c.conrelid = v_payments_oid AND c.contype = 'c' AND c.conname = 'chk_payments_status';
+
+  IF NOT FOUND OR v_chk.convalidated IS DISTINCT FROM TRUE THEN
+    RAISE EXCEPTION '2A FAILURE: chk_payments_status missing or not validated (convalidated=%).', v_chk.convalidated;
   END IF;
 
+  IF v_chk.conkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_status_attnum] THEN
+    RAISE EXCEPTION '2A FAILURE: chk_payments_status conkey=% does not exclusively target single column status (attnum=%).',
+      v_chk.conkey, v_status_attnum;
+  END IF;
+
+  IF v_chk.def !~* v_expected_status_regex THEN
+    RAISE EXCEPTION '2A FAILURE: chk_payments_status definition mismatch: got "%".', v_chk.def;
+  END IF;
+
+  -- 2. Verify legacy restrictive constraint removed & no other single-column status constraint remains
   SELECT COUNT(*) INTO v_legacy_cnt
   FROM pg_catalog.pg_constraint c
-  JOIN pg_catalog.pg_class t ON t.oid = c.conrelid
-  JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
-  WHERE n.nspname = 'public' AND t.relname = 'payments' AND c.conname = 'payments_status_check';
+  WHERE c.conrelid = v_payments_oid AND c.contype = 'c' AND c.conname = 'payments_status_check';
 
   IF v_legacy_cnt <> 0 THEN
     RAISE EXCEPTION '2A FAILURE: Legacy restrictive constraint payments_status_check was not dropped.';
   END IF;
 
-  IF current_database() = 'digitalmuid_v43_legacy_test' THEN
-    SELECT COUNT(*) INTO v_amt_cnt
-    FROM pg_catalog.pg_constraint c
-    JOIN pg_catalog.pg_class t ON t.oid = c.conrelid
-    JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
-    WHERE n.nspname = 'public' AND t.relname = 'payments' AND c.conname = 'chk_payments_amount_positive';
+  SELECT COUNT(*) INTO v_extra_status_cnt
+  FROM pg_catalog.pg_constraint c
+  WHERE c.conrelid = v_payments_oid AND c.contype = 'c'
+    AND c.conkey::SMALLINT[] = ARRAY[v_status_attnum]
+    AND c.conname <> 'chk_payments_status';
 
-    IF v_amt_cnt <> 1 THEN
-      RAISE EXCEPTION '2A FAILURE: Unrelated chk_payments_amount_positive was unexpectedly dropped.';
-    END IF;
+  IF v_extra_status_cnt <> 0 THEN
+    RAISE EXCEPTION '2A FAILURE: Found % unexpected additional status CHECK constraint(s) on public.payments.', v_extra_status_cnt;
   END IF;
 
-  RAISE NOTICE 'PASS [2A]: Payment status constraint migration verified.';
+  -- 3. Verify unrelated amount > 0 CHECK preserved with its original name, scope, validation, and definition
+  SELECT c.convalidated, c.conkey, pg_catalog.pg_get_constraintdef(c.oid) AS def
+  INTO v_amt
+  FROM pg_catalog.pg_constraint c
+  WHERE c.conrelid = v_payments_oid AND c.contype = 'c' AND c.conname = v_expected_amt_name;
+
+  IF NOT FOUND OR v_amt.convalidated IS DISTINCT FROM TRUE THEN
+    RAISE EXCEPTION '2A FAILURE: Expected amount CHECK "%" missing or unvalidated.', v_expected_amt_name;
+  END IF;
+
+  IF v_amt.conkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_amount_attnum]
+     OR v_amt.def !~* '^CHECK\s*\(\s*\(*\s*amount\s*>\s*\(?0(?:\.0+)?\)?(?:::numeric)?\s*\)*\s*\)$' THEN
+    RAISE EXCEPTION '2A FAILURE: Amount CHECK "%" altered unexpectedly (conkey=%, def=%).',
+      v_expected_amt_name, v_amt.conkey, v_amt.def;
+  END IF;
+
+  -- 4. Verify payments.user_id nullable, payments.status default='pending', and credit_notes NOT NULL tightening
+  SELECT a.attnotnull INTO v_user_notnull
+  FROM pg_catalog.pg_attribute a
+  WHERE a.attrelid = v_payments_oid AND a.attname = 'user_id' AND NOT a.attisdropped;
+  ASSERT v_user_notnull IS FALSE, '2A FAILURE: public.payments.user_id must allow NULL for guest checkouts.';
+
+  SELECT pg_catalog.pg_get_expr(d.adbin, d.adrelid) INTO v_status_default
+  FROM pg_catalog.pg_attrdef d
+  WHERE d.adrelid = v_payments_oid AND d.adnum = v_status_attnum;
+  ASSERT v_status_default ~* '''pending''', '2A FAILURE: public.payments.status default expected pending, got ' || COALESCE(v_status_default, '<null>');
+
+  SELECT COUNT(*) INTO v_cn_nullable_cnt
+  FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'credit_notes'
+    AND column_name IN ('credit_note_number', 'original_invoice_number', 'payment_id', 'refund_id', 'amount', 'base_amount', 'tax_amount', 'currency')
+    AND is_nullable <> 'NO';
+  ASSERT v_cn_nullable_cnt = 0, '2A FAILURE: Found ' || v_cn_nullable_cnt || ' required public.credit_notes column(s) still nullable.';
+
+  RAISE NOTICE 'PASS [2A]: Exact chk_payments_status (convalidated=true, 1-col), legacy drop, preserved %, and schema tightening verified.', v_expected_amt_name;
 END $$;
 
--- 2B. Verify sequences (last_value and is_called) without rewinding or collision
+-- 2B. Verify sequences (last_value and is_called) strictly read-only without rewinding or collision
 SELECT last_value AS student_seq_last, is_called AS student_seq_called FROM public.student_id_seq;
 SELECT last_value AS enrollment_seq_last, is_called AS enrollment_seq_called FROM public.enrollment_id_seq;
 
@@ -210,35 +506,67 @@ DECLARE
   v_stu_called BOOLEAN;
   v_enr_last BIGINT;
   v_enr_called BOOLEAN;
+  v_max_assigned_stu BIGINT;
+  v_max_assigned_enr BIGINT;
+  v_stu_total INTEGER;
+  v_stu_distinct INTEGER;
+  v_stu_ws_bad INTEGER;
+  v_enr_total INTEGER;
+  v_enr_distinct INTEGER;
+  v_enr_ws_bad INTEGER;
 BEGIN
   SELECT last_value, is_called INTO v_stu_last, v_stu_called FROM public.student_id_seq;
   SELECT last_value, is_called INTO v_enr_last, v_enr_called FROM public.enrollment_id_seq;
 
-  IF current_database() = 'digitalmuid_v43_legacy_test' THEN
-    -- Legacy fixture seeds DM-STU-010001 with seq (10001, is_called=false) & backfills 1 missing row -> (10002, true)
-    IF v_stu_last < 10002 OR v_stu_called IS DISTINCT FROM TRUE THEN
-      RAISE EXCEPTION '2B FAILURE: student_id_seq expected (>=10002, is_called=true), got (%, %).', v_stu_last, v_stu_called;
-    END IF;
-    -- Legacy fixture seeds enrollment_id_seq at (10050, is_called=true) and reassigns 1 dup -> (10051, true)
-    IF v_enr_last < 10051 OR v_enr_called IS DISTINCT FROM TRUE THEN
-      RAISE EXCEPTION '2B FAILURE: enrollment_id_seq rewound or mis-synced: expected (>=10051, true), got (%, %).', v_enr_last, v_enr_called;
-    END IF;
-  ELSE
-    -- Fresh fixture backfills 2 profiles and 1 enrollment starting from 10001
-    IF v_stu_last < 10002 OR v_stu_called IS DISTINCT FROM TRUE THEN
-      RAISE EXCEPTION '2B FAILURE: student_id_seq expected (>=10002, true), got (%, %).', v_stu_last, v_stu_called;
-    END IF;
-    IF v_enr_last < 10001 OR v_enr_called IS DISTINCT FROM TRUE THEN
-      RAISE EXCEPTION '2B FAILURE: enrollment_id_seq expected (>=10001, true), got (%, %).', v_enr_last, v_enr_called;
-    END IF;
+  SELECT
+    COUNT(*),
+    COUNT(DISTINCT student_id),
+    COUNT(*) FILTER (WHERE student_id IS NULL OR student_id !~ '^DM-STU-[0-9]+$' OR student_id <> pg_catalog.btrim(student_id, E' \t\n\r\f\v')),
+    COALESCE(MAX(SUBSTRING(student_id FROM '^DM-STU-0*([0-9]+)$')::BIGINT), 0)
+  INTO v_stu_total, v_stu_distinct, v_stu_ws_bad, v_max_assigned_stu
+  FROM public.profiles;
+
+  SELECT
+    COUNT(*),
+    COUNT(DISTINCT enrollment_id),
+    COUNT(*) FILTER (WHERE enrollment_id IS NULL OR enrollment_id !~ '^DM-ENR-[0-9]+$' OR enrollment_id <> pg_catalog.btrim(enrollment_id, E' \t\n\r\f\v')),
+    COALESCE(MAX(SUBSTRING(enrollment_id FROM '^DM-ENR-0*([0-9]+)$')::BIGINT), 0)
+  INTO v_enr_total, v_enr_distinct, v_enr_ws_bad, v_max_assigned_enr
+  FROM public.course_enrollments;
+
+  ASSERT v_stu_ws_bad = 0 AND v_stu_total = v_stu_distinct,
+    '2B FAILURE: profiles.student_id contains missing/untrimmed/duplicate values.';
+  ASSERT v_enr_ws_bad = 0 AND v_enr_total = v_enr_distinct,
+    '2B FAILURE: course_enrollments.enrollment_id contains missing/untrimmed/duplicate values.';
+
+  -- Neither sequence may ever lag behind highest assigned ID or remain is_called=false at an assigned value
+  IF v_stu_called IS DISTINCT FROM TRUE OR v_stu_last < GREATEST(10001, v_max_assigned_stu) THEN
+    RAISE EXCEPTION '2B FAILURE: student_id_seq (%, called=%) would rewind or collide with max assigned %.',
+      v_stu_last, v_stu_called, v_max_assigned_stu;
   END IF;
 
-  RAISE NOTICE 'PASS [2B]: Sequences verified (student=(%,%), enrollment=(%,%)).',
-    v_stu_last, v_stu_called, v_enr_last, v_enr_called;
+  IF v_enr_called IS DISTINCT FROM TRUE OR v_enr_last < GREATEST(10001, v_max_assigned_enr) THEN
+    RAISE EXCEPTION '2B FAILURE: enrollment_id_seq (%, called=%) would rewind or collide with max assigned %.',
+      v_enr_last, v_enr_called, v_max_assigned_enr;
+  END IF;
+
+  IF current_database() = 'digitalmuid_v43_legacy_test' THEN
+    -- Edge case 1: Legacy started at (10001, is_called=false) with DM-STU-010001 already assigned;
+    -- backfill must assign strictly >10001 (10002), leaving sequence >= max assigned and is_called=true.
+    ASSERT v_max_assigned_stu >= 10002 AND v_stu_last >= 10002,
+      '2B FAILURE: Legacy student_id_seq (10001, is_called=false) failed to advance past existing DM-STU-010001 (max_assigned=' || v_max_assigned_stu || ', seq=' || v_stu_last || ').';
+    -- Edge case 2: Legacy started at (10050, is_called=true) while max assigned was 10010;
+    -- deduplication must NOT rewind sequence below 10050 (reassigned duplicate >= 10051).
+    ASSERT v_max_assigned_enr >= 10051 AND v_enr_last >= 10051,
+      '2B FAILURE: Legacy enrollment_id_seq (10050, is_called=true) rewound or failed to preserve high-water mark (max_assigned=' || v_max_assigned_enr || ', seq=' || v_enr_last || ').';
+  END IF;
+
+  RAISE NOTICE 'PASS [2B]: Sequences verified read-only (student=(%,% | max=%), enrollment=(%,% | max=%)).',
+    v_stu_last, v_stu_called, v_max_assigned_stu, v_enr_last, v_enr_called, v_max_assigned_enr;
 END $$;
 
 -- 2C. Verify ALL 9 SECURITY DEFINER functions by exact canonical signature,
---     prosecdef, owner, search_path, and absence of PUBLIC/anon/authenticated execute
+--     prosecdef, owner, search_path, triggers, and strict ACLs
 SELECT
   n.nspname || '.' || p.proname || '(' || pg_catalog.oidvectortypes(p.proargtypes) || ')' AS canonical_signature,
   p.prosecdef,
@@ -313,10 +641,12 @@ BEGIN
       p.prosecdef,
       p.proconfig,
       p.proacl,
-      pg_catalog.pg_get_userbyid(p.proowner) AS owner_role
+      pg_catalog.pg_get_userbyid(p.proowner) AS owner_role,
+      r.rolsuper AS owner_is_super
     INTO v_rec
     FROM pg_catalog.pg_proc p
     JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+    JOIN pg_catalog.pg_roles r ON r.oid = p.proowner
     WHERE n.nspname = 'public'
       AND (n.nspname || '.' || p.proname || '(' || pg_catalog.oidvectortypes(p.proargtypes) || ')') = v_sig;
 
@@ -328,11 +658,18 @@ BEGIN
       RAISE EXCEPTION '2C FAILURE: Function % is not SECURITY DEFINER.', v_sig;
     END IF;
 
-    IF v_has_postgres_role AND v_rec.owner_role IS DISTINCT FROM 'postgres' THEN
-      RAISE EXCEPTION '2C FAILURE: Function % owner is %, expected postgres.', v_sig, v_rec.owner_role;
+    IF v_has_postgres_role THEN
+      IF v_rec.owner_role IS DISTINCT FROM 'postgres' THEN
+        RAISE EXCEPTION '2C FAILURE: Function % owner is %, expected postgres.', v_sig, v_rec.owner_role;
+      END IF;
+    ELSIF v_rec.owner_is_super IS DISTINCT FROM TRUE THEN
+      RAISE EXCEPTION '2C FAILURE: Function % owner "%" is not superuser (and postgres role absent).', v_sig, v_rec.owner_role;
     END IF;
 
-    IF NOT ('search_path=public, pg_temp' = ANY(COALESCE(v_rec.proconfig, ARRAY[]::TEXT[]))) THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_catalog.unnest(COALESCE(v_rec.proconfig, ARRAY[]::TEXT[])) cfg
+      WHERE cfg ~ '^search_path="?public"?,\s*"?pg_temp"?$'
+    ) THEN
       RAISE EXCEPTION '2C FAILURE: Function % lacks SET search_path = public, pg_temp (proconfig=%).', v_sig, v_rec.proconfig;
     END IF;
 
@@ -364,7 +701,24 @@ BEGIN
     END IF;
   END LOOP;
 
-  RAISE NOTICE 'PASS [2C]: All 9 SECURITY DEFINER signatures, search_path, owners, and strict ACLs verified.';
+  -- Verify all 4 lifecycle triggers are enabled on their target tables
+  ASSERT (
+    SELECT COUNT(*) = 4
+    FROM pg_catalog.pg_trigger tg
+    JOIN pg_catalog.pg_class t ON t.oid = tg.tgrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = 'public'
+      AND tg.tgenabled = 'O'
+      AND NOT tg.tgisinternal
+      AND (t.relname, tg.tgname) IN (
+        ('profiles',           'set_profile_student_id'),
+        ('course_enrollments', 'set_enrollment_id'),
+        ('payments',           'set_payment_invoice_number'),
+        ('payments',           'trg_protect_payment_status')
+      )
+  ), '2C FAILURE: One or more Phase A lifecycle triggers are missing or disabled.';
+
+  RAISE NOTICE 'PASS [2C]: All 9 SECURITY DEFINER signatures, search_path, owners, strict ACLs, and 4 triggers verified.';
 END $$;
 
 -- 2D. Verify Phase A->B gate blocks credit-note issuance BEFORE Phase B runs
@@ -447,6 +801,12 @@ DECLARE
   v_attnum SMALLINT;
   v_pred_regex TEXT;
   v_def_regex TEXT;
+  v_ws_pattern TEXT :=
+    ' (?:' || pg_catalog.chr(9)  || '|\\t|\\x09|\\011)'
+    || '(?:' || pg_catalog.chr(10) || '|\\n|\\x0a|\\012)'
+    || '(?:' || pg_catalog.chr(13) || '|\\r|\\x0d|\\015)'
+    || '(?:' || pg_catalog.chr(12) || '|\\f|\\x0c|\\014)'
+    || '(?:' || pg_catalog.chr(11) || '|\\v|\\x0b|\\013)';
   v_found_names_cnt INTEGER;
   v_invalid_on_targets INTEGER;
   v_verified INTEGER := 0;
@@ -513,10 +873,13 @@ BEGIN
     SELECT
       nt.nspname AS table_schema,
       t.relname AS table_name,
+      am.amname AS access_method,
       i.indisunique,
       i.indisvalid,
       i.indisready,
       i.indislive,
+      i.indnkeyatts,
+      i.indnatts,
       i.indkey,
       i.indexprs,
       i.indpred,
@@ -525,6 +888,7 @@ BEGIN
     INTO v_row
     FROM pg_catalog.pg_index i
     JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
+    JOIN pg_catalog.pg_am am ON am.oid = c.relam
     JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
     JOIN pg_catalog.pg_namespace nc ON nc.oid = c.relnamespace
     JOIN pg_catalog.pg_namespace nt ON nt.oid = t.relnamespace
@@ -541,6 +905,10 @@ BEGIN
         v_spec.idx_name, v_row.table_schema, v_row.table_name, v_spec.tbl_name, v_row.idx_def;
     END IF;
 
+    IF v_row.access_method IS DISTINCT FROM 'btree' THEN
+      RAISE EXCEPTION '3 FAILURE: Index public.% uses access method %, expected btree.', v_spec.idx_name, v_row.access_method;
+    END IF;
+
     IF v_row.indisunique IS DISTINCT FROM v_spec.expect_unique THEN
       RAISE EXCEPTION '3 FAILURE: Index public.% indisunique=%, expected % (%).',
         v_spec.idx_name, v_row.indisunique, v_spec.expect_unique, v_row.idx_def;
@@ -554,27 +922,29 @@ BEGIN
     END IF;
 
     IF v_row.indexprs IS NOT NULL
+       OR v_row.indnkeyatts IS DISTINCT FROM 1
+       OR v_row.indnatts IS DISTINCT FROM 1
        OR v_row.indkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_attnum] THEN
-      RAISE EXCEPTION '3 FAILURE: Index public.% does not exclusively index column public.%.(%) (%).',
-        v_spec.idx_name, v_spec.tbl_name, v_spec.col_name, v_row.idx_def;
+      RAISE EXCEPTION '3 FAILURE: Index public.% must index exclusively single column public.%.(%) with zero expressions or INCLUDE columns (indnkeyatts=%, indnatts=%, indkey=%, def=%).',
+        v_spec.idx_name, v_spec.tbl_name, v_spec.col_name, v_row.indnkeyatts, v_row.indnatts, v_row.indkey, v_row.idx_def;
     END IF;
 
     v_pred_regex :=
       '^\s*\(*\s*' || v_spec.col_name || '\s+IS\s+NOT\s+NULL\s*\)*\s+AND\s+\(*\s*(?:pg_catalog\.)?btrim\(\s*\(*\s*'
       || v_spec.col_name
-      || '(?:\)*(?:::text)?)\s*,\s*E?'' (?:\t|\\t|\\x09|\\011)(?:\n|\\n|\\x0a|\\012)(?:\r|\\r|\\x0d|\\015)(?:\f|\\f|\\x0c|\\014)(?:\v|\\v|\\x0b|\\013)''(?:::text)?\s*\)\s*(?:<>|!=)\s*''''(?:::text)?\s*\)*\s*$';
+      || '(?:\)*(?:::text)?)\s*,\s*E?''' || v_ws_pattern || '''(?:::text)?\s*\)(?:::text)?\s*(?:<>|!=)\s*''''(?:::text)?\s*\)*\s*$';
 
     IF v_spec.expect_partial THEN
       IF v_row.indpred IS NULL OR v_row.pred_expr IS NULL OR v_row.pred_expr !~* v_pred_regex THEN
-        RAISE EXCEPTION '3 FAILURE: Index public.% partial predicate mismatch: got %, expected non-blank BTRIM predicate on %.',
+        RAISE EXCEPTION '3 FAILURE: Index public.% partial predicate mismatch: got %, expected non-blank 6-whitespace BTRIM predicate on %.',
           v_spec.idx_name, COALESCE(v_row.pred_expr, '<none>'), v_spec.col_name;
       END IF;
-      v_def_regex := '^CREATE UNIQUE INDEX ' || v_spec.idx_name || ' ON public\.' || v_spec.tbl_name || ' USING btree \(' || v_spec.col_name || '\) WHERE ';
+      v_def_regex := '^CREATE UNIQUE INDEX ' || v_spec.idx_name || ' ON (?:public\.)?' || v_spec.tbl_name || ' USING btree \(' || v_spec.col_name || '\) WHERE ';
     ELSE
       IF v_row.indpred IS NOT NULL OR v_row.pred_expr IS NOT NULL THEN
         RAISE EXCEPTION '3 FAILURE: Non-partial index public.% unexpectedly has predicate %.', v_spec.idx_name, v_row.pred_expr;
       END IF;
-      v_def_regex := '^CREATE INDEX ' || v_spec.idx_name || ' ON public\.' || v_spec.tbl_name || ' USING btree \(' || v_spec.col_name || '\)$';
+      v_def_regex := '^CREATE INDEX ' || v_spec.idx_name || ' ON (?:public\.)?' || v_spec.tbl_name || ' USING btree \(' || v_spec.col_name || '\)$';
     END IF;
 
     IF v_row.idx_def !~ v_def_regex THEN
@@ -588,7 +958,7 @@ BEGIN
     RAISE EXCEPTION '3 FAILURE: Verified %/8 Phase B indexes.', v_verified;
   END IF;
 
-  RAISE NOTICE 'PASS [3]: All 8/8 Phase B indexes match table, column, uniqueness, btree def, indisvalid/ready/live, and partial predicates.';
+  RAISE NOTICE 'PASS [3]: All 8/8 Phase B indexes match schema/table, single btree column (no expr/INCLUDE), uniqueness, valid/ready/live, and partial predicates.';
 END $$;
 
 -- ==============================================================================
@@ -920,6 +1290,7 @@ BEGIN
 
   -- 3. Switch to real non-superuser `authenticated` role as Student 1
   SET LOCAL ROLE authenticated;
+  ASSERT current_user::text = 'authenticated', '4D FAILURE: SET LOCAL ROLE authenticated did not take effect.';
   PERFORM set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000001","role":"authenticated","email":"student1.synthetic@example.test"}', true);
   PERFORM set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000001', true);
   PERFORM set_config('request.jwt.claim.role', 'authenticated', true);
@@ -974,7 +1345,7 @@ BEGIN
     RAISE EXCEPTION '4D GRANT FAILURE [DELETE payments]: Expected 42501, got threw=% SQLSTATE=% ERRM=%', v_threw, v_sqlstate, v_errm;
   END IF;
 
-  -- 3e. GRANT NEGATIVE: authenticated cannot SELECT invoice_series or execute credit-note RPC (SQLSTATE 42501)
+  -- 3e. GRANT NEGATIVE: authenticated cannot SELECT series tables, mutate credit_notes, or execute credit-note RPC (42501)
   v_threw := FALSE; v_sqlstate := NULL; v_errm := NULL;
   BEGIN
     PERFORM * FROM public.invoice_series LIMIT 1;
@@ -987,12 +1358,60 @@ BEGIN
 
   v_threw := FALSE; v_sqlstate := NULL; v_errm := NULL;
   BEGIN
+    PERFORM * FROM public.credit_note_series LIMIT 1;
+  EXCEPTION WHEN OTHERS THEN
+    v_threw := TRUE; v_sqlstate := SQLSTATE; v_errm := SQLERRM;
+  END;
+  IF NOT v_threw OR v_sqlstate IS DISTINCT FROM '42501' THEN
+    RAISE EXCEPTION '4D GRANT FAILURE [SELECT credit_note_series]: Expected 42501, got threw=% SQLSTATE=% ERRM=%', v_threw, v_sqlstate, v_errm;
+  END IF;
+
+  v_threw := FALSE; v_sqlstate := NULL; v_errm := NULL;
+  BEGIN
+    DELETE FROM public.credit_notes WHERE user_id = v_stu1;
+  EXCEPTION WHEN OTHERS THEN
+    v_threw := TRUE; v_sqlstate := SQLSTATE; v_errm := SQLERRM;
+  END;
+  IF NOT v_threw OR v_sqlstate IS DISTINCT FROM '42501' THEN
+    RAISE EXCEPTION '4D GRANT FAILURE [DELETE credit_notes]: Expected 42501, got threw=% SQLSTATE=% ERRM=%', v_threw, v_sqlstate, v_errm;
+  END IF;
+
+  v_threw := FALSE; v_sqlstate := NULL; v_errm := NULL;
+  BEGIN
     PERFORM * FROM public.record_credit_note_with_limit('pay_atk_none', 'rfnd_atk_rpc', 10.00);
   EXCEPTION WHEN OTHERS THEN
     v_threw := TRUE; v_sqlstate := SQLSTATE; v_errm := SQLERRM;
   END;
   IF NOT v_threw OR v_sqlstate IS DISTINCT FROM '42501' THEN
     RAISE EXCEPTION '4D GRANT FAILURE [EXEC RPC]: Expected 42501, got threw=% SQLSTATE=% ERRM=%', v_threw, v_sqlstate, v_errm;
+  END IF;
+
+  -- 3f. Switch to `anon` role and verify zero table/RPC access (SQLSTATE 42501)
+  RESET ROLE;
+  SET LOCAL ROLE anon;
+  ASSERT current_user::text = 'anon', '4D FAILURE: SET LOCAL ROLE anon did not take effect.';
+  PERFORM set_config('request.jwt.claims', '{"role":"anon"}', true);
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM set_config('request.jwt.claim.role', 'anon', true);
+
+  v_threw := FALSE; v_sqlstate := NULL; v_errm := NULL;
+  BEGIN
+    PERFORM * FROM public.payments LIMIT 1;
+  EXCEPTION WHEN OTHERS THEN
+    v_threw := TRUE; v_sqlstate := SQLSTATE; v_errm := SQLERRM;
+  END;
+  IF NOT v_threw OR v_sqlstate IS DISTINCT FROM '42501' THEN
+    RAISE EXCEPTION '4D ANON FAILURE [SELECT payments]: Expected 42501, got threw=% SQLSTATE=% ERRM=%', v_threw, v_sqlstate, v_errm;
+  END IF;
+
+  v_threw := FALSE; v_sqlstate := NULL; v_errm := NULL;
+  BEGIN
+    PERFORM * FROM public.credit_notes LIMIT 1;
+  EXCEPTION WHEN OTHERS THEN
+    v_threw := TRUE; v_sqlstate := SQLSTATE; v_errm := SQLERRM;
+  END;
+  IF NOT v_threw OR v_sqlstate IS DISTINCT FROM '42501' THEN
+    RAISE EXCEPTION '4D ANON FAILURE [SELECT credit_notes]: Expected 42501, got threw=% SQLSTATE=% ERRM=%', v_threw, v_sqlstate, v_errm;
   END IF;
 
   RESET ROLE;
@@ -1063,17 +1482,38 @@ BEGIN
   END IF;
 
   PERFORM set_config('request.jwt.claims', '', true);
+  PERFORM set_config('request.jwt.claim.sub', '', true);
   PERFORM set_config('request.jwt.claim.role', '', true);
 
-  RAISE NOTICE 'PASS [4D]: RLS isolation (% own CN / 0 other), 42501 grants, and P0001 trigger protections verified.', v_visible_own_cn;
+  RAISE NOTICE 'PASS [4D]: RLS isolation (% own CN / 0 other), anon/authenticated 42501 grants, and P0001 trigger protections verified.', v_visible_own_cn;
 END $$;
 
 ROLLBACK;
 
+-- 4E. Verify ROLLBACK left the synthetic baseline completely unchanged (read-only)
+DO $$
+DECLARE
+  v_cn_count INTEGER;
+  v_pay1_status TEXT;
+BEGIN
+  IF current_database() = 'digitalmuid_v43_legacy_test' THEN
+    SELECT COUNT(*) INTO v_cn_count FROM public.credit_notes;
+    SELECT status INTO v_pay1_status FROM public.payments WHERE razorpay_payment_id = 'pay_leg_101';
+    ASSERT v_cn_count = 3 AND v_pay1_status = 'captured',
+      '4E ROLLBACK FAILURE: Legacy baseline mutated across Section 4 (cn_count=' || v_cn_count || ', pay_leg_101=' || v_pay1_status || ').';
+  ELSE
+    SELECT COUNT(*) INTO v_cn_count FROM public.credit_notes;
+    SELECT status INTO v_pay1_status FROM public.payments WHERE razorpay_payment_id = 'pay_fresh_001';
+    ASSERT v_cn_count = 0 AND v_pay1_status = 'captured',
+      '4E ROLLBACK FAILURE: Fresh baseline mutated across Section 4 (cn_count=' || v_cn_count || ', pay_fresh_001=' || v_pay1_status || ').';
+  END IF;
+  RAISE NOTICE 'PASS [4E]: Section 4 ROLLBACK confirmed — synthetic baseline unchanged.';
+END $$;
+
 \endif
 
 -- ==============================================================================
--- 5. MULTI-SESSION CONCURRENCY TEST PLAN (NOT EXECUTABLE IN ONE SESSION)
+-- 5. SEPARATE MANUAL TWO-SESSION CONCURRENCY TEST PLAN (NOT EXECUTED IN THIS FILE)
 -- ==============================================================================
 -- Single-transaction SQL CANNOT observe lock waits, uncommitted MVCC snapshots,
 -- or concurrent unique-index collisions. Run these 4 two-session tests in

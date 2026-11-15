@@ -16,17 +16,167 @@
 -- - DO NOT RUN against production or any hosted Supabase project.
 -- - Uses 100% synthetic UUIDs, @example.test emails, and pay_fresh_* IDs.
 -- - NOT EXECUTED automatically. Run ONLY inside a disposable local database.
+-- LOCAL DOCKER BRIDGE OPT-IN (Optional, disabled by default):
+-- By default ONLY local Unix domain sockets or loopback (127.0.0.0/8, ::1) are
+-- permitted; private RFC1918 VPC/RDS/cloud IPs are REJECTED fail-closed.
+-- If connecting over a local Docker bridge network ONLY, pass BOTH flags:
+--   -v allow_local_docker_bridge=true -v local_docker_cidr=172.17.0.0/16
 -- ==============================================================================
 
 \set ON_ERROR_STOP on
 
--- 0. FAIL-CLOSED ENVIRONMENT GUARD
+\if :{?allow_local_docker_bridge}
+  SELECT pg_catalog.set_config('digitalmuid.allow_local_docker_bridge', :'allow_local_docker_bridge', false) AS docker_bridge_opt_in;
+\else
+  SELECT pg_catalog.set_config('digitalmuid.allow_local_docker_bridge', 'false', false) AS docker_bridge_opt_in;
+\endif
+
+\if :{?local_docker_cidr}
+  SELECT pg_catalog.set_config('digitalmuid.local_docker_cidr', :'local_docker_cidr', false) AS docker_bridge_cidr;
+\else
+  SELECT pg_catalog.set_config('digitalmuid.local_docker_cidr', '', false) AS docker_bridge_cidr;
+\endif
+
+-- 0. FAIL-CLOSED ENVIRONMENT & DATABASE IDENTITY GUARD (BEFORE ANY DDL/DROP/EXTENSION)
 DO $$
+DECLARE
+  v_db_name TEXT := NULLIF(pg_catalog.btrim(pg_catalog.current_database()::text), '');
+  v_cur_user TEXT := NULLIF(pg_catalog.btrim(current_user::text), '');
+  v_sess_user TEXT := NULLIF(pg_catalog.btrim(session_user::text), '');
+  v_srv_version TEXT := NULLIF(pg_catalog.btrim(pg_catalog.version()), '');
+  v_srv_addr INET := pg_catalog.inet_server_addr();
+  v_srv_port INTEGER := pg_catalog.inet_server_port();
+  v_client_addr INET;
+  v_backend_type TEXT;
+  v_cluster TEXT := COALESCE(NULLIF(pg_catalog.btrim(pg_catalog.current_setting('cluster_name', true)), ''), '<unset>');
+  v_allow_docker TEXT := pg_catalog.current_setting('digitalmuid.allow_local_docker_bridge', true);
+  v_docker_cidr_txt TEXT := NULLIF(pg_catalog.btrim(pg_catalog.current_setting('digitalmuid.local_docker_cidr', true)), '');
+  v_docker_cidr CIDR := NULL;
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'supabase_migrations')
-     OR EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_auth_admin') THEN
-    RAISE EXCEPTION 'SAFETY HALT: Hosted Supabase environment detected. Execute isolated test fixtures ONLY in a disposable local PostgreSQL instance.';
+  -- 0A. Fail closed if required session or server identity cannot be established
+  IF v_db_name IS NULL OR v_cur_user IS NULL OR v_sess_user IS NULL OR v_srv_version IS NULL THEN
+    RAISE EXCEPTION 'SAFETY HALT: Cannot establish required PostgreSQL identity (db=%, current_user=%, session_user=%, version=%).',
+      COALESCE(v_db_name, '<null>'), COALESCE(v_cur_user, '<null>'), COALESCE(v_sess_user, '<null>'), COALESCE(v_srv_version, '<null>');
   END IF;
+
+  IF v_srv_version !~ '^PostgreSQL ' THEN
+    RAISE EXCEPTION 'SAFETY HALT: Unexpected server version "%".', v_srv_version;
+  END IF;
+
+  IF v_allow_docker IS NULL OR v_allow_docker NOT IN ('true', 'false') THEN
+    RAISE EXCEPTION 'SAFETY HALT: Transport policy (digitalmuid.allow_local_docker_bridge=%) missing or invalid. Run via psql with ON_ERROR_STOP=1.',
+      COALESCE(v_allow_docker, '<null>');
+  END IF;
+
+  SELECT sa.client_addr, sa.backend_type
+  INTO v_client_addr, v_backend_type
+  FROM pg_catalog.pg_stat_activity sa
+  WHERE sa.pid = pg_catalog.pg_backend_pid();
+
+  IF NOT FOUND OR v_backend_type IS NULL OR v_backend_type <> 'client backend' THEN
+    RAISE EXCEPTION 'SAFETY HALT: Cannot verify current backend identity in pg_catalog.pg_stat_activity (pid=%).',
+      pg_catalog.pg_backend_pid();
+  END IF;
+
+  -- 0B. Require EXACT fresh test database name
+  IF v_db_name IS DISTINCT FROM 'digitalmuid_v43_fresh_test' THEN
+    RAISE EXCEPTION 'SAFETY HALT: v4_3_isolated_bootstrap_fresh.sql requires current_database() = "digitalmuid_v43_fresh_test", got "%". Refusing execution.',
+      v_db_name;
+  END IF;
+
+  -- 0C. Deny hosted Supabase namespaces, roles, and project identifiers
+  IF EXISTS (
+       SELECT 1 FROM pg_catalog.pg_namespace
+       WHERE nspname IN (
+         'supabase_migrations', 'supabase_functions', 'realtime',
+         'storage', 'vault', 'graphql', 'graphql_public', 'pgsodium'
+       )
+     )
+     OR EXISTS (
+       SELECT 1 FROM pg_catalog.pg_roles
+       WHERE rolname IN (
+         'supabase_auth_admin', 'supabase_storage_admin', 'supabase_realtime_admin',
+         'supabase_read_only_user', 'supabase_replication_admin', 'authenticator',
+         'pgbouncer', 'cli_login_postgres'
+       )
+     )
+     OR v_db_name ~* 'kpuxtsworzkueyffjaaz|supabase'
+     OR v_cur_user ~* 'kpuxtsworzkueyffjaaz'
+     OR v_sess_user ~* 'kpuxtsworzkueyffjaaz'
+     OR v_cluster ~* 'supabase|kpuxtsworzkueyffjaaz' THEN
+    RAISE EXCEPTION 'SAFETY HALT: Hosted Supabase environment or forbidden project reference detected (db=%, user=%, cluster=%).',
+      v_db_name, v_cur_user, v_cluster;
+  END IF;
+
+  -- 0D. Strict server identity check (Unix socket or loopback ONLY; no automatic RFC1918 trust)
+  IF (v_srv_addr IS NULL) IS DISTINCT FROM (v_srv_port IS NULL) THEN
+    RAISE EXCEPTION 'SAFETY HALT: Inconsistent server endpoint identity (addr=%, port=%).',
+      COALESCE(v_srv_addr::text, '<null>'), COALESCE(v_srv_port::text, '<null>');
+  END IF;
+
+  IF v_srv_addr IS NULL THEN
+    IF v_client_addr IS NOT NULL THEN
+      RAISE EXCEPTION 'SAFETY HALT: Inconsistent Unix socket identity (server addr NULL, client_addr=%).', v_client_addr;
+    END IF;
+  ELSE
+    IF v_srv_port < 1 OR v_srv_port > 65535 THEN
+      RAISE EXCEPTION 'SAFETY HALT: Invalid server TCP port %.', v_srv_port;
+    END IF;
+
+    IF v_srv_addr << '127.0.0.0/8'::inet OR v_srv_addr = '::1'::inet THEN
+      IF v_client_addr IS NULL OR NOT (v_client_addr << '127.0.0.0/8'::inet OR v_client_addr = '::1'::inet) THEN
+        RAISE EXCEPTION 'SAFETY HALT: Loopback server %:% received non-loopback client_addr %.',
+          v_srv_addr, v_srv_port, COALESCE(v_client_addr::text, '<null>');
+      END IF;
+    ELSIF v_allow_docker = 'true' THEN
+      IF v_docker_cidr_txt IS NULL THEN
+        RAISE EXCEPTION 'SAFETY HALT: allow_local_docker_bridge=true requires explicit -v local_docker_cidr=<CIDR> (e.g. 172.17.0.0/16).';
+      END IF;
+
+      BEGIN
+        v_docker_cidr := v_docker_cidr_txt::cidr;
+      EXCEPTION WHEN OTHERS THEN
+        RAISE EXCEPTION 'SAFETY HALT: Invalid local_docker_cidr "%" (%).', v_docker_cidr_txt, SQLERRM;
+      END;
+
+      IF pg_catalog.masklen(v_docker_cidr) < 16
+         OR NOT (
+           v_docker_cidr <<= '172.16.0.0/12'::inet
+           OR v_docker_cidr <<= '192.168.0.0/16'::inet
+           OR v_docker_cidr <<= '10.0.0.0/8'::inet
+         ) THEN
+        RAISE EXCEPTION 'SAFETY HALT: local_docker_cidr "%" must be an explicit RFC1918 subnet with prefix >= /16.', v_docker_cidr;
+      END IF;
+
+      IF NOT (v_srv_addr <<= v_docker_cidr) THEN
+        RAISE EXCEPTION 'SAFETY HALT: Server IP %:% is outside approved local_docker_cidr %.',
+          v_srv_addr, v_srv_port, v_docker_cidr;
+      END IF;
+
+      IF v_client_addr IS NULL
+         OR NOT (
+           v_client_addr << '127.0.0.0/8'::inet
+           OR v_client_addr = '::1'::inet
+           OR v_client_addr <<= v_docker_cidr
+         ) THEN
+        RAISE EXCEPTION 'SAFETY HALT: Docker bridge server %:% rejected non-local client_addr %.',
+          v_srv_addr, v_srv_port, COALESCE(v_client_addr::text, '<null>');
+      END IF;
+    ELSE
+      RAISE EXCEPTION 'SAFETY HALT: Server IP %:% is NOT Unix socket or loopback (127.0.0.0/8, ::1). Private RFC1918 IPs are blocked by default. For local Docker bridge only, pass -v allow_local_docker_bridge=true -v local_docker_cidr=<subnet/prefix>.',
+        v_srv_addr, v_srv_port;
+    END IF;
+  END IF;
+
+  -- 0E. Reject unprivileged runtime roles
+  IF v_cur_user IN ('anon', 'authenticated', 'service_role') THEN
+    RAISE EXCEPTION 'SAFETY HALT: Execute fixture as local superuser/postgres role, not "%".', v_cur_user;
+  END IF;
+
+  RAISE NOTICE 'ISOLATED FRESH GUARD PASSED: db=%, current_user=%, session_user=%, server=%:%, client=%, docker_opt_in=%, cluster=% (NOT a standalone safety guarantee).',
+    v_db_name, v_cur_user, v_sess_user,
+    COALESCE(v_srv_addr::text, 'unix-socket'), COALESCE(v_srv_port::text, 'local'),
+    COALESCE(v_client_addr::text, 'unix-socket'), v_allow_docker, v_cluster;
 END $$;
 
 BEGIN;
