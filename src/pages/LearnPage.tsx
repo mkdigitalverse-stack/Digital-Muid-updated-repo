@@ -40,12 +40,12 @@ export const LearnPage: React.FC<LearnPageProps> = ({ navigate }) => {
           <p className="text-lg font-display font-bold text-slate-900">Don't Just Learn. Build. Launch. Measure. Improve.</p>
           <p className="text-xs text-slate-600">Every masterclass includes production-ready templates, direct accountability, and live campaign teardowns.</p>
         </div>
-        <div className="shrink-0 flex items-center gap-2">
+        <div className="w-full sm:w-auto flex flex-wrap items-center gap-2">
           {['Beginner', 'Intermediate', 'Advanced', 'All Levels'].map((lvl) => (
             <button
               key={lvl}
               onClick={() => setSelectedLevel(lvl === selectedLevel ? 'All' : lvl)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              className={`min-h-[44px] px-3 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 selectedLevel === lvl
                   ? 'bg-emerald-600 text-white shadow-sm'
                   : 'bg-slate-100 text-slate-700 hover:text-slate-900 hover:bg-slate-200'

@@ -258,8 +258,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navig
       .toUpperCase() || 'DM';
 
     return (
-      <div className="min-h-[75vh] py-16 px-4 flex items-center justify-center bg-[#F8FAFC]">
-        <div className="w-full max-w-xl bg-white border border-slate-200 rounded-3xl shadow-xl p-8 sm:p-10 space-y-8">
+      <div className="min-h-[75vh] pt-28 pb-16 px-4 flex items-center justify-center bg-[#F8FAFC]">
+        <div className="w-full max-w-xl bg-white border border-slate-200 rounded-3xl shadow-xl p-6 sm:p-10 space-y-8">
           {/* Header Badge */}
           <div className="flex items-center justify-between border-b border-slate-100 pb-6">
             <div className="flex items-center gap-3">
@@ -289,27 +289,25 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navig
             )}
           </div>
 
-          {/* Session Details */}
+          {/* Account Overview */}
           <div className="space-y-4">
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500 font-medium">Session Status</span>
-                <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Authenticated & Persistent
-                </span>
+            {!isAdminAuthenticated && (
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2">
+                <div className="flex items-center justify-between text-xs gap-2">
+                  <span className="text-slate-500 font-medium">Account Status</span>
+                  <span className="inline-flex items-center gap-1 text-emerald-600 font-semibold">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Active Member
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs gap-2">
+                  <span className="text-slate-500 font-medium">Registered Email</span>
+                  <span className="font-mono text-[11px] text-slate-700 truncate max-w-[220px]">
+                    {currentUser.email || 'Member Email'}
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500 font-medium">Account ID</span>
-                <span className="font-mono text-[11px] text-slate-700 truncate max-w-[200px]">
-                  {currentUser.id}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500 font-medium">Authentication Source</span>
-                <span className="text-slate-700 font-medium">Supabase Auth (Official)</span>
-              </div>
-            </div>
+            )}
 
             {isAdminAuthenticated ? (
               <div className="p-4 bg-slate-900 text-white rounded-2xl space-y-3">
@@ -410,8 +408,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode = 'login', navig
 
   // 3. Unauthenticated Login / Register Form View
   return (
-    <div className="min-h-[85vh] py-16 px-4 flex items-center justify-center bg-[#F8FAFC]">
-      <div className="w-full max-w-md bg-white border border-slate-200/90 rounded-3xl shadow-xl p-8 sm:p-10 space-y-8">
+    <div className="min-h-[85vh] pt-28 pb-16 px-4 flex items-center justify-center bg-[#F8FAFC]">
+      <div className="w-full max-w-md bg-white border border-slate-200/90 rounded-3xl shadow-xl p-6 sm:p-10 space-y-8">
         {/* Brand Header */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#0F172A] text-white mx-auto shadow-md border border-slate-800">

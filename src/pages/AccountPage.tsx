@@ -46,6 +46,27 @@ interface AccountPageProps {
 
 type ActiveTab = 'profile' | 'security' | 'certificates' | 'billing';
 
+const formatSafeDate = (
+  value: string | null | undefined,
+  locale: string = 'en-US',
+  options?: Intl.DateTimeFormatOptions,
+  fallback: string = 'Recent'
+): string => {
+  if (!value) return fallback;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return fallback;
+  try {
+    return d.toLocaleDateString(locale, options);
+  } catch {
+    return fallback;
+  }
+};
+
+const safeMoney = (value: unknown): number => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+};
+
 export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }) => {
   const {
     currentUser,
@@ -171,13 +192,16 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
   // Human-friendly permanent Student ID (Supabase internal UUID is never displayed)
   const studentId = formatStudentId(currentUser?.id, userProfile?.studentId);
 
-  const memberSince = currentUser?.created_at
-    ? new Date(currentUser.created_at).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      })
-    : 'Member';
+  const memberSince = formatSafeDate(
+    currentUser?.created_at,
+    'en-US',
+    {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    },
+    'Member'
+  );
 
   // Handle Profile Submission
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -292,7 +316,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
   return (
     <div className="min-h-screen bg-[#F8FAFC] pb-24">
       {/* Header Banner */}
-      <div className="bg-[#0B1526] border-b border-slate-800 text-white pt-10 pb-12 px-4 sm:px-6 lg:px-8">
+      <div className="bg-[#0B1526] border-b border-slate-800 text-white pt-28 sm:pt-32 pb-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-6xl mx-auto">
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
             {/* Identity Card */}
@@ -365,14 +389,14 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
               <button
                 type="button"
                 onClick={() => navigate('/dashboard')}
-                className="flex-1 md:flex-initial px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs font-semibold tracking-wide border border-slate-700 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="flex-1 md:flex-initial min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs font-semibold tracking-wide border border-slate-700 transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <span>Dashboard</span>
               </button>
               <button
                 type="button"
                 onClick={handleLogout}
-                className="flex-1 md:flex-initial px-4 py-2.5 rounded-xl bg-red-950/40 hover:bg-red-900/60 text-red-300 text-xs font-semibold tracking-wide border border-red-800/60 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="flex-1 md:flex-initial min-h-[44px] px-4 py-2.5 rounded-xl bg-red-950/40 hover:bg-red-900/60 text-red-300 text-xs font-semibold tracking-wide border border-red-800/60 transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span>Sign Out</span>
@@ -381,11 +405,11 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex gap-2 pt-8 border-t border-slate-800/80 mt-8">
+          <div className="flex flex-wrap sm:flex-nowrap gap-2 pt-8 border-t border-slate-800/80 mt-8 overflow-x-auto pb-1 scrollbar-none">
             <button
               type="button"
               onClick={() => setActiveTab('profile')}
-              className={`px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+              className={`min-h-[44px] whitespace-nowrap px-4 sm:px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
                 activeTab === 'profile'
                   ? 'bg-[#FF6B00] text-white shadow-md'
                   : 'bg-slate-800/50 text-slate-400 hover:text-white hover:bg-slate-800'
@@ -397,7 +421,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
             <button
               type="button"
               onClick={() => setActiveTab('security')}
-              className={`px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+              className={`min-h-[44px] whitespace-nowrap px-4 sm:px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
                 activeTab === 'security'
                   ? 'bg-[#FF6B00] text-white shadow-md'
                   : 'bg-slate-800/50 text-slate-400 hover:text-white hover:bg-slate-800'
@@ -409,7 +433,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
             <button
               type="button"
               onClick={() => setActiveTab('certificates')}
-              className={`px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+              className={`min-h-[44px] whitespace-nowrap px-4 sm:px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
                 activeTab === 'certificates'
                   ? 'bg-amber-500 text-white shadow-md'
                   : 'bg-slate-800/50 text-slate-400 hover:text-white hover:bg-slate-800'
@@ -422,7 +446,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
               id="account-tab-billing-btn"
               type="button"
               onClick={() => setActiveTab('billing')}
-              className={`px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
+              className={`min-h-[44px] whitespace-nowrap px-4 sm:px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
                 activeTab === 'billing'
                   ? 'bg-[#FF6B00] text-white shadow-md'
                   : 'bg-slate-800/50 text-slate-400 hover:text-white hover:bg-slate-800'
@@ -849,17 +873,26 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
               <div className="bg-white border border-slate-200 rounded-3xl shadow-sm p-6 space-y-5">
                 <div className="border-b border-slate-100 pb-4">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                    Account Identity & Security
+                    Account Summary
                   </h3>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    Official Supabase verified credentials.
+                    Your student account details and membership information.
                   </p>
                 </div>
 
                 <div className="space-y-3.5 text-xs">
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
-                      Verified Email
+                      Student ID
+                    </span>
+                    <div className="text-sm font-bold text-[#2457D6] font-mono">
+                      {studentId}
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+                      Registered Email
                     </span>
                     <div className="text-sm font-semibold text-slate-900 font-mono break-all">
                       {currentUser.email}
@@ -868,26 +901,17 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
 
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
-                      Account ID (UUID)
-                    </span>
-                    <div className="text-[11px] font-mono text-slate-600 break-all select-all">
-                      {currentUser.id}
-                    </div>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
-                      Session Status
+                      Account Status
                     </span>
                     <div className="flex items-center gap-1.5 text-emerald-600 font-semibold">
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Authenticated & Active</span>
+                      <span>Active Student Member</span>
                     </div>
                   </div>
 
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-mono">
-                      Account Created
+                      Member Since
                     </span>
                     <div className="text-slate-700 font-medium">
                       {memberSince}
@@ -994,7 +1018,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                               <span>Issued On</span>
                             </div>
                             <div className="font-semibold text-slate-800 text-[11px] truncate mt-0.5">
-                              {new Date(cert.issuedAt).toLocaleDateString()}
+                              {formatSafeDate(cert.issuedAt, 'en-US', { month: 'short', day: 'numeric', year: 'numeric' }, 'Issued')}
                             </div>
                           </div>
                         </div>
@@ -1098,7 +1122,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                     <div className="text-2xl font-bold font-mono text-slate-900">
                       ₹{studentPayments
                         .filter((p) => p.status === 'captured')
-                        .reduce((acc, p) => acc + (p.amount || 0), 0)
+                        .reduce((acc, p) => acc + safeMoney(p.amount), 0)
                         .toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                   </div>
@@ -1202,7 +1226,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                             <button
                               type="button"
                               onClick={() => setBillingSubFilter('all')}
-                              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                              className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
                                 billingSubFilter === 'all'
                                   ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
                                   : 'bg-white text-slate-600 hover:text-slate-900 border-slate-200 hover:bg-slate-50'
@@ -1213,7 +1237,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                             <button
                               type="button"
                               onClick={() => setBillingSubFilter('courses')}
-                              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                              className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border flex items-center gap-1.5 ${
                                 billingSubFilter === 'courses'
                                   ? 'bg-[#FF6B00] text-white border-[#FF6B00] shadow-xs'
                                   : 'bg-white text-slate-600 hover:text-slate-900 border-slate-200 hover:bg-slate-50'
@@ -1225,7 +1249,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                             <button
                               type="button"
                               onClick={() => setBillingSubFilter('consultations')}
-                              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                              className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border flex items-center gap-1.5 ${
                                 billingSubFilter === 'consultations'
                                   ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
                                   : 'bg-white text-slate-600 hover:text-slate-900 border-slate-200 hover:bg-slate-50'
@@ -1237,7 +1261,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                             <button
                               type="button"
                               onClick={() => setBillingSubFilter('resources')}
-                              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                              className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border flex items-center gap-1.5 ${
                                 billingSubFilter === 'resources'
                                   ? 'bg-[#2457D6] text-white border-[#2457D6] shadow-xs'
                                   : 'bg-white text-slate-600 hover:text-slate-900 border-slate-200 hover:bg-slate-50'
@@ -1296,8 +1320,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                           </div>
                         ) : (
                           <>
-                            {/* Desktop Table View */}
-                            <div className="hidden md:block overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+                            {/* Desktop Table View (>= lg) */}
+                            <div className="hidden lg:block overflow-x-auto rounded-2xl border border-slate-200 bg-white">
                               <table className="w-full text-left text-xs border-collapse">
                                 <thead>
                                   <tr className="border-b border-slate-200 bg-slate-900 text-white font-mono uppercase tracking-wider text-[11px]">
@@ -1400,7 +1424,7 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
 
                                         {/* Amount Paid */}
                                         <td className="py-4 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
-                                          ₹{p.amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {p.currency || 'INR'}
+                                          ₹{safeMoney(p.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {p.currency || 'INR'}
                                         </td>
 
                                         {/* Status */}
@@ -1531,8 +1555,8 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                               </table>
                             </div>
 
-                            {/* Mobile Responsive Cards (< md) */}
-                            <div className="grid grid-cols-1 gap-3 md:hidden">
+                            {/* Mobile & Tablet Responsive Cards (< lg) */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:hidden gap-3">
                               {displayedPayments.map((p) => {
                                 const isCaptured = p.status === 'captured';
                                 const isRefunded = p.status === 'refunded';
@@ -1541,40 +1565,39 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                                 const persistentInvoiceNo = p.invoiceNumber || formatInvoiceNumber(p.createdAt, p.razorpayPaymentId || p.id);
                                 const displayStudentId = p.studentId || studentId;
 
-                                let formattedDate = 'Recent';
-                                try {
-                                  const d = new Date(p.createdAt);
-                                  if (!isNaN(d.getTime())) {
-                                    formattedDate = d.toLocaleDateString('en-IN', {
-                                      year: 'numeric',
-                                      month: 'short',
-                                      day: 'numeric'
-                                    });
-                                  }
-                                } catch {}
+                                const formattedDate = formatSafeDate(
+                                  p.createdAt,
+                                  'en-IN',
+                                  {
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric'
+                                  },
+                                  'Recent'
+                                );
 
                                 return (
                                   <div
                                     key={p.id}
-                                    className="p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3"
+                                    className="p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3 min-w-0"
                                   >
                                     <div className="flex items-start justify-between gap-2">
-                                      <div>
+                                      <div className="min-w-0">
                                         <div className="flex items-center gap-2 mb-1">
-                                          <span className="text-[10px] font-mono font-bold text-[#FF6B00]">{persistentInvoiceNo}</span>
+                                          <span className="text-[10px] font-mono font-bold text-[#FF6B00] truncate">{persistentInvoiceNo}</span>
                                           <span className="text-[10px] font-mono text-slate-400">·</span>
-                                          <span className="text-[10px] font-mono text-slate-500">{formattedDate}</span>
+                                          <span className="text-[10px] font-mono text-slate-500 shrink-0">{formattedDate}</span>
                                         </div>
-                                        <h4 className="text-sm font-bold text-slate-900">
+                                        <h4 className="text-sm font-bold text-slate-900 break-words">
                                           {p.itemTitle || (isResource ? 'Digital Toolkit / Resource' : (isCourse ? 'Course Masterclass' : 'Consultation Session'))}
                                         </h4>
                                         <div className="text-[10px] font-mono text-[#2457D6] font-semibold mt-0.5">
                                           Student ID: {displayStudentId}
                                         </div>
                                       </div>
-                                      <div className="text-right">
+                                      <div className="text-right shrink-0">
                                         <div className="font-mono font-bold text-slate-900 text-sm">
-                                          ₹{p.amount.toLocaleString('en-IN')}
+                                          ₹{safeMoney(p.amount).toLocaleString('en-IN')}
                                         </div>
                                         <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider inline-block mt-1 ${
                                           isCourse ? 'bg-orange-50 text-[#FF6B00]' : isResource ? 'bg-blue-50 text-[#2457D6]' : 'bg-purple-50 text-purple-700'

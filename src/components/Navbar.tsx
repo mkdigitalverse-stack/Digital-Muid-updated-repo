@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { analytics } from '../utils/analytics';
 import {
@@ -49,7 +49,30 @@ interface NavbarProps {
   onOpenSearch?: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSearch }) => {
+const canHoverPointer = (): boolean => {
+  if (typeof window === 'undefined' || !window.matchMedia) return true;
+  return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+};
+
+const formatRelativeNotificationTime = (createdAt?: string): string => {
+  if (!createdAt) return '';
+  try {
+    const date = new Date(createdAt);
+    if (isNaN(date.getTime())) return '';
+    const diffMins = Math.floor((Date.now() - date.getTime()) / 60000);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return new Intl.DateTimeFormat('en-IN', { month: 'short', day: 'numeric' }).format(date);
+  } catch {
+    return '';
+  }
+};
+
+const NavbarComponent: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSearch }) => {
   const {
     setIsSearchOpen,
     isAdminAuthenticated,
@@ -74,6 +97,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
 
   const [activeDropdown, setActiveDropdown] = useState<NavDropdown>(null);
   const dropdownTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const hoveredMenuRef = useRef<{ menu: NavDropdown; ts: number } | null>(null);
 
   // Accordion state for Mobile Menu
   const [mobileExpandedSection, setMobileExpandedSection] = useState<MobileAccordion>(null);
@@ -146,38 +170,51 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
     };
   }, []);
 
-  const handleNav = (path: string) => {
+  const handleNav = useCallback((path: string) => {
     setActiveDropdown(null);
     setIsMobileMenuOpen(false);
     document.body.style.overflow = '';
     document.body.style.touchAction = '';
     navigate(path);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, [navigate]);
 
-  const handleMouseEnter = (menu: NavDropdown) => {
+  const handleMouseEnter = useCallback((menu: NavDropdown) => {
+    if (!canHoverPointer()) return;
     if (dropdownTimeoutRef.current) {
       clearTimeout(dropdownTimeoutRef.current);
     }
+    hoveredMenuRef.current = { menu, ts: Date.now() };
     setActiveDropdown(menu);
-  };
+  }, []);
 
-  const handleMouseLeave = () => {
+  const handleMouseLeave = useCallback(() => {
+    if (!canHoverPointer()) return;
     dropdownTimeoutRef.current = setTimeout(() => {
+      hoveredMenuRef.current = null;
       setActiveDropdown(null);
     }, 180);
-  };
+  }, []);
 
-  const toggleDropdown = (menu: NavDropdown) => {
+  const toggleDropdown = useCallback((menu: NavDropdown) => {
     if (dropdownTimeoutRef.current) {
       clearTimeout(dropdownTimeoutRef.current);
     }
-    setActiveDropdown((prev) => (prev === menu ? null : menu));
-  };
+    const openedByRecentHover =
+      hoveredMenuRef.current?.menu === menu &&
+      Date.now() - hoveredMenuRef.current.ts < 500;
+    hoveredMenuRef.current = null;
+    setActiveDropdown((prev) => {
+      if (prev === menu && openedByRecentHover) {
+        return menu;
+      }
+      return prev === menu ? null : menu;
+    });
+  }, []);
 
-  const toggleMobileAccordion = (menu: MobileAccordion) => {
+  const toggleMobileAccordion = useCallback((menu: MobileAccordion) => {
     setMobileExpandedSection((prev) => (prev === menu ? null : menu));
-  };
+  }, []);
 
   const servicesSubmenu = [
     {
@@ -314,25 +351,25 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
           : 'bg-[#FFFFFF]/90 backdrop-blur-md border-b border-[#E5EAF2] py-3.5 sm:py-4.5'
       }`}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 flex items-center justify-between gap-2">
         {/* Brand / Logo */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <button
             id="brand-logo-btn"
             type="button"
             onClick={() => handleNav('/')}
-            className="flex items-center gap-2.5 group text-left focus:outline-none cursor-pointer"
+            className="flex items-center gap-2 sm:gap-2.5 group text-left focus:outline-none cursor-pointer min-w-0"
             aria-label="Digital Muid Home"
           >
-            <div className="w-8 h-8 rounded-lg bg-[#2457D6] flex items-center justify-center text-white font-display font-bold text-sm shadow-md shadow-[#2457D6]/20 group-hover:scale-105 transition-transform">
+            <div className="w-8 h-8 rounded-lg bg-[#2457D6] flex items-center justify-center text-white font-display font-bold text-sm shadow-md shadow-[#2457D6]/20 group-hover:scale-105 transition-transform shrink-0">
               M
             </div>
-            <div>
-              <div className="font-display font-bold text-base sm:text-lg tracking-tight text-[#172033] flex items-center gap-2">
+            <div className="min-w-0">
+              <div className="font-display font-bold text-sm sm:text-lg tracking-tight text-[#172033] flex items-center gap-1.5 sm:gap-2 whitespace-nowrap">
                 <span>DIGITAL MUID</span>
-                <span className="w-1.5 h-1.5 rounded-full bg-[#2457D6]"></span>
+                <span className="w-1.5 h-1.5 rounded-full bg-[#2457D6] shrink-0"></span>
               </div>
-              <p className="text-[9px] text-[#596579] font-interface tracking-[0.2em] uppercase hidden sm:block">
+              <p className="text-[9px] text-[#596579] font-interface tracking-[0.2em] uppercase hidden sm:block truncate">
                 Growth · AI · Transformation
               </p>
             </div>
@@ -670,7 +707,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
         </nav>
 
         {/* Right Action Area */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
           {/* Global Search Button */}
           <button
             id="nav-search-btn"
@@ -697,7 +734,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                 id="nav-notifications-btn"
                 type="button"
                 onClick={() => toggleDropdown('notifications')}
-                className="p-2 sm:p-2.5 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl transition-colors flex items-center justify-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#FF6B00] min-h-[44px] min-w-[44px] relative"
+                className="p-2 sm:p-2.5 text-[#465166] hover:text-[#172033] hover:bg-[#EEF3FA] border border-[#E5EAF2] bg-[#FFFFFF] rounded-xl transition-colors flex items-center justify-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#2457D6] min-h-[44px] min-w-[44px] relative"
                 title="Student Notifications"
                 aria-label={`Notifications, ${unreadNotificationsCount} unread`}
               >
@@ -705,7 +742,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                 {unreadNotificationsCount > 0 && (
                   <span
                     id="nav-notifications-badge"
-                    className="absolute top-1.5 right-1.5 min-w-[18px] h-[18px] px-1 bg-[#FF6B00] text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow-lg border border-[#07111F]"
+                    className="absolute top-1.5 right-1.5 min-w-[18px] h-[18px] px-1 bg-[#FF6B00] text-white text-[10px] font-bold rounded-full flex items-center justify-center shadow-lg border border-white"
                   >
                     {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
                   </span>
@@ -716,7 +753,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               {activeDropdown === 'notifications' && (
                 <div
                   id="nav-notifications-dropdown"
-                  className="absolute right-0 sm:right-auto sm:left-1/2 sm:-translate-x-1/2 top-full mt-2 w-[calc(100vw-2rem)] max-w-sm sm:w-96 rounded-2xl bg-[#0F172A] border border-slate-700/80 shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150"
+                  className="absolute right-0 top-full mt-2 w-[min(24rem,calc(100vw-1.5rem))] rounded-2xl bg-[#0F172A] border border-slate-700/80 shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-150"
                 >
                   {/* Dropdown Header */}
                   <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
@@ -803,22 +840,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                                   {item.title}
                                 </p>
                                 <span className="text-[10px] text-slate-400 shrink-0">
-                                  {(() => {
-                                    try {
-                                      const date = new Date(item.createdAt);
-                                      const now = new Date();
-                                      const diffMins = Math.floor((now.getTime() - date.getTime()) / 60000);
-                                      if (diffMins < 1) return 'Just now';
-                                      if (diffMins < 60) return `${diffMins}m ago`;
-                                      const diffHours = Math.floor(diffMins / 60);
-                                      if (diffHours < 24) return `${diffHours}h ago`;
-                                      const diffDays = Math.floor(diffHours / 24);
-                                      if (diffDays < 7) return `${diffDays}d ago`;
-                                      return new Intl.DateTimeFormat('en-IN', { month: 'short', day: 'numeric' }).format(date);
-                                    } catch {
-                                      return '';
-                                    }
-                                  })()}
+                                  {formatRelativeNotificationTime(item.createdAt)}
                                 </span>
                               </div>
                               <p className="text-[11px] text-slate-300 mt-0.5 line-clamp-2 leading-relaxed">
@@ -866,16 +888,18 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                 id="nav-account-btn"
                 type="button"
                 onClick={() => toggleDropdown('user')}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-slate-300 hover:text-white hover:bg-white/10 rounded-xl text-[11px] font-semibold uppercase tracking-wider transition-colors cursor-pointer border border-white/10 min-h-[44px]"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-[#172033] hover:text-[#2457D6] hover:bg-[#EEF3FA] bg-[#F7F9FC] border border-[#E5EAF2] rounded-xl text-[11px] font-semibold uppercase tracking-wider transition-colors cursor-pointer min-h-[44px]"
                 title="Student Dashboard & Learning"
+                aria-expanded={activeDropdown === 'user'}
+                aria-haspopup="true"
               >
-                <User className="w-3.5 h-3.5 text-[#FF6B00]" />
-                <span className="hidden md:inline">
+                <User className="w-3.5 h-3.5 text-[#2457D6]" />
+                <span className="hidden md:inline max-w-[90px] truncate">
                   {userProfile?.fullName?.split(' ')[0] || 'Student'}
                 </span>
                 <ChevronDown
-                  className={`w-3 h-3 text-slate-400 transition-transform duration-200 ${
-                    activeDropdown === 'user' ? 'rotate-180 text-white' : ''
+                  className={`w-3 h-3 text-[#596579] transition-transform duration-200 ${
+                    activeDropdown === 'user' ? 'rotate-180 text-[#2457D6]' : ''
                   }`}
                 />
               </button>
@@ -1050,7 +1074,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
             </button>
           )}
 
-          {/* Primary Book Consultation CTA Button (Tablet & Desktop: >= 640px) */}
+          {/* Primary Book Consultation CTA Button (Tablet & Desktop: >= 768px) */}
           <a
             id="nav-book-consultation-btn"
             href="/business-growth-consultation"
@@ -1059,7 +1083,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
               analytics.trackGrowthAuditCta('navbar');
               handleNav('/business-growth-consultation');
             }}
-            className="hidden sm:inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 bg-[#2457D6] hover:bg-[#1D46B3] text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-[#2457D6]/25 active:scale-[0.98] rounded-xl font-interface min-h-[44px] whitespace-nowrap"
+            className="hidden md:inline-flex items-center justify-center gap-2 px-3.5 lg:px-5 py-2.5 bg-[#2457D6] hover:bg-[#1D46B3] text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-[#2457D6]/25 active:scale-[0.98] rounded-xl font-interface min-h-[44px] whitespace-nowrap"
           >
             <span>Book Consultation</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -1095,7 +1119,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
           role="dialog"
           aria-modal="true"
           aria-label="Mobile Navigation"
-          className="lg:hidden fixed inset-x-0 top-[58px] sm:top-[68px] bottom-0 h-[calc(100dvh-58px)] sm:h-[calc(100dvh-68px)] bg-[#FFFFFF]/98 backdrop-blur-2xl z-50 overflow-y-auto overscroll-contain flex flex-col justify-between p-5 sm:p-6 border-t border-[#E5EAF2] shadow-2xl animate-in fade-in slide-in-from-top-2 duration-200"
+          className="lg:hidden fixed inset-x-0 top-[68px] sm:top-[72px] bottom-0 h-[calc(100dvh-68px)] sm:h-[calc(100dvh-72px)] bg-[#FFFFFF] z-50 overflow-y-auto overscroll-contain flex flex-col justify-between p-5 sm:p-6 border-t border-[#E5EAF2] shadow-2xl"
         >
           <div className="space-y-3 pt-1">
             <div className="pb-3 border-b border-[#E5EAF2] flex items-center justify-between">
@@ -1109,7 +1133,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   if (onOpenSearch) onOpenSearch();
                   else setIsSearchOpen(true);
                 }}
-                className="text-xs text-[#2457D6] hover:text-[#1D46B3] flex items-center gap-1.5 font-semibold cursor-pointer py-1.5 px-3 rounded-lg bg-[#E8EFFF] border border-[#2457D6]/20 transition-colors"
+                className="min-h-[44px] text-xs text-[#2457D6] hover:text-[#1D46B3] flex items-center gap-1.5 font-semibold cursor-pointer py-2 px-3 rounded-lg bg-[#E8EFFF] border border-[#2457D6]/20 transition-colors"
               >
                 <Search className="w-3.5 h-3.5" />
                 <span>Search Knowledge</span>
@@ -1352,11 +1376,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   </span>
                 </div>
 
-                <div className="space-y-0.5">
+                <div className="space-y-1">
                   <button
                     type="button"
                     onClick={() => handleNav('/dashboard')}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
+                    className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/dashboard'
                         ? 'text-[#2457D6] bg-[#E8EFFF]'
                         : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
@@ -1378,7 +1402,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   <button
                     type="button"
                     onClick={() => handleNav('/my-courses')}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
+                    className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/my-courses'
                         ? 'text-[#2457D6] bg-[#E8EFFF]'
                         : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
@@ -1394,7 +1418,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   <button
                     type="button"
                     onClick={() => handleNav('/my-consultations')}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
+                    className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/my-consultations'
                         ? 'text-[#2457D6] bg-[#E8EFFF]'
                         : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
@@ -1411,7 +1435,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     id="mobile-drawer-student-saved-btn"
                     type="button"
                     onClick={() => handleNav('/saved')}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
+                    className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/saved'
                         ? 'text-[#2457D6] bg-[#E8EFFF]'
                         : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
@@ -1434,7 +1458,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                     id="mobile-drawer-student-wishlist-btn"
                     type="button"
                     onClick={() => handleNav('/wishlist')}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
+                    className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/wishlist'
                         ? 'text-[#2457D6] bg-[#E8EFFF]'
                         : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
@@ -1456,7 +1480,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   <button
                     type="button"
                     onClick={() => handleNav('/resources')}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
+                    className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/resources'
                         ? 'text-[#2457D6] bg-[#E8EFFF]'
                         : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
@@ -1472,7 +1496,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   <button
                     type="button"
                     onClick={() => handleNav('/account?tab=billing')}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
+                    className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/account' && window.location.search.includes('tab=billing')
                         ? 'text-[#2457D6] bg-[#E8EFFF]'
                         : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
@@ -1488,7 +1512,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                   <button
                     type="button"
                     onClick={() => handleNav('/account')}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
+                    className={`w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-between cursor-pointer transition-colors ${
                       currentPath === '/account' && !window.location.search.includes('tab=billing')
                         ? 'text-[#2457D6] bg-[#E8EFFF]'
                         : 'text-[#465166] hover:bg-[#EEF3FA] hover:text-[#172033]'
@@ -1507,7 +1531,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
                       await studentLogout();
                       handleNav('/');
                     }}
-                    className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-red-600 hover:bg-red-50 hover:text-red-700 flex items-center justify-between cursor-pointer transition-colors"
+                    className="w-full min-h-[44px] text-left px-3 py-2.5 rounded-xl text-xs font-semibold text-red-600 hover:bg-red-50 hover:text-red-700 flex items-center justify-between cursor-pointer transition-colors"
                   >
                     <span className="flex items-center gap-2">
                       <LogOut className="w-4 h-4 text-red-600" />
@@ -1584,4 +1608,6 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPath, navigate, onOpenSea
     </header>
   );
 };
+
+export const Navbar = React.memo(NavbarComponent);
 

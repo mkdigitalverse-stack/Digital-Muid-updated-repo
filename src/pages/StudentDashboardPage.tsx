@@ -28,13 +28,36 @@ import {
   Award,
   CreditCard,
   Receipt,
-  Heart
+  Heart,
+  Lock
 } from 'lucide-react';
 import { StudentEnrollmentWithCourse, LessonProgress, Resource, Framework, Course } from '../types';
 import { INITIAL_COURSES } from '../data/initialData';
 import { progressService, resourceService } from '../services';
 import { isAuthoritativePaidResource } from '../constants/authoritativePaidResources';
 import { formatStudentId, formatEnrollmentId } from '../utils/studentId';
+
+function safeTimeMs(input?: string | Date | null): number {
+  if (!input) return 0;
+  const ms = new Date(input).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function formatSafeDate(
+  input?: string | Date | null,
+  locales?: string | string[],
+  options?: Intl.DateTimeFormatOptions,
+  fallback = 'Recent'
+): string {
+  if (!input) return fallback;
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return fallback;
+  try {
+    return d.toLocaleDateString(locales, options);
+  } catch {
+    return fallback;
+  }
+}
 
 interface StudentDashboardPageProps {
   navigate: (path: string) => void;
@@ -79,33 +102,54 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
   const [deliveringResourceId, setDeliveringResourceId] = useState<string | null>(null);
 
   // Derive relevant toolkits and frameworks linked to the student's enrolled courses
+  const safeEnrollments = Array.isArray(studentEnrollments) ? studentEnrollments : [];
+  const safeBookings = Array.isArray(studentBookings) ? studentBookings : [];
+  const safeNotifications = Array.isArray(studentNotifications) ? studentNotifications : [];
+  const safeBookmarks = Array.isArray(studentBookmarks) ? studentBookmarks : [];
+  const safeWishlist = Array.isArray(courseWishlist) ? courseWishlist : [];
+  const safeCertificates = Array.isArray(studentCertificates) ? studentCertificates : [];
+  const safePayments = Array.isArray(studentPayments) ? studentPayments : [];
+  const safeResources = Array.isArray(resources) ? resources : [];
+  const safeFrameworks = Array.isArray(frameworks) ? frameworks : [];
+  const safeCourses = Array.isArray(courses) ? courses : [];
+
   const enrolledMaterials = useMemo(() => {
     const resourceIdSet = new Set<string>();
     const frameworkIdSet = new Set<string>();
 
-    studentEnrollments.forEach((e) => {
-      const c = e.course;
+    safeEnrollments.forEach((e) => {
+      const c = e?.course;
       if (c) {
-        (c.relatedResources || (c as any).related_resources || []).forEach((id: string) => resourceIdSet.add(id));
-        (c.relatedFrameworks || (c as any).related_frameworks || []).forEach((id: string) => frameworkIdSet.add(id));
+        const relRes = Array.isArray(c.relatedResources)
+          ? c.relatedResources
+          : Array.isArray((c as any).related_resources)
+          ? (c as any).related_resources
+          : [];
+        const relFw = Array.isArray(c.relatedFrameworks)
+          ? c.relatedFrameworks
+          : Array.isArray((c as any).related_frameworks)
+          ? (c as any).related_frameworks
+          : [];
+        relRes.forEach((id: string) => resourceIdSet.add(id));
+        relFw.forEach((id: string) => frameworkIdSet.add(id));
       }
     });
 
-    const matchedResources = (resources || []).filter(
+    const matchedResources = safeResources.filter(
       (r) => resourceIdSet.has(r.id) && (r.status === 'published' || !r.status)
     );
-    const matchedFrameworks = (frameworks || []).filter(
+    const matchedFrameworks = safeFrameworks.filter(
       (f) => frameworkIdSet.has(f.id) && (f.status === 'published' || !f.status)
     );
 
     // If courses don't have explicit linking IDs yet, surface top published toolkits and frameworks
     const displayResources = matchedResources.length > 0
       ? matchedResources
-      : (resources || []).filter((r) => r.status === 'published' || !r.status).slice(0, 4);
+      : safeResources.filter((r) => r.status === 'published' || !r.status).slice(0, 4);
 
     const displayFrameworks = matchedFrameworks.length > 0
       ? matchedFrameworks
-      : (frameworks || []).filter((f) => f.status === 'published' || !f.status).slice(0, 4);
+      : safeFrameworks.filter((f) => f.status === 'published' || !f.status).slice(0, 4);
 
     return {
       resources: displayResources,
@@ -113,7 +157,7 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
       hasDirectLinks: matchedResources.length > 0 || matchedFrameworks.length > 0,
       totalCount: displayResources.length + displayFrameworks.length
     };
-  }, [studentEnrollments, resources, frameworks]);
+  }, [safeEnrollments, safeResources, safeFrameworks]);
 
   const handleDeliverToolkit = async (res: Resource) => {
     const isPaid = isAuthoritativePaidResource(res.id) || isAuthoritativePaidResource(res.slug) || ((res.accessType === 'paid' || (res as any).access_type === 'paid') && (res.price || 0) > 0);
@@ -144,8 +188,8 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
   // Lightweight, deterministic Suggested Courses recommendation model (Phase 2A)
   const suggestedCourses = useMemo<Course[]>(() => {
     // Step 1: Filter published courses
-    const allCoursesList: Course[] = (courses && courses.length > 0)
-      ? courses
+    const allCoursesList: Course[] = safeCourses.length > 0
+      ? safeCourses
       : INITIAL_COURSES;
 
     const published = allCoursesList.filter((c) => c.status === 'published' || !c.status);
@@ -153,7 +197,7 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
     // Step 2: Remove courses already enrolled by the current student
     const enrolledIds = new Set<string>();
     const enrolledSlugs = new Set<string>();
-    studentEnrollments.forEach((e) => {
+    safeEnrollments.forEach((e) => {
       enrolledIds.add(e.courseId);
       if (e.course?.id) enrolledIds.add(e.course.id);
       if (e.course?.slug) enrolledSlugs.add(e.course.slug);
@@ -167,7 +211,7 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
 
     // Step 3: New Student Fallback
     // If the student has no enrolled courses: published courses -> enrolledCount DESC -> top 3
-    if (studentEnrollments.length === 0) {
+    if (safeEnrollments.length === 0) {
       return [...unenrolled]
         .sort((a, b) => {
           const countA = a.enrolledCount ?? (a as any).enrolled_count ?? 0;
@@ -178,16 +222,13 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
     }
 
     // Step 4: Build affinity and score candidates
-    // Category match: +10
-    // Each shared tag: +3
-    // If multiple enrolled courses match, scores accumulate.
     const scoredCandidates = unenrolled.map((candidate) => {
       let relevanceScore = 0;
 
       const candidateCategory = ((candidate as any).category || (candidate as any).category_name || '').toLowerCase().trim();
-      const candidateTags = (candidate.tags || []).map((t) => t.toLowerCase().trim());
+      const candidateTags = (Array.isArray(candidate.tags) ? candidate.tags : []).map((t) => String(t).toLowerCase().trim());
 
-      studentEnrollments.forEach((enrollment) => {
+      safeEnrollments.forEach((enrollment) => {
         const enrolledCourse = enrollment.course;
         if (!enrolledCourse) return;
 
@@ -198,7 +239,7 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
         }
 
         // Each shared tag: +3
-        const enrolledTags = (enrolledCourse.tags || []).map((t) => t.toLowerCase().trim());
+        const enrolledTags = (Array.isArray(enrolledCourse.tags) ? enrolledCourse.tags : []).map((t) => String(t).toLowerCase().trim());
         const sharedTagsCount = candidateTags.filter((tag) => enrolledTags.includes(tag)).length;
         relevanceScore += sharedTagsCount * 3;
       });
@@ -222,7 +263,7 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
 
     // Step 6: Return at most 3 courses
     return scoredCandidates.slice(0, 3).map((item) => item.course);
-  }, [courses, studentEnrollments]);
+  }, [safeCourses, safeEnrollments]);
 
   // Redirect unauthenticated visitors to login
   useEffect(() => {
@@ -232,24 +273,32 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
   }, [isAuthLoading, currentUser, navigate]);
 
   // Ensure enrollments, bookings, notifications, and progress are freshly hydrated
+  const currentUserId = currentUser?.id;
   useEffect(() => {
-    if (currentUser) {
-      refreshStudentEnrollments().catch(() => {});
-      refreshStudentBookings().catch(() => {});
-      fetchStudentNotifications(currentUser.id).catch(() => {});
+    if (!currentUserId) return;
 
-      setIsProgressFeedLoading(true);
-      progressService.fetchMyAllProgress().then((res) => {
-        if (res.data) {
-          setLessonProgressList(res.data);
-        }
-      }).catch((err) => {
-        console.error('[StudentDashboard] Error loading progress stream:', err);
-      }).finally(() => {
+    let isActive = true;
+    refreshStudentEnrollments().catch(() => {});
+    refreshStudentBookings().catch(() => {});
+    fetchStudentNotifications(currentUserId).catch(() => {});
+
+    setIsProgressFeedLoading(true);
+    progressService.fetchMyAllProgress().then((res) => {
+      if (isActive && Array.isArray(res.data)) {
+        setLessonProgressList(res.data);
+      }
+    }).catch((err) => {
+      console.error('[StudentDashboard] Error loading progress stream:', err);
+    }).finally(() => {
+      if (isActive) {
         setIsProgressFeedLoading(false);
-      });
-    }
-  }, [currentUser, refreshStudentEnrollments, refreshStudentBookings, fetchStudentNotifications]);
+      }
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, [currentUserId, refreshStudentEnrollments, refreshStudentBookings, fetchStudentNotifications]);
 
   // Student display name
   const displayName = useMemo(() => {
@@ -267,15 +316,15 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
   // Next upcoming consultation
   const nextUpcomingConsultation = useMemo(() => {
     const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
-    const valid = studentBookings
-      .filter((b) => b.status !== 'cancelled' && b.status !== 'completed' && (b.date || '') >= todayStr)
+    const valid = safeBookings
+      .filter((b) => b && b.status !== 'cancelled' && b.status !== 'completed' && (b.date || '') >= todayStr)
       .sort((a, b) => {
-        const dateDiff = a.date.localeCompare(b.date);
+        const dateDiff = (a.date || '').localeCompare(b.date || '');
         if (dateDiff !== 0) return dateDiff;
-        return a.time.localeCompare(b.time);
+        return (a.time || '').localeCompare(b.time || '');
       });
     return valid[0] || null;
-  }, [studentBookings]);
+  }, [safeBookings]);
 
   // Computed summary statistics across active enrollments
   const summary = useMemo(() => {
@@ -311,14 +360,12 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
   // Determine Continue Learning list (courses not yet 100% completed)
   // Sorted by most recent activity/access timestamp descending
   const continueLearningList = useMemo(() => {
-    const active = studentEnrollments.filter((item) => (item.progressPercent || 0) < 100);
+    const active = safeEnrollments.filter((item) => (item.progressPercent || 0) < 100);
 
     return [...active].sort((a, b) => {
-      const timeA = a.lastAccessedAt ? new Date(a.lastAccessedAt).getTime() : 0;
-      const timeB = b.lastAccessedAt ? new Date(b.lastAccessedAt).getTime() : 0;
-      return timeB - timeA;
+      return safeTimeMs(b.lastAccessedAt) - safeTimeMs(a.lastAccessedAt);
     });
-  }, [studentEnrollments]);
+  }, [safeEnrollments]);
 
   // Most prominent course to resume
   const featuredResumeCourse = continueLearningList[0] || null;
@@ -340,8 +387,8 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
     }> = [];
 
     // 1. Student Notifications
-    studentNotifications.forEach((n) => {
-      const timeMs = new Date(n.createdAt).getTime() || 0;
+    safeNotifications.forEach((n) => {
+      const timeMs = safeTimeMs(n.createdAt);
       list.push({
         id: `notif-${n.id}`,
         rawId: n.id,
@@ -358,9 +405,9 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
     });
 
     // 2. Course Enrollments
-    studentEnrollments.forEach((e) => {
+    safeEnrollments.forEach((e) => {
       const ts = e.enrolledAt || e.createdAt;
-      const timeMs = new Date(ts).getTime() || 0;
+      const timeMs = safeTimeMs(ts);
       const course = e.course;
       const slug = course?.slug || e.courseId;
       const pct = Math.min(100, Math.max(0, e.progressPercent || 0));
@@ -382,8 +429,8 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
     // 3. Lesson Progress & Completion Milestones
     lessonProgressList.forEach((p) => {
       const ts = p.completedAt || p.updatedAt;
-      const timeMs = new Date(ts).getTime() || 0;
-      const course = studentEnrollments.find((e) => e.courseId === p.courseId)?.course;
+      const timeMs = safeTimeMs(ts);
+      const course = safeEnrollments.find((e) => e.courseId === p.courseId)?.course;
       const slug = course?.slug || p.courseId;
       const courseTitle = course?.title || 'Masterclass';
 
@@ -405,9 +452,9 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
     });
 
     // 4. Consultation Bookings
-    studentBookings.forEach((b) => {
-      const ts = b.createdAt || `${b.date}T${b.time || '10:00'}:00Z`;
-      const timeMs = new Date(ts).getTime() || 0;
+    safeBookings.forEach((b) => {
+      const ts = b.createdAt || (b.date ? `${b.date}T${b.time || '10:00'}:00Z` : '');
+      const timeMs = safeTimeMs(ts);
       const statusLabel =
         b.status === 'confirmed'
           ? 'Confirmed'
@@ -423,7 +470,7 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
         source: 'booking',
         type: b.status,
         title: b.serviceName ? `Consultation: ${b.serviceName}` : '1-on-1 Growth Consultation',
-        description: `Scheduled for ${b.date} at ${b.time} (${statusLabel})`,
+        description: `Scheduled for ${b.date || 'TBD'} at ${b.time || 'TBD'} (${statusLabel})`,
         timestamp: ts,
         isRead: true,
         link: '/my-consultations',
@@ -434,7 +481,7 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
 
     // Sort descending by time
     return list.sort((a, b) => b.timeMs - a.timeMs);
-  }, [studentNotifications, studentEnrollments, lessonProgressList, studentBookings]);
+  }, [safeNotifications, safeEnrollments, lessonProgressList, safeBookings]);
 
   // Filtered Activity Stream
   const filteredActivities = useMemo(() => {
@@ -487,18 +534,18 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
   return (
     <div id="student-dashboard-root" className="pt-28 sm:pt-32 pb-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
       {/* 1. Welcome Section */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-slate-200">
-        <div className="space-y-3">
+      <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-6 pb-6 border-b border-slate-200">
+        <div className="space-y-3 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-50 border border-orange-200 text-[#FF6B00] text-xs font-bold uppercase tracking-wider font-interface">
-              <GraduationCap className="w-3.5 h-3.5" />
+              <GraduationCap className="w-3.5 h-3.5 shrink-0" />
               <span>Student Learning Portal</span>
             </div>
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-[#2457D6] text-xs font-mono font-semibold">
               <span>Student ID: {studentId}</span>
             </div>
           </div>
-          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold text-slate-900 tracking-tight">
+          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-display font-bold text-slate-900 tracking-tight break-words">
             Welcome back, {displayName}
           </h1>
           <p className="text-slate-600 text-sm sm:text-base font-interface max-w-2xl">
@@ -506,45 +553,45 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 shrink-0">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 shrink-0">
           <button
             id="dashboard-saved-shortcut-btn"
             type="button"
             onClick={() => navigate('/saved')}
-            className="px-4 py-2.5 bg-white hover:bg-orange-50/50 text-slate-800 hover:text-[#FF6B00] border border-slate-200 hover:border-[#FF6B00]/40 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-sm hover:shadow"
+            className="min-h-[44px] px-4 py-2.5 bg-white hover:bg-orange-50/50 text-slate-800 hover:text-[#FF6B00] border border-slate-200 hover:border-[#FF6B00]/40 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-sm hover:shadow"
           >
-            <Bookmark className="w-4 h-4 text-[#FF6B00]" />
-            <span>Saved Content ({studentBookmarks.length})</span>
+            <Bookmark className="w-4 h-4 text-[#FF6B00] shrink-0" />
+            <span>Saved Content ({safeBookmarks.length})</span>
           </button>
           <button
             id="dashboard-wishlist-shortcut-btn"
             type="button"
             onClick={() => navigate('/wishlist')}
-            className="px-4 py-2.5 bg-white hover:bg-rose-50/50 text-slate-800 hover:text-rose-600 border border-slate-200 hover:border-rose-200 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-sm hover:shadow"
+            className="min-h-[44px] px-4 py-2.5 bg-white hover:bg-rose-50/50 text-slate-800 hover:text-rose-600 border border-slate-200 hover:border-rose-200 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-sm hover:shadow"
           >
-            <Heart className="w-4 h-4 text-rose-500" />
-            <span>Wishlist ({courseWishlist.length})</span>
+            <Heart className="w-4 h-4 text-rose-500 shrink-0" />
+            <span>Wishlist ({safeWishlist.length})</span>
           </button>
           <button
             type="button"
             onClick={() => navigate('/my-courses')}
-            className="px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-sm hover:shadow"
+            className="min-h-[44px] px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-sm hover:shadow"
           >
-            <BookOpen className="w-4 h-4 text-[#FF6B00]" />
+            <BookOpen className="w-4 h-4 text-[#FF6B00] shrink-0" />
             <span>My Courses</span>
           </button>
           <button
             type="button"
             onClick={() => navigate('/learn')}
-            className="px-4 py-2.5 bg-[#0F172A] hover:bg-slate-800 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-sm"
+            className="min-h-[44px] px-4 py-2.5 bg-[#0F172A] hover:bg-slate-800 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-sm"
           >
-            <Compass className="w-4 h-4 text-[#FF6B00]" />
+            <Compass className="w-4 h-4 text-[#FF6B00] shrink-0" />
             <span>Browse Catalog</span>
           </button>
         </div>
       </div>
 
-      {/* Error Banner if Supabase query failed */}
+      {/* Error Banner if enrollment fetch failed */}
       {enrollmentsError && (
         <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
@@ -558,66 +605,66 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
       {/* 2. Summary Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Card 1: Enrolled Courses */}
-        <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider font-interface">
+        <div className="p-4 xl:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm flex items-center justify-between gap-3 min-w-0">
+          <div className="space-y-1 min-w-0">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider font-interface block truncate">
               Enrolled Courses
             </span>
-            <div className="text-3xl font-display font-bold text-slate-900 font-mono">
+            <div className="text-2xl xl:text-3xl font-display font-bold text-slate-900 font-mono">
               {summary.totalEnrolled}
             </div>
-            <span className="text-[11px] text-slate-500">Active enrollments</span>
+            <span className="text-[11px] text-slate-500 block truncate">Active enrollments</span>
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-orange-50 text-[#FF6B00] border border-orange-100 flex items-center justify-center shrink-0">
-            <BookOpen className="w-6 h-6" />
+          <div className="w-10 h-10 xl:w-12 xl:h-12 rounded-2xl bg-orange-50 text-[#FF6B00] border border-orange-100 flex items-center justify-center shrink-0">
+            <BookOpen className="w-5 h-5 xl:w-6 xl:h-6" />
           </div>
         </div>
 
         {/* Card 2: In Progress */}
-        <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider font-interface">
+        <div className="p-4 xl:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm flex items-center justify-between gap-3 min-w-0">
+          <div className="space-y-1 min-w-0">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider font-interface block truncate">
               In Progress
             </span>
-            <div className="text-3xl font-display font-bold text-slate-900 font-mono">
+            <div className="text-2xl xl:text-3xl font-display font-bold text-slate-900 font-mono">
               {summary.inProgressCourses}
             </div>
-            <span className="text-[11px] text-slate-500">Courses underway</span>
+            <span className="text-[11px] text-slate-500 block truncate">Courses underway</span>
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 flex items-center justify-center shrink-0">
-            <Clock className="w-6 h-6" />
+          <div className="w-10 h-10 xl:w-12 xl:h-12 rounded-2xl bg-blue-50 text-blue-600 border border-blue-100 flex items-center justify-center shrink-0">
+            <Clock className="w-5 h-5 xl:w-6 xl:h-6" />
           </div>
         </div>
 
         {/* Card 3: Completed Courses */}
-        <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider font-interface">
+        <div className="p-4 xl:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm flex items-center justify-between gap-3 min-w-0">
+          <div className="space-y-1 min-w-0">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider font-interface block truncate">
               Completed
             </span>
-            <div className="text-3xl font-display font-bold text-slate-900 font-mono">
+            <div className="text-2xl xl:text-3xl font-display font-bold text-slate-900 font-mono">
               {summary.completedCourses}
             </div>
-            <span className="text-[11px] text-slate-500">Finished courses</span>
+            <span className="text-[11px] text-slate-500 block truncate">Finished courses</span>
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center shrink-0">
-            <CheckCircle2 className="w-6 h-6" />
+          <div className="w-10 h-10 xl:w-12 xl:h-12 rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center shrink-0">
+            <CheckCircle2 className="w-5 h-5 xl:w-6 xl:h-6" />
           </div>
         </div>
 
         {/* Card 4: Overall Progress */}
-        <div className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm flex items-center justify-between">
-          <div className="space-y-1">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider font-interface">
+        <div className="p-4 xl:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm flex items-center justify-between gap-3 min-w-0">
+          <div className="space-y-1 min-w-0">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider font-interface block truncate">
               Avg. Progress
             </span>
-            <div className="text-3xl font-display font-bold text-slate-900 font-mono">
+            <div className="text-2xl xl:text-3xl font-display font-bold text-slate-900 font-mono">
               {summary.overallProgress}%
             </div>
-            <span className="text-[11px] text-slate-500">Across masterclasses</span>
+            <span className="text-[11px] text-slate-500 block truncate">Across masterclasses</span>
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 border border-purple-100 flex items-center justify-center shrink-0">
-            <TrendingUp className="w-6 h-6" />
+          <div className="w-10 h-10 xl:w-12 xl:h-12 rounded-2xl bg-purple-50 text-purple-600 border border-purple-100 flex items-center justify-center shrink-0">
+            <TrendingUp className="w-5 h-5 xl:w-6 xl:h-6" />
           </div>
         </div>
 
@@ -625,22 +672,22 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
         <div
           id="dashboard-saved-metric-card"
           onClick={() => navigate('/saved')}
-          className="p-5 rounded-3xl bg-white border border-slate-200 shadow-sm flex items-center justify-between hover:border-[#FF6B00]/50 hover:shadow-md transition-all cursor-pointer group"
+          className="sm:col-span-2 lg:col-span-1 p-4 xl:p-5 rounded-3xl bg-white border border-slate-200 shadow-sm flex items-center justify-between gap-3 min-w-0 hover:border-[#FF6B00]/50 hover:shadow-md transition-all cursor-pointer group"
         >
-          <div className="space-y-1">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider font-interface group-hover:text-[#FF6B00] transition-colors">
+          <div className="space-y-1 min-w-0">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider font-interface group-hover:text-[#FF6B00] transition-colors block truncate">
               Saved Items
             </span>
-            <div className="text-3xl font-display font-bold text-slate-900 font-mono">
-              {studentBookmarks.length}
+            <div className="text-2xl xl:text-3xl font-display font-bold text-slate-900 font-mono">
+              {safeBookmarks.length}
             </div>
             <span className="text-[11px] text-slate-500 flex items-center gap-1 group-hover:text-[#FF6B00] transition-colors">
-              <span>View collection</span>
-              <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+              <span className="truncate">View collection</span>
+              <ArrowRight className="w-3 h-3 shrink-0 group-hover:translate-x-0.5 transition-transform" />
             </span>
           </div>
-          <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 border border-amber-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-            <Bookmark className="w-6 h-6 text-[#FF6B00]" />
+          <div className="w-10 h-10 xl:w-12 xl:h-12 rounded-2xl bg-amber-50 text-amber-600 border border-amber-100 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+            <Bookmark className="w-5 h-5 xl:w-6 xl:h-6 text-[#FF6B00]" />
           </div>
         </div>
       </div>
@@ -742,7 +789,7 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
                     </span>
                   )}
                   <span className="text-xs text-slate-500 font-mono">
-                    Enrolled {new Date(featuredResumeCourse.enrolledAt).toLocaleDateString()}
+                    Enrolled {formatSafeDate(featuredResumeCourse.enrolledAt)}
                   </span>
                   <span className="text-[11px] font-mono font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
                     Enrolment ID: {formatEnrollmentId(featuredResumeCourse.enrollmentId || featuredResumeCourse.id)}
@@ -780,14 +827,14 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
                 </div>
 
                 {/* Action CTA */}
-                <div className="pt-2 flex items-center gap-3">
+                <div className="pt-2 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
                     onClick={() => {
                       const slug = featuredResumeCourse.course?.slug || featuredResumeCourse.courseId;
                       navigate(`/learn/${slug}/player`);
                     }}
-                    className="px-6 py-3 bg-[#FF6B00] hover:bg-[#e66000] text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-lg shadow-[#FF6B00]/20 active:scale-[0.98]"
+                    className="min-h-[44px] px-6 py-3 bg-[#FF6B00] hover:bg-[#e66000] text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-lg shadow-[#FF6B00]/20 active:scale-[0.98]"
                   >
                     <PlayCircle className="w-4 h-4" />
                     <span>
@@ -802,7 +849,7 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
                       const slug = featuredResumeCourse.course?.slug || featuredResumeCourse.courseId;
                       navigate(`/learn/${slug}`);
                     }}
-                    className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
+                    className="min-h-[44px] px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
                   >
                     Course Details
                   </button>
@@ -1151,7 +1198,10 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
                     </div>
 
                     {(() => {
-                      const isPaid = (res.accessType === 'paid' || (res as any).access_type === 'paid') && (res.price || 0) > 0;
+                      const isPaid =
+                        isAuthoritativePaidResource(res.id) ||
+                        isAuthoritativePaidResource(res.slug) ||
+                        ((res.accessType === 'paid' || (res as any).access_type === 'paid') && (res.price || 0) > 0);
                       const isEntitled = !isPaid || hasPurchasedResource(res.id);
 
                       if (isPaid && !isEntitled) {
@@ -1159,7 +1209,7 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
                           <button
                             type="button"
                             onClick={() => handleDeliverToolkit(res)}
-                            className="px-3 py-1.5 rounded-lg bg-[#FF6B00] hover:bg-[#FF7A1A] text-white text-[11px] font-bold uppercase tracking-wider transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                            className="min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg bg-[#FF6B00] hover:bg-[#FF7A1A] text-white text-[11px] font-bold uppercase tracking-wider transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer shadow-2xs"
                           >
                             <Lock className="w-3 h-3" />
                             <span>Unlock ₹{res.price}</span>
@@ -1172,7 +1222,7 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
                           type="button"
                           onClick={() => handleDeliverToolkit(res)}
                           disabled={deliveringResourceId === res.id}
-                          className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-amber-600 text-white text-[11px] font-bold uppercase tracking-wider transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-60"
+                          className="min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-amber-600 text-white text-[11px] font-bold uppercase tracking-wider transition-colors shrink-0 flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-60"
                         >
                           {deliveringResourceId === res.id ? (
                             <>
@@ -1280,22 +1330,16 @@ export const StudentDashboardPage: React.FC<StudentDashboardPageProps> = ({ navi
             <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-500">
               Most Recent Transaction
             </span>
-            {studentPayments.length > 0 ? (
-              <div className="mt-1 space-y-0.5">
+            {safePayments.length > 0 ? (
+              <div className="mt-1 space-y-0.5 min-w-0">
                 <div className="text-xs font-bold text-slate-900 truncate">
-                  {studentPayments[0].itemTitle || 'Educational Service'}
+                  {safePayments[0].itemTitle || 'Educational Service'}
                 </div>
                 <div className="text-[10px] font-mono text-slate-500 flex items-center gap-1.5">
-                  <span>{studentPayments[0].currency || 'INR'} {studentPayments[0].amount.toLocaleString('en-IN')}</span>
+                  <span>{safePayments[0].currency || 'INR'} {Number(safePayments[0].amount || 0).toLocaleString('en-IN')}</span>
                   <span>·</span>
                   <span>
-                    {(() => {
-                      try {
-                        return new Date(studentPayments[0].createdAt).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
-                      } catch {
-                        return 'Recent';
-                      }
-                    })()}
+                    {formatSafeDate(safePayments[0].createdAt, 'en-IN', { month: 'short', day: 'numeric' })}
                   </span>
                 </div>
               </div>

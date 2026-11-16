@@ -29,6 +29,17 @@ interface MyCoursesPageProps {
   navigate: (path: string) => void;
 }
 
+const formatSafeDate = (value?: string | null, fallback = 'Recent'): string => {
+  if (!value) return fallback;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return fallback;
+  try {
+    return d.toLocaleDateString();
+  } catch {
+    return fallback;
+  }
+};
+
 export const MyCoursesPage: React.FC<MyCoursesPageProps> = ({ navigate }) => {
   const {
     currentUser,
@@ -63,11 +74,12 @@ export const MyCoursesPage: React.FC<MyCoursesPageProps> = ({ navigate }) => {
   }, [isAuthLoading, currentUser, navigate]);
 
   // Ensure fresh enrollments data on mount
+  const currentUserId = currentUser?.id;
   useEffect(() => {
-    if (currentUser) {
+    if (currentUserId) {
       refreshStudentEnrollments().catch(() => {});
     }
-  }, [currentUser, refreshStudentEnrollments]);
+  }, [currentUserId, refreshStudentEnrollments]);
 
   // Filtered course enrollments
   const filteredEnrollments = useMemo(() => {
@@ -182,11 +194,11 @@ export const MyCoursesPage: React.FC<MyCoursesPageProps> = ({ navigate }) => {
       {/* Filter Tabs (when courses exist) */}
       {studentEnrollments.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl border border-slate-200">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 p-1.5 bg-slate-100 rounded-xl border border-slate-200 max-w-full">
             <button
               type="button"
               onClick={() => setFilter('all')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+              className={`min-h-[44px] whitespace-nowrap px-3.5 sm:px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
                 filter === 'all'
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
@@ -197,7 +209,7 @@ export const MyCoursesPage: React.FC<MyCoursesPageProps> = ({ navigate }) => {
             <button
               type="button"
               onClick={() => setFilter('in-progress')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+              className={`min-h-[44px] whitespace-nowrap px-3.5 sm:px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
                 filter === 'in-progress'
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
@@ -208,7 +220,7 @@ export const MyCoursesPage: React.FC<MyCoursesPageProps> = ({ navigate }) => {
             <button
               type="button"
               onClick={() => setFilter('completed')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+              className={`min-h-[44px] whitespace-nowrap px-3.5 sm:px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
                 filter === 'completed'
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
@@ -219,7 +231,7 @@ export const MyCoursesPage: React.FC<MyCoursesPageProps> = ({ navigate }) => {
             <button
               type="button"
               onClick={() => setFilter('certificates')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`min-h-[44px] whitespace-nowrap px-3.5 sm:px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
                 filter === 'certificates'
                   ? 'bg-amber-500 text-white shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
@@ -375,7 +387,7 @@ export const MyCoursesPage: React.FC<MyCoursesPageProps> = ({ navigate }) => {
                         {formatEnrollmentId(item.enrollmentId || item.id)}
                       </span>
                       <span className="font-mono text-slate-500">
-                        {new Date(item.enrolledAt).toLocaleDateString()}
+                        {formatSafeDate(item.enrolledAt)}
                       </span>
                     </div>
                   </div>
@@ -518,7 +530,7 @@ export const MyCoursesPage: React.FC<MyCoursesPageProps> = ({ navigate }) => {
                           <span>Issued On</span>
                         </div>
                         <div className="font-semibold text-slate-800 text-[11px] truncate mt-0.5">
-                          {new Date(cert.issuedAt).toLocaleDateString()}
+                          {formatSafeDate(cert.issuedAt, 'Issued')}
                         </div>
                       </div>
                     </div>

@@ -44,11 +44,12 @@ export const MyConsultationsPage: React.FC<MyConsultationsPageProps> = ({ naviga
   }, [isAuthLoading, currentUser, navigate]);
 
   // Load fresh bookings on mount
+  const currentUserId = currentUser?.id;
   useEffect(() => {
-    if (currentUser) {
+    if (currentUserId) {
       refreshStudentBookings().catch(() => {});
     }
-  }, [currentUser, refreshStudentBookings]);
+  }, [currentUserId, refreshStudentBookings]);
 
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
@@ -73,9 +74,9 @@ export const MyConsultationsPage: React.FC<MyConsultationsPageProps> = ({ naviga
     return studentBookings
       .filter(isBookingUpcoming)
       .sort((a, b) => {
-        const dateDiff = a.date.localeCompare(b.date);
+        const dateDiff = (a.date || '').localeCompare(b.date || '');
         if (dateDiff !== 0) return dateDiff;
-        return a.time.localeCompare(b.time);
+        return (a.time || '').localeCompare(b.time || '');
       });
   }, [studentBookings]);
 
@@ -83,9 +84,9 @@ export const MyConsultationsPage: React.FC<MyConsultationsPageProps> = ({ naviga
     return studentBookings
       .filter((b) => !isBookingUpcoming(b))
       .sort((a, b) => {
-        const dateDiff = b.date.localeCompare(a.date);
+        const dateDiff = (b.date || '').localeCompare(a.date || '');
         if (dateDiff !== 0) return dateDiff;
-        return b.time.localeCompare(a.time);
+        return (b.time || '').localeCompare(a.time || '');
       });
   }, [studentBookings]);
 
@@ -144,6 +145,7 @@ export const MyConsultationsPage: React.FC<MyConsultationsPageProps> = ({ naviga
         const month = parseInt(parts[1], 10) - 1;
         const day = parseInt(parts[2], 10);
         const d = new Date(year, month, day);
+        if (isNaN(d.getTime())) return dateStr;
         return d.toLocaleDateString('en-US', {
           weekday: 'short',
           month: 'short',
@@ -280,12 +282,12 @@ export const MyConsultationsPage: React.FC<MyConsultationsPageProps> = ({ naviga
       </div>
 
       {/* 3. Filter Tabs */}
-      <div className="flex items-center justify-between border-b border-slate-200 pb-3 gap-4">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between border-b border-slate-200 pb-3 gap-4">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setActiveTab('upcoming')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+            className={`min-h-[44px] whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === 'upcoming'
                 ? 'bg-[#0F172A] text-white shadow-xs'
                 : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
@@ -296,7 +298,7 @@ export const MyConsultationsPage: React.FC<MyConsultationsPageProps> = ({ naviga
           <button
             type="button"
             onClick={() => setActiveTab('past')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+            className={`min-h-[44px] whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === 'past'
                 ? 'bg-[#0F172A] text-white shadow-xs'
                 : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
@@ -307,7 +309,7 @@ export const MyConsultationsPage: React.FC<MyConsultationsPageProps> = ({ naviga
           <button
             type="button"
             onClick={() => setActiveTab('all')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
+            className={`min-h-[44px] whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
               activeTab === 'all'
                 ? 'bg-[#0F172A] text-white shadow-xs'
                 : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'

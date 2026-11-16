@@ -5,6 +5,7 @@ export interface ErrorBoundaryProps {
   children?: any;
   fallback?: any;
   key?: any;
+  resetKey?: string;
   onReset?: () => void;
 }
 
@@ -36,6 +37,12 @@ export class ErrorBoundary extends BaseComponent<ErrorBoundaryProps, ErrorBounda
 
   componentDidCatch(error: Error, errorInfo: any) {
     console.error('[ErrorBoundary caught error]:', error, errorInfo);
+  }
+
+  componentDidUpdate(prevProps: ErrorBoundaryProps) {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false, error: null });
+    }
   }
 
   handleReset = () => {

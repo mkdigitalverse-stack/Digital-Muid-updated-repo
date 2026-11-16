@@ -238,7 +238,7 @@ export const SavedContentPage: React.FC<SavedContentPageProps> = ({ navigate }) 
   return (
     <div className="min-h-screen bg-[#F8FAFC]">
       {/* Header Banner */}
-      <section className="bg-[#07111F] text-white border-b border-slate-800 relative overflow-hidden py-10 sm:py-14">
+      <section className="bg-[#07111F] text-white border-b border-slate-800 relative overflow-hidden pt-28 sm:pt-32 pb-10 sm:pb-14">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,107,0,0.12),transparent_60%)] pointer-events-none" />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -280,12 +280,12 @@ export const SavedContentPage: React.FC<SavedContentPageProps> = ({ navigate }) 
         {/* Navigation Filters & Search */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-6 border-b border-slate-200">
           {/* Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-2 lg:pb-0 scrollbar-none">
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 overflow-x-auto pb-2 lg:pb-0 scrollbar-none">
             <button
               id="tab-saved-all"
               type="button"
               onClick={() => setActiveTab('all')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
                 activeTab === 'all'
                   ? 'bg-[#FF6B00] text-white shadow-md shadow-[#FF6B00]/20'
                   : 'bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200'
@@ -301,7 +301,7 @@ export const SavedContentPage: React.FC<SavedContentPageProps> = ({ navigate }) 
               id="tab-saved-resources"
               type="button"
               onClick={() => setActiveTab('resource')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
                 activeTab === 'resource'
                   ? 'bg-[#FF6B00] text-white shadow-md shadow-[#FF6B00]/20'
                   : 'bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200'
@@ -318,7 +318,7 @@ export const SavedContentPage: React.FC<SavedContentPageProps> = ({ navigate }) 
               id="tab-saved-frameworks"
               type="button"
               onClick={() => setActiveTab('framework')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
                 activeTab === 'framework'
                   ? 'bg-[#FF6B00] text-white shadow-md shadow-[#FF6B00]/20'
                   : 'bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200'
@@ -335,7 +335,7 @@ export const SavedContentPage: React.FC<SavedContentPageProps> = ({ navigate }) 
               id="tab-saved-articles"
               type="button"
               onClick={() => setActiveTab('article')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
                 activeTab === 'article'
                   ? 'bg-[#FF6B00] text-white shadow-md shadow-[#FF6B00]/20'
                   : 'bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200'
@@ -352,7 +352,7 @@ export const SavedContentPage: React.FC<SavedContentPageProps> = ({ navigate }) 
               id="tab-saved-videos"
               type="button"
               onClick={() => setActiveTab('video')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              className={`min-h-[44px] px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
                 activeTab === 'video'
                   ? 'bg-[#FF6B00] text-white shadow-md shadow-[#FF6B00]/20'
                   : 'bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200'

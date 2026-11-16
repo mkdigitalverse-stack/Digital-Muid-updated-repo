@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
@@ -7,45 +7,58 @@ import { ToastNotification } from './components/ToastNotification';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { SEOHead } from './components/SEOHead';
 
-// Pages
+// Eager Core Pages
 import { HomePage } from './pages/HomePage';
-import { AboutPage } from './pages/AboutPage';
-import { InsightsPage } from './pages/InsightsPage';
-import { ArticleDetailPage } from './pages/ArticleDetailPage';
-import { WatchPage } from './pages/WatchPage';
-import { VideoDetailPage } from './pages/VideoDetailPage';
-import { LearnPage } from './pages/LearnPage';
-import { AcademyPage } from './pages/AcademyPage';
-import { CourseDetailPage } from './pages/CourseDetailPage';
-import { FrameworksPage } from './pages/FrameworksPage';
-import { FrameworkDetailPage } from './pages/FrameworkDetailPage';
-import { ResourcesPage } from './pages/ResourcesPage';
-import { FreeResourceThankYouPage } from './pages/FreeResourceThankYouPage';
-import { PaidResourceThankYouPage } from './pages/PaidResourceThankYouPage';
-import { BundleAccessPage } from './pages/BundleAccessPage';
-import { MetaAdsCampaignBundlePage } from './pages/MetaAdsCampaignBundlePage';
-import { SpeakingPage } from './pages/SpeakingPage';
-import { ServicesPage } from './pages/ServicesPage';
-import { GrowthSystemsPage } from './pages/GrowthSystemsPage';
-import { AgencyServicesPage } from './pages/AgencyServicesPage';
-import { GrowthAuditPage } from './pages/GrowthAuditPage';
-import { WebPage } from './pages/WebPage';
 import { NotFoundPage } from './pages/NotFoundPage';
-import { ConsultationPage } from './pages/ConsultationPage';
-import { ConsultationConfirmationPage } from './pages/ConsultationConfirmationPage';
-import { ContactPage } from './pages/ContactPage';
-import { AdminPage } from './pages/AdminPage';
-import { TermsPage } from './pages/TermsPage';
-import { AuthPage } from './pages/AuthPage';
-import { StudentDashboardPage } from './pages/StudentDashboardPage';
-import { MyCoursesPage } from './pages/MyCoursesPage';
-import { MyConsultationsPage } from './pages/MyConsultationsPage';
-import { CoursePlayerPage } from './pages/CoursePlayerPage';
-import { AccountPage } from './pages/AccountPage';
-import { SavedContentPage } from './pages/SavedContentPage';
-import { CourseWishlistPage } from './pages/CourseWishlistPage';
-import { CertificateVerifyPage } from './pages/CertificateVerifyPage';
 import { Booking } from './types';
+
+// Lazy-loaded Route Pages (Code-splitting for fast initial parse & smooth navigation)
+const AboutPage = lazy(() => import('./pages/AboutPage').then((m) => ({ default: m.AboutPage })));
+const InsightsPage = lazy(() => import('./pages/InsightsPage').then((m) => ({ default: m.InsightsPage })));
+const ArticleDetailPage = lazy(() => import('./pages/ArticleDetailPage').then((m) => ({ default: m.ArticleDetailPage })));
+const WatchPage = lazy(() => import('./pages/WatchPage').then((m) => ({ default: m.WatchPage })));
+const VideoDetailPage = lazy(() => import('./pages/VideoDetailPage').then((m) => ({ default: m.VideoDetailPage })));
+const LearnPage = lazy(() => import('./pages/LearnPage').then((m) => ({ default: m.LearnPage })));
+const AcademyPage = lazy(() => import('./pages/AcademyPage').then((m) => ({ default: m.AcademyPage })));
+const CourseDetailPage = lazy(() => import('./pages/CourseDetailPage').then((m) => ({ default: m.CourseDetailPage })));
+const FrameworksPage = lazy(() => import('./pages/FrameworksPage').then((m) => ({ default: m.FrameworksPage })));
+const FrameworkDetailPage = lazy(() => import('./pages/FrameworkDetailPage').then((m) => ({ default: m.FrameworkDetailPage })));
+const ResourcesPage = lazy(() => import('./pages/ResourcesPage').then((m) => ({ default: m.ResourcesPage })));
+const FreeResourceThankYouPage = lazy(() => import('./pages/FreeResourceThankYouPage').then((m) => ({ default: m.FreeResourceThankYouPage })));
+const PaidResourceThankYouPage = lazy(() => import('./pages/PaidResourceThankYouPage').then((m) => ({ default: m.PaidResourceThankYouPage })));
+const BundleAccessPage = lazy(() => import('./pages/BundleAccessPage').then((m) => ({ default: m.BundleAccessPage })));
+const MetaAdsCampaignBundlePage = lazy(() => import('./pages/MetaAdsCampaignBundlePage').then((m) => ({ default: m.MetaAdsCampaignBundlePage })));
+const SpeakingPage = lazy(() => import('./pages/SpeakingPage').then((m) => ({ default: m.SpeakingPage })));
+const ServicesPage = lazy(() => import('./pages/ServicesPage').then((m) => ({ default: m.ServicesPage })));
+const GrowthSystemsPage = lazy(() => import('./pages/GrowthSystemsPage').then((m) => ({ default: m.GrowthSystemsPage })));
+const AgencyServicesPage = lazy(() => import('./pages/AgencyServicesPage').then((m) => ({ default: m.AgencyServicesPage })));
+const GrowthAuditPage = lazy(() => import('./pages/GrowthAuditPage').then((m) => ({ default: m.GrowthAuditPage })));
+const WebPage = lazy(() => import('./pages/WebPage').then((m) => ({ default: m.WebPage })));
+const ConsultationPage = lazy(() => import('./pages/ConsultationPage').then((m) => ({ default: m.ConsultationPage })));
+const ConsultationConfirmationPage = lazy(() => import('./pages/ConsultationConfirmationPage').then((m) => ({ default: m.ConsultationConfirmationPage })));
+const ContactPage = lazy(() => import('./pages/ContactPage').then((m) => ({ default: m.ContactPage })));
+const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })));
+const TermsPage = lazy(() => import('./pages/TermsPage').then((m) => ({ default: m.TermsPage })));
+const AuthPage = lazy(() => import('./pages/AuthPage').then((m) => ({ default: m.AuthPage })));
+const StudentDashboardPage = lazy(() => import('./pages/StudentDashboardPage').then((m) => ({ default: m.StudentDashboardPage })));
+const MyCoursesPage = lazy(() => import('./pages/MyCoursesPage').then((m) => ({ default: m.MyCoursesPage })));
+const MyConsultationsPage = lazy(() => import('./pages/MyConsultationsPage').then((m) => ({ default: m.MyConsultationsPage })));
+const CoursePlayerPage = lazy(() => import('./pages/CoursePlayerPage').then((m) => ({ default: m.CoursePlayerPage })));
+const AccountPage = lazy(() => import('./pages/AccountPage').then((m) => ({ default: m.AccountPage })));
+const SavedContentPage = lazy(() => import('./pages/SavedContentPage').then((m) => ({ default: m.SavedContentPage })));
+const CourseWishlistPage = lazy(() => import('./pages/CourseWishlistPage').then((m) => ({ default: m.CourseWishlistPage })));
+const CertificateVerifyPage = lazy(() => import('./pages/CertificateVerifyPage').then((m) => ({ default: m.CertificateVerifyPage })));
+
+const RouteFallback: React.FC = () => (
+  <div className="min-h-[65vh] pt-28 pb-16 flex items-center justify-center px-4">
+    <div className="flex flex-col items-center gap-3">
+      <div className="w-8 h-8 border-2 border-[#2457D6] border-t-transparent rounded-full animate-spin" />
+      <p className="text-xs font-interface font-semibold text-[#596579] tracking-wide">
+        Loading view...
+      </p>
+    </div>
+  </div>
+);
 
 const MainApp: React.FC = () => {
   const [currentPath, setCurrentPath] = useState<string>(() => {
@@ -57,11 +70,11 @@ const MainApp: React.FC = () => {
   const [lastConfirmedBooking, setLastConfirmedBooking] = useState<Booking | null>(null);
 
   // Router handler
-  const navigate = (path: string) => {
+  const navigate = useCallback((path: string) => {
     window.history.pushState({}, '', path);
     setCurrentPath(path);
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, []);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -354,8 +367,10 @@ const MainApp: React.FC = () => {
       )}
 
       <main className="flex-1">
-        <ErrorBoundary>
-          {renderCurrentPage()}
+        <ErrorBoundary resetKey={normalizedCurrentPath}>
+          <Suspense fallback={<RouteFallback />}>
+            {renderCurrentPage()}
+          </Suspense>
         </ErrorBoundary>
       </main>
 

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured, getSupabaseConfigStatus } from '../lib/supabase';
 import {
@@ -530,13 +530,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const notifyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const notify = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+  const notify = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setNotification({ message, type });
-    setTimeout(() => {
+    if (notifyTimeoutRef.current) {
+      clearTimeout(notifyTimeoutRef.current);
+    }
+    notifyTimeoutRef.current = setTimeout(() => {
       setNotification(null);
+      notifyTimeoutRef.current = null;
     }, 4000);
-  };
+  }, []);
 
   // Student Bookmarks & Saved Content (Phase 2H)
   const [studentBookmarks, setStudentBookmarks] = useState<StudentBookmark[]>([]);
@@ -1023,9 +1028,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
+  const inFlightSessionRef = useRef<{ key: string; promise: Promise<void> } | null>(null);
+  const lastInitialSessionKeyRef = useRef<string | null>(null);
+
   // Unified Session Resolution: Differentiates verified Administrators from normal Students
-  const handleSessionResolution = useCallback(async (session: Session | null) => {
+  const handleSessionResolution = useCallback(async (session: Session | null, options?: { isInitialEvent?: boolean }) => {
     if (!session || !session.user) {
+      inFlightSessionRef.current = null;
+      lastInitialSessionKeyRef.current = null;
       setCurrentSession(null);
       setCurrentUser(null);
       setUserProfile(null);
@@ -1054,45 +1064,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
 
-    setCurrentSession(session);
-    setCurrentUser(session.user);
-
-    // Strictly verify administrative status against Supabase RPC / authorized claims
-    const isAdmin = await authService.checkIsAdmin(session.user);
-
-    if (isAdmin) {
-      setAdminSession(session);
-      setAdminUser(session.user);
-      setIsAdminAuthenticated(true);
-      setIsStudentAuthenticated(true);
-      setAuthRole('admin');
-      profileService.fetchProfile(session.user.id).then((res) => {
-        if (res.data) setUserProfile(res.data);
-      }).catch(() => {});
-    } else {
-      setAdminSession(null);
-      setAdminUser(null);
-      setIsAdminAuthenticated(false);
-      setIsStudentAuthenticated(true);
-      setAuthRole('student');
-      profileService.ensureProfile(session.user.id, {
-        fullName: session.user.user_metadata?.full_name || session.user.user_metadata?.name
-      }).then((res) => {
-        if (res.data) setUserProfile(res.data);
-      }).catch(() => {});
+    const sessionKey = `${session.user.id}:${session.access_token || ''}`;
+    if (inFlightSessionRef.current?.key === sessionKey) {
+      return inFlightSessionRef.current.promise;
     }
+    if (options?.isInitialEvent && lastInitialSessionKeyRef.current === sessionKey) {
+      return;
+    }
+    lastInitialSessionKeyRef.current = sessionKey;
 
-    // Refresh student enrollments, bookings, notifications, bookmarks, wishlist, certificates, billing, and resource purchases
-    await Promise.all([
-      refreshStudentEnrollments(),
-      refreshStudentBookings(),
-      fetchStudentNotifications(session.user.id),
-      fetchStudentBookmarks(session.user.id),
-      refreshCourseWishlist(session.user.id),
-      fetchStudentCertificates(session.user.id),
-      fetchStudentPayments(session.user.id),
-      fetchStudentResourcePurchases()
-    ]);
+    const runResolution = async () => {
+      setCurrentSession(session);
+      setCurrentUser(session.user);
+
+      // Strictly verify administrative status against Supabase RPC / authorized claims
+      const isAdmin = await authService.checkIsAdmin(session.user);
+
+      if (isAdmin) {
+        setAdminSession(session);
+        setAdminUser(session.user);
+        setIsAdminAuthenticated(true);
+        setIsStudentAuthenticated(true);
+        setAuthRole('admin');
+        profileService.fetchProfile(session.user.id).then((res) => {
+          if (res.data) setUserProfile(res.data);
+        }).catch(() => {});
+      } else {
+        setAdminSession(null);
+        setAdminUser(null);
+        setIsAdminAuthenticated(false);
+        setIsStudentAuthenticated(true);
+        setAuthRole('student');
+        profileService.ensureProfile(session.user.id, {
+          fullName: session.user.user_metadata?.full_name || session.user.user_metadata?.name
+        }).then((res) => {
+          if (res.data) setUserProfile(res.data);
+        }).catch(() => {});
+      }
+
+      // Refresh student enrollments, bookings, notifications, bookmarks, wishlist, certificates, billing, and resource purchases
+      await Promise.all([
+        refreshStudentEnrollments(),
+        refreshStudentBookings(),
+        fetchStudentNotifications(session.user.id),
+        fetchStudentBookmarks(session.user.id),
+        refreshCourseWishlist(session.user.id),
+        fetchStudentCertificates(session.user.id),
+        fetchStudentPayments(session.user.id),
+        fetchStudentResourcePurchases()
+      ]);
+    };
+
+    const promise = runResolution().finally(() => {
+      if (inFlightSessionRef.current?.key === sessionKey) {
+        inFlightSessionRef.current = null;
+      }
+    });
+    inFlightSessionRef.current = { key: sessionKey, promise };
+    return promise;
   }, [refreshStudentEnrollments, refreshStudentBookings, fetchStudentNotifications, fetchStudentBookmarks, refreshCourseWishlist, fetchStudentCertificates, fetchStudentPayments, fetchStudentResourcePurchases]);
 
   // Supabase Auth Session Initialization and Real-time State Listener
@@ -1129,7 +1158,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (event === 'PASSWORD_RECOVERY') {
         setIsPasswordRecovery(true);
       }
-      await handleSessionResolution(session);
+      const isInitialEvent = event === 'INITIAL_SESSION';
+      if (!isInitialEvent) {
+        lastInitialSessionKeyRef.current = null;
+      }
+      await handleSessionResolution(session, { isInitialEvent });
       if (isMounted) setIsAuthLoading(false);
     });
 
@@ -1173,10 +1206,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, []);
 
+  const inFlightDashboardSyncRef = useRef<Promise<void> | null>(null);
+
   // Master Supabase Data Hydration (Supabase-first with LocalStorage Fallback)
   const refreshDashboardData = useCallback(async () => {
     if (!isSupabaseConfigured()) return;
+    if (inFlightDashboardSyncRef.current) {
+      return inFlightDashboardSyncRef.current;
+    }
 
+    const runSync = (async () => {
     try {
       // 1. Fetch public platform configurations (accessible publicly without authentication)
       const [prodRes, availRes, setRes] = await Promise.allSettled([
@@ -1431,6 +1470,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setFrameworksLoading(false);
       setCoursesLoading(false);
     }
+    })();
+
+    inFlightDashboardSyncRef.current = runSync.finally(() => {
+      inFlightDashboardSyncRef.current = null;
+    });
+    return inFlightDashboardSyncRef.current;
   }, []);
 
   useEffect(() => {
@@ -3825,9 +3870,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     notify('Settings saved', 'success');
   };
 
-  return (
-    <AppContext.Provider
-      value={{
+  const contextValue = useMemo<AppContextType>(() => ({
         articles,
         refreshArticles,
         addArticle,
@@ -3990,8 +4033,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setSearchQuery,
         notification,
         notify
-      }}
-    >
+      }), [
+        articles, refreshArticles, addArticle, updateArticle, deleteArticle, publishArticle, unpublishArticle,
+        videos, refreshVideos, addVideo, updateVideo, deleteVideo, publishVideo, unpublishVideo,
+        frameworks, frameworksLoading, refreshFrameworks, addFramework, updateFramework, deleteFramework, publishFramework, unpublishFramework, toggleFeatureFramework, syncInitialFrameworks,
+        frameworkCategories, refreshFrameworkCategories, addFrameworkCategory, updateFrameworkCategory, deleteFrameworkCategory, toggleFrameworkCategoryStatus, reorderFrameworkCategories,
+        resources, refreshResources, addResource, updateResource, deleteResource, publishResource, unpublishResource, recordResourceDownload, hasUnlockedFreeResource, resourcePurchases, hasPurchasedResource, purchaseResource,
+        courses, coursesLoading, refreshCourses, addCourse, updateCourse, deleteCourse, publishCourse, unpublishCourse, syncInitialCourses,
+        testimonials, addTestimonial, deleteTestimonial,
+        speakingEvents, addSpeakingEvent, deleteSpeakingEvent,
+        consultationProduct, updateConsultationProduct,
+        availabilityRules, updateAvailabilityRules, refreshAvailabilityRules,
+        bookings, getAvailableSlotsForDate, fetchLiveAvailableSlots, createBooking, cancelBooking, rescheduleBooking, updateBookingStatus, deleteBooking,
+        leads, addLead, submitContactMessage, updateLeadStatus, deleteLead,
+        contactMessages, deleteContactMessage,
+        subscribers, addSubscriber, deleteSubscriber,
+        settings, updateSettings, refreshDashboardData,
+        adminUser, adminSession, isAdminAuthenticated, isAuthLoading, adminLogin, adminLogout, requestPasswordReset,
+        currentUser, currentSession, userProfile, isStudentAuthenticated, authRole, studentLogin, studentRegister, studentLogout, refreshUserProfile, updateStudentProfile, updatePassword, isPasswordRecovery, clearPasswordRecovery,
+        studentEnrollments, isEnrollmentsLoading, enrollmentsError, refreshStudentEnrollments,
+        studentBookings, isBookingsLoading, bookingsError, refreshStudentBookings,
+        studentNotifications, isNotificationsLoading, unreadNotificationsCount, fetchStudentNotifications, markNotificationAsRead, markAllNotificationsAsRead,
+        studentBookmarks, isBookmarksLoading, fetchStudentBookmarks, isBookmarked, toggleBookmark,
+        courseWishlist, isWishlistLoading, refreshCourseWishlist, isCourseWishlisted, toggleCourseWishlist, removeFromWishlist,
+        studentCertificates, isCertificatesLoading, certificatesError, fetchStudentCertificates, issueCourseCertificate, getCertificateForCourse,
+        studentPayments, isPaymentsLoading, paymentsError, fetchStudentPayments, fetchStudentResourcePurchases,
+        adminPayments, isAdminPaymentsLoading, adminPaymentsError, fetchAdminPayments,
+        webEnquiries, isWebEnquiriesLoading, webEnquiriesError, fetchAdminWebEnquiries, updateWebEnquiry, deleteWebEnquiry,
+        courseProgressMap, isProgressLoading, fetchCourseProgress, updateLessonPlaybackPosition, toggleLessonProgressCompletion, getCourseProgressStats,
+        isSearchOpen, searchQuery, notification, notify
+      ]);
+
+  return (
+    <AppContext.Provider value={contextValue}>
       {children}
     </AppContext.Provider>
   );
