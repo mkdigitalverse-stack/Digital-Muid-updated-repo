@@ -17,10 +17,13 @@ import {
 } from "./supabaseServer.js";
 import { handleRazorpayWebhook } from "./paymentWebhook.js";
 import {
+  AUTHORITATIVE_PAID_RESOURCES,
+  getAuthoritativeResourcePricing,
   calculateAuthoritativeCoursePrice,
   fulfillCourseEnrollment,
   fulfillConsultationPayment,
-  fulfillResourcePurchase
+  fulfillResourcePurchase,
+  toPaiseStrict
 } from "./paymentFulfillment.js";
 import {
   generateAuthoritativeInvoicePdf,
@@ -44,10 +47,24 @@ import {
   buildSignedInvoiceUrl
 } from "./invoiceToken.js";
 
+import {
+  getResourceTokenHmacSecret,
+  generateGuestResourceToken,
+  tryGenerateGuestResourceToken,
+  verifyGuestResourceToken,
+  verifyTokenGuestIdentityBinding,
+  extractResourceAccessToken
+} from "./resourceToken.js";
+
 export {
+  AUTHORITATIVE_PAID_RESOURCES,
+  getAuthoritativeResourcePricing,
   getInvoiceTokenHmacSecret,
   generateSignedInvoiceToken,
-  verifySignedInvoiceToken
+  verifySignedInvoiceToken,
+  getResourceTokenHmacSecret,
+  generateGuestResourceToken,
+  verifyGuestResourceToken
 };
 
 // ==============================================================================
@@ -110,28 +127,8 @@ export function resetPaymentRateLimits() {
   paymentRateLimitMap.clear();
 }
 
-// ==============================================================================
-// AUTHORITATIVE PAID RESOURCES CATALOG & PRICING
-// Guarantees authoritative fail-closed pricing even if DB schema cache lacks columns
-// ==============================================================================
-export const AUTHORITATIVE_PAID_RESOURCES = {
-  // Bundle (All 4 tools)
-  "2d50e5e3-711d-4461-a70d-0ed54dd29f17": { price: 299, accessType: "paid", currency: "INR" },
-  "meta-ads-campaign-planner-bundle": { price: 299, accessType: "paid", currency: "INR" },
-  // Deliverable 1: The Meta Ads Campaign Planner Workbook
-  "27ef2c04-4d4a-4dbe-a702-d4013b2542b9": { price: 129, accessType: "paid", currency: "INR" },
-  "meta-ads-campaign-planner-workbook": { price: 129, accessType: "paid", currency: "INR" },
-  // Deliverable 2: Interactive Ad Budget & Break-Even Calculator
-  "fafe5ffc-3323-4761-9d22-50a2588f6326": { price: 79, accessType: "paid", currency: "INR" },
-  "the-ad-budget-breat-even-calculate": { price: 79, accessType: "paid", currency: "INR" },
-  "the-ad-budget-break-even-calculator": { price: 79, accessType: "paid", currency: "INR" },
-  // Deliverable 3: 10 High-Converting Meta Ads Copy Frameworks
-  "004d374c-d872-4bfe-bf54-8083504e9174": { price: 79, accessType: "paid", currency: "INR" },
-  "10-high-converting-meta-ads-copy-frameworks": { price: 79, accessType: "paid", currency: "INR" },
-  // Deliverable 4: Pre-Launch & Tracking Audit Checklist
-  "6867ecdd-2797-40f0-bdc8-ead20600ac6c": { price: 79, accessType: "paid", currency: "INR" },
-  "pre-launch-tracking-audit-checklist": { price: 79, accessType: "paid", currency: "INR" }
-};
+// Authoritative paid resource pricing helpers are imported from ./paymentFulfillment.js
+// and re-exported above to maintain a single source of truth without circular dependencies.
 
 /**
  * Dedicated high-entropy HMAC secret for paid asset access tokens.
@@ -223,40 +220,6 @@ export function verifyAssetAccessToken(token) {
   } catch {
     return null;
   }
-}
-
-export function getAuthoritativeResourcePricing(idOrSlug, resourceRecord = null, fallbackBody = null) {
-  const clean = String(idOrSlug || "").trim();
-  const known = AUTHORITATIVE_PAID_RESOURCES[clean] ||
-    (resourceRecord?.id && AUTHORITATIVE_PAID_RESOURCES[resourceRecord.id]) ||
-    (resourceRecord?.slug && AUTHORITATIVE_PAID_RESOURCES[resourceRecord.slug]);
-
-  const dbAccessType = resourceRecord?.access_type || resourceRecord?.accessType;
-  const isExplicitlyPaidInDb = dbAccessType && String(dbAccessType).toLowerCase() === "paid" && Number(resourceRecord?.price) > 0;
-
-  if (isExplicitlyPaidInDb) {
-    return {
-      accessType: "paid",
-      price: Number(resourceRecord.price),
-      currency: (resourceRecord.currency || "INR").toUpperCase()
-    };
-  }
-
-  if (known) {
-    return {
-      accessType: "paid",
-      price: known.price,
-      currency: known.currency
-    };
-  }
-
-  const fallbackAccessType = (fallbackBody?.accessType || dbAccessType || "free").toLowerCase();
-  const fallbackPrice = Number(resourceRecord?.price) || Number(fallbackBody?.price) || 0;
-  return {
-    accessType: fallbackAccessType,
-    price: fallbackPrice,
-    currency: (resourceRecord?.currency || fallbackBody?.currency || "INR").toUpperCase()
-  };
 }
 
 // ==============================================================================
@@ -401,12 +364,26 @@ router.post("/create-course-order", async (req, res) => {
     // - Convert final amount to paise: Math.round(effectivePrice * 100).
     // - No GST/tax additions (course price is complete consumer price).
     const { effectivePrice, currency } = calculateAuthoritativeCoursePrice(course);
-    const amountInPaise = Math.round(effectivePrice * 100);
+    const expectedCurrency = String(currency || "").trim().toUpperCase();
+    const amountInPaise = toPaiseStrict(effectivePrice);
 
-    if (amountInPaise <= 0) {
+    if (!amountInPaise) {
+      if (effectivePrice === 0) {
+        return res.status(400).json({
+          success: false,
+          error: "This course is free and does not require payment processing."
+        });
+      }
       return res.status(400).json({
         success: false,
-        error: "This course is free and does not require payment processing."
+        error: "Invalid course pricing configuration (must be positive INR with max 2 decimals)."
+      });
+    }
+
+    if (expectedCurrency !== "INR") {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid currency: Course checkout must be denominated in INR."
       });
     }
 
@@ -452,9 +429,10 @@ router.post("/create-course-order", async (req, res) => {
 
     const orderOptions = {
       amount: amountInPaise,
-      currency: currency,
+      currency: expectedCurrency,
       receipt: receipt,
       notes: {
+        itemType: "course",
         courseId: course.id,
         userId: user.id,
         courseTitle: (course.title || "Course Masterclass").slice(0, 100),
@@ -600,12 +578,15 @@ router.post("/verify-course-payment", async (req, res) => {
       `[Payment Verification] Signature verified successfully for user ${user.id}, order ${razorpay_order_id}, payment ${razorpay_payment_id}`
     );
 
+    const cleanOrderId = razorpay_order_id.trim();
+    const cleanPaymentId = razorpay_payment_id.trim();
+
     // 5. Query public.courses for authoritative price & details (NEVER trust client price)
     const dbClient = getSupabaseDbClient(authHeader) || getSupabaseServerClient();
     if (!dbClient) {
       return res.status(503).json({
         success: false,
-        verified: true,
+        verified: false,
         fulfilled: false,
         status: "verification_pending_fulfillment",
         error: "Database service is not currently available."
@@ -617,26 +598,167 @@ router.post("/verify-course-payment", async (req, res) => {
     if (courseError || !course) {
       return res.status(404).json({
         success: false,
-        verified: true,
+        verified: false,
         fulfilled: false,
         status: "fulfillment_rejected",
         error: "Course record not found for authoritative fulfillment verification."
       });
     }
 
+    if (String(course.status || "").trim().toLowerCase() !== "published") {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        status: "fulfillment_rejected",
+        error: `This course is not available for purchase (status: ${course.status || "missing"}).`
+      });
+    }
+
     const { effectivePrice, currency } = calculateAuthoritativeCoursePrice(course);
+    const expectedCurrency = String(currency || "").trim().toUpperCase();
+    const expectedAmountInPaise = toPaiseStrict(effectivePrice);
+
+    if (expectedCurrency !== "INR" || !expectedAmountInPaise) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        status: "fulfillment_rejected",
+        error: "Invalid authoritative course pricing or currency configuration (INR required)."
+      });
+    }
+
+    // 6. Independent Razorpay Gateway Verification (NEVER fulfill on HMAC signature alone)
+    const razorpay = getRazorpayClient();
+    if (!razorpay) {
+      return res.status(503).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Payment gateway client is unavailable on the server."
+      });
+    }
+
+    let gatewayPayment = null;
+    let gatewayOrder = null;
+    try {
+      [gatewayPayment, gatewayOrder] = await Promise.all([
+        razorpay.payments.fetch(cleanPaymentId),
+        razorpay.orders.fetch(cleanOrderId)
+      ]);
+    } catch (fetchErr) {
+      console.warn("[Course Verification] Gateway fetch failed:", fetchErr?.error?.description || fetchErr?.message || fetchErr);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Failed to verify payment and order records with Razorpay gateway."
+      });
+    }
+
+    if (!gatewayPayment || !gatewayOrder) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Gateway payment or order record not found."
+      });
+    }
+
+    const gatewayPayStatus = String(gatewayPayment.status || "").trim().toLowerCase();
+    if (gatewayPayStatus !== "captured") {
+      console.warn(`[Course Verification] Rejected payment ${cleanPaymentId}: gateway status=${gatewayPayStatus || "unknown"}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: `Payment is not captured (current gateway status: ${gatewayPayStatus || "unknown"}).`
+      });
+    }
+
+    if (gatewayPayment.order_id !== cleanOrderId || gatewayOrder.id !== cleanOrderId) {
+      console.warn(`[Course Verification] Order ID mismatch: payment.order_id=${gatewayPayment.order_id}, order.id=${gatewayOrder.id}, expected=${cleanOrderId}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Payment is not associated with the requested order ID."
+      });
+    }
+
+    const payCurrency = String(gatewayPayment.currency || "").trim().toUpperCase();
+    const ordCurrency = String(gatewayOrder.currency || "").trim().toUpperCase();
+    if (payCurrency !== "INR" || ordCurrency !== "INR") {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Invalid currency: Course payments must be settled in INR."
+      });
+    }
+
+    const payAmountPaise = Number(gatewayPayment.amount);
+    const ordAmountPaise = Number(gatewayOrder.amount);
+    if (
+      !Number.isSafeInteger(payAmountPaise) ||
+      !Number.isSafeInteger(ordAmountPaise) ||
+      payAmountPaise <= 0 ||
+      payAmountPaise !== expectedAmountInPaise ||
+      ordAmountPaise !== expectedAmountInPaise
+    ) {
+      console.warn(`[Course Verification] Amount mismatch: payment=${payAmountPaise}, order=${ordAmountPaise}, expected=${expectedAmountInPaise}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Gateway payment amount does not match authoritative course price."
+      });
+    }
+
+    const orderNotes = gatewayOrder.notes || {};
+    if (String(orderNotes.itemType || "").trim().toLowerCase() !== "course") {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Gateway order item type must explicitly be 'course'."
+      });
+    }
+
+    const noteCourseId = String(orderNotes.courseId || "").trim();
+    if (!noteCourseId || noteCourseId !== String(course.id).trim()) {
+      console.warn(`[Course Verification] Course ID mismatch in order notes: note=${noteCourseId}, expected=${course.id}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Order metadata does not match the requested course."
+      });
+    }
+
+    const noteUserId = String(orderNotes.userId || "").trim();
+    if (!noteUserId || noteUserId !== String(user.id).trim()) {
+      console.warn(`[Course Verification] User ID mismatch in order notes: note=${noteUserId}, authenticated=${user.id}`);
+      return res.status(403).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Forbidden: Order does not belong to the authenticated user."
+      });
+    }
 
     const studentEmail = (user.email || "").trim() || null;
     const studentName = (user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "Student Member").trim();
 
-    // 6. Execute atomic server-side fulfillment RPC (Phase 2K-E)
+    // 7. Execute atomic server-side fulfillment RPC (Phase 2K-E)
     const fulfillment = await fulfillCourseEnrollment({
       userId: user.id,
       courseId: course.id,
-      amount: effectivePrice,
-      currency,
-      orderId: razorpay_order_id.trim(),
-      paymentId: razorpay_payment_id.trim(),
+      amount: expectedAmountInPaise / 100,
+      currency: "INR",
+      orderId: cleanOrderId,
+      paymentId: cleanPaymentId,
       studentEmail,
       studentName
     });
@@ -659,28 +781,35 @@ router.post("/verify-course-payment", async (req, res) => {
       });
     }
 
-    // If RPC failed due to pending migration or missing service role key:
-    if (fulfillment.code === "MIGRATION_PENDING" || fulfillment.code === "SERVICE_KEY_MISSING") {
-      return res.status(200).json({
-        success: true,
+    // Fail closed with HTTP 503 on retryable/migration-pending/unavailable RPC failures
+    if (
+      fulfillment.retryable ||
+      fulfillment.code === "MIGRATION_PENDING" ||
+      fulfillment.code === "RPC_UNAVAILABLE" ||
+      fulfillment.code === "SERVICE_KEY_MISSING"
+    ) {
+      return res.status(503).json({
+        success: false,
         verified: true,
         fulfilled: false,
+        retryable: true,
+        code: fulfillment.code || "RPC_UNAVAILABLE",
         status: "verification_pending_fulfillment",
         courseId: course.id,
         courseSlug: course.slug,
         courseTitle: course.title,
         orderId: razorpay_order_id.trim(),
         paymentId: razorpay_payment_id.trim(),
-        warning: fulfillment.error,
-        message: "Payment signature verified. Automated course fulfillment is pending server migration or credentials."
+        error: fulfillment.error || "Payment verified. Automated course fulfillment is temporarily unavailable; please retry."
       });
     }
 
-    // If fulfillment was rejected (e.g. price mismatch, validation error):
-    return res.status(400).json({
+    // Non-retryable RPC or business rejection:
+    return res.status(fulfillment.code === "IDEMPOTENCY_CONFLICT" ? 409 : 400).json({
       success: false,
       verified: true,
       fulfilled: false,
+      code: fulfillment.code || "FULFILLMENT_REJECTED",
       status: "fulfillment_rejected",
       error: fulfillment.error || "Course enrollment fulfillment was rejected."
     });
@@ -744,22 +873,36 @@ router.post("/create-consultation-order", async (req, res) => {
       .maybeSingle();
 
     if (productError || !product) {
-      // Fallback to canonical row UUID if query returned empty
-      const { data: canonProduct } = await dbClient
-        .from("consultation_products")
-        .select("*")
-        .eq("id", "31bbb9bf-ce10-4da4-a517-dfc673f9b875")
-        .maybeSingle();
-      product = canonProduct;
+      return res.status(404).json({
+        success: false,
+        error: "Consultation product is currently unavailable or inactive."
+      });
     }
 
-    // 3. Compute authoritative pricing in Rupees and Paise
-    const basePrice = Number(product?.base_price) || 499;
-    const gstRate = Number(product?.gst_rate) || 0.18;
-    const gstAmount = Number((basePrice * gstRate).toFixed(2));
-    const totalAmount = Number((basePrice + gstAmount).toFixed(2));
-    const amountInPaise = Math.round(totalAmount * 100);
-    const currency = (product?.currency || "INR").toUpperCase();
+    // 3. Compute authoritative pricing strictly in integer Paise
+    const basePaise = toPaiseStrict(product.base_price);
+    const gstRate = product.gst_rate != null ? Number(product.gst_rate) : 0.18;
+    const currency = String(product.currency || "INR").trim().toUpperCase();
+
+    if (!basePaise || !Number.isFinite(gstRate) || gstRate < 0 || gstRate > 1 || currency !== "INR") {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid consultation product pricing or currency configuration."
+      });
+    }
+
+    const gstPaise = Math.round(basePaise * gstRate);
+    const amountInPaise = basePaise + gstPaise;
+    if (!Number.isSafeInteger(gstPaise) || !Number.isSafeInteger(amountInPaise) || amountInPaise <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Consultation pricing calculation overflow."
+      });
+    }
+
+    const basePrice = basePaise / 100;
+    const gstAmount = gstPaise / 100;
+    const totalAmount = amountInPaise / 100;
 
     // 4. Retrieve server Razorpay client
     const razorpay = getRazorpayClient();
@@ -886,12 +1029,15 @@ router.post("/verify-consultation-payment", async (req, res) => {
       });
     }
 
-    // 2. Authoritative Gateway Verification: Validate captured status, amount, and order relationship
+    const cleanOrderId = razorpay_order_id.trim();
+    const cleanPaymentId = razorpay_payment_id.trim();
+
+    // 2. Authoritative Gateway Verification: Validate captured status, order metadata, amount, and identity
     const razorpay = getRazorpayClient();
     if (!razorpay) {
       return res.status(503).json({
         success: false,
-        verified: true,
+        verified: false,
         fulfilled: false,
         error: "Payment gateway client is unavailable on the server."
       });
@@ -901,14 +1047,15 @@ router.post("/verify-consultation-payment", async (req, res) => {
     let gatewayOrder = null;
     try {
       [gatewayPayment, gatewayOrder] = await Promise.all([
-        razorpay.payments.fetch(razorpay_payment_id.trim()),
-        razorpay.orders.fetch(razorpay_order_id.trim())
+        razorpay.payments.fetch(cleanPaymentId),
+        razorpay.orders.fetch(cleanOrderId)
       ]);
     } catch (fetchErr) {
       console.error("[Consultation Verification] Failed to fetch authoritative gateway records:", fetchErr?.message || fetchErr);
       return res.status(502).json({
         success: false,
         verified: false,
+        fulfilled: false,
         error: "Failed to confirm payment status with gateway provider."
       });
     }
@@ -917,72 +1064,229 @@ router.post("/verify-consultation-payment", async (req, res) => {
       return res.status(400).json({
         success: false,
         verified: false,
+        fulfilled: false,
         error: "Gateway payment or order could not be retrieved."
       });
     }
 
-    if (gatewayPayment.status !== "captured") {
-      console.warn(`[Consultation Verification] Payment ${razorpay_payment_id} rejected: status is ${gatewayPayment.status}`);
+    if (String(gatewayPayment.status || "").toLowerCase() !== "captured") {
+      console.warn(`[Consultation Verification] Payment ${cleanPaymentId} rejected: status is ${gatewayPayment.status}`);
       return res.status(400).json({
         success: false,
         verified: false,
+        fulfilled: false,
         error: `Payment is not in captured status (current status: ${gatewayPayment.status}).`
       });
     }
 
-    if (gatewayPayment.order_id !== razorpay_order_id.trim() || gatewayOrder.id !== razorpay_order_id.trim()) {
-      console.warn(`[Consultation Verification] Order ID mismatch: payment order is ${gatewayPayment.order_id}, expected ${razorpay_order_id}`);
+    if (gatewayPayment.order_id !== cleanOrderId || gatewayOrder.id !== cleanOrderId) {
+      console.warn(`[Consultation Verification] Order ID mismatch: payment order is ${gatewayPayment.order_id}, expected ${cleanOrderId}`);
       return res.status(400).json({
         success: false,
         verified: false,
+        fulfilled: false,
         error: "Payment is not associated with the provided order ID."
       });
     }
 
-    const payCurrency = String(gatewayPayment.currency || "").toUpperCase();
-    const ordCurrency = String(gatewayOrder.currency || "").toUpperCase();
+    const payCurrency = String(gatewayPayment.currency || "").trim().toUpperCase();
+    const ordCurrency = String(gatewayOrder.currency || "").trim().toUpperCase();
     if (payCurrency !== "INR" || ordCurrency !== "INR") {
       return res.status(400).json({
         success: false,
         verified: false,
+        fulfilled: false,
         error: "Invalid currency: Consultation transactions must be denominated in INR."
       });
     }
 
-    const payAmountPaise = Number(gatewayPayment.amount);
-    const ordAmountPaise = Number(gatewayOrder.amount);
-    if (payAmountPaise <= 0 || payAmountPaise !== ordAmountPaise) {
+    const orderNotes = gatewayOrder.notes || {};
+    const orderItemType = String(orderNotes.itemType || "").trim().toLowerCase();
+    if (orderItemType !== "consultation") {
+      console.warn(`[Consultation Verification] Rejected cross-item substitution: order ${cleanOrderId} has itemType=${orderItemType || "missing"}`);
       return res.status(400).json({
         success: false,
         verified: false,
-        error: `Payment amount (${payAmountPaise}) does not match order amount (${ordAmountPaise}).`
+        fulfilled: false,
+        error: "Gateway order does not represent a consultation booking."
       });
     }
 
-    // 3. Atomic fulfillment into public.bookings and public.payments
+    const orderProductId = String(orderNotes.productId || "").trim();
+    if (!orderProductId || !isValidUUID(orderProductId)) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Gateway order is missing a valid consultation productId."
+      });
+    }
+
+    // Validate product against authoritative catalog pricing in public.consultation_products
+    const dbClient = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    if (!dbClient) {
+      return res.status(503).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Database service is not currently available."
+      });
+    }
+
+    const { data: product, error: productError } = await dbClient
+      .from("consultation_products")
+      .select("*")
+      .eq("id", orderProductId)
+      .eq("active", true)
+      .maybeSingle();
+
+    if (productError || !product) {
+      return res.status(404).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: `Consultation product (${orderProductId}) is inactive or not found.`
+      });
+    }
+
+    const basePaise = toPaiseStrict(product.base_price);
+    const gstRate = product.gst_rate != null ? Number(product.gst_rate) : 0.18;
+    const catalogCurrency = String(product.currency || "INR").trim().toUpperCase();
+
+    if (!basePaise || !Number.isFinite(gstRate) || gstRate < 0 || gstRate > 1 || catalogCurrency !== "INR") {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Invalid consultation catalog pricing configuration."
+      });
+    }
+
+    const gstPaise = Math.round(basePaise * gstRate);
+    const expectedAmountInPaise = basePaise + gstPaise;
+    if (!Number.isSafeInteger(gstPaise) || !Number.isSafeInteger(expectedAmountInPaise) || expectedAmountInPaise <= 0) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Consultation pricing calculation overflow."
+      });
+    }
+    const expectedTotalAmount = expectedAmountInPaise / 100;
+
+    const payAmountPaise = Number(gatewayPayment.amount);
+    const ordAmountPaise = Number(gatewayOrder.amount);
+    if (
+      !Number.isSafeInteger(payAmountPaise) ||
+      !Number.isSafeInteger(ordAmountPaise) ||
+      payAmountPaise <= 0 ||
+      payAmountPaise !== ordAmountPaise ||
+      payAmountPaise !== expectedAmountInPaise
+    ) {
+      console.warn(`[Consultation Verification] Amount mismatch: paid=${payAmountPaise}, order=${ordAmountPaise}, expected=${expectedAmountInPaise}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: `Payment amount (${payAmountPaise} paise) does not match authoritative consultation total (${expectedAmountInPaise} paise).`
+      });
+    }
+
+    // Verify authenticated user OR legitimate guest booking identity
+    const orderUserId = String(orderNotes.userId || "").trim();
+    if (orderUserId) {
+      if (!authenticatedUser || authenticatedUser.id !== orderUserId) {
+        return res.status(403).json({
+          success: false,
+          verified: false,
+          fulfilled: false,
+          error: "Forbidden: Consultation order belongs to a different authenticated user."
+        });
+      }
+    } else {
+      const bookingEmail = String(bookingDetails?.customerEmail || "").trim().toLowerCase();
+      const noteEmail = String(orderNotes.customerEmail || "").trim().toLowerCase();
+      const payEmail = String(gatewayPayment.email || "").trim().toLowerCase();
+      if (!bookingEmail) {
+        return res.status(400).json({
+          success: false,
+          verified: false,
+          fulfilled: false,
+          error: "Guest consultation verification requires booking customerEmail."
+        });
+      }
+      if (noteEmail && bookingEmail.slice(0, 50) !== noteEmail.slice(0, 50)) {
+        return res.status(403).json({
+          success: false,
+          verified: false,
+          fulfilled: false,
+          error: "Forbidden: Guest booking email does not match order metadata."
+        });
+      }
+      if (!noteEmail && payEmail && bookingEmail !== payEmail) {
+        return res.status(403).json({
+          success: false,
+          verified: false,
+          fulfilled: false,
+          error: "Forbidden: Guest booking email does not match payment email."
+        });
+      }
+    }
+
+    // 3. Atomic fulfillment into public.bookings and public.payments (never copy payment amount into order_total_amount,
+    // and never attribute guest orders verified by an admin to admin.id / admin.email)
+    const isAdminCaller = Boolean(authenticatedUser && checkIsAdmin(authenticatedUser));
+    const orderUserIdResolved = String(orderNotes.userId || "").trim();
+    if (orderUserIdResolved && !authenticatedUser) {
+      return res.status(403).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Forbidden: Authentication required for user-owned consultation order."
+      });
+    }
+    const attributedUserId = orderUserIdResolved
+      ? orderUserIdResolved
+      : isAdminCaller
+      ? null
+      : (authenticatedUser?.id || null);
+
+    const { order_total_amount: _discardSnapshot, ...sanitizedBookingDetails } = bookingDetails || {};
     const fulfillment = await fulfillConsultationPayment({
-      userId: authenticatedUser?.id || null,
-      bookingDetails: {
-        ...(bookingDetails || {}),
-        order_total_amount: (payAmountPaise / 100).toFixed(2)
-      },
-      orderId: razorpay_order_id.trim(),
-      paymentId: razorpay_payment_id.trim(),
-      amount: payAmountPaise / 100,
-      currency: payCurrency,
-      productId: gatewayOrder.notes?.productId || "31bbb9bf-ce10-4da4-a517-dfc673f9b875"
+      userId: attributedUserId,
+      bookingDetails: sanitizedBookingDetails,
+      orderId: cleanOrderId,
+      paymentId: cleanPaymentId,
+      amount: expectedTotalAmount,
+      currency: "INR",
+      productId: product.id
     });
 
     if (!fulfillment.success) {
-      return res.status(500).json({
+      const isRetryable = Boolean(
+        fulfillment.retryable ||
+        fulfillment.code === "MIGRATION_PENDING" ||
+        fulfillment.code === "RPC_UNAVAILABLE" ||
+        fulfillment.code === "SERVICE_KEY_MISSING"
+      );
+      const statusCode = isRetryable
+        ? 503
+        : fulfillment.code === "IDEMPOTENCY_CONFLICT" || fulfillment.code === "SLOT_CONFLICT"
+        ? 409
+        : ["AMOUNT_MISMATCH", "INVALID_INTAKE", "INVALID_CURRENCY", "PRODUCT_UNAVAILABLE", "INVALID_PRODUCT_PRICING", "FULFILLMENT_REJECTED"].includes(fulfillment.code)
+        ? 400
+        : 500;
+
+      return res.status(statusCode).json({
         success: false,
         verified: true,
         fulfilled: false,
+        retryable: isRetryable,
+        code: fulfillment.code || "FULFILLMENT_FAILED",
         error: fulfillment.error || "Failed to finalize consultation booking record."
       });
     }
 
-    const cleanPaymentId = razorpay_payment_id.trim();
     const invoiceToken = tryGenerateSignedInvoiceToken(cleanPaymentId);
     const invoiceDownloadUrl = invoiceToken ? buildSignedInvoiceUrl(cleanPaymentId, invoiceToken) : null;
 
@@ -1035,32 +1339,75 @@ router.post("/create-resource-order", async (req, res) => {
 
     // 1. Obtain database client
     const dbClient = getSupabaseDbClient(authHeader) || getSupabaseServerClient();
-    let resourceRecord = null;
-
-    if (dbClient) {
-      const isUUID = isValidUUID(cleanResourceId);
-      const query = dbClient.from("resources").select("*");
-      const { data, error } = isUUID
-        ? await query.eq("id", cleanResourceId).maybeSingle()
-        : await query.eq("slug", cleanResourceId).maybeSingle();
-
-      if (!error && data) {
-        resourceRecord = data;
-      }
-    }
-
-    // 2. Validate access type & price using authoritative pricing resolver
-    const pricing = getAuthoritativeResourcePricing(cleanResourceId, resourceRecord, req.body);
-    if (pricing.accessType !== "paid" || pricing.price <= 0) {
-      return res.status(400).json({
+    if (!dbClient) {
+      return res.status(503).json({
         success: false,
-        error: "This resource is free and does not require payment processing."
+        error: "Database service is not currently available."
       });
     }
 
-    const authoritativePrice = pricing.price;
-    const currency = pricing.currency;
-    const amountInPaise = Math.round(authoritativePrice * 100);
+    const isUUID = isValidUUID(cleanResourceId);
+    const query = dbClient.from("resources").select("*");
+    const { data: resourceRecord, error: resourceErr } = isUUID
+      ? await query.eq("id", cleanResourceId).maybeSingle()
+      : await query.eq("slug", cleanResourceId).maybeSingle();
+
+    if (resourceErr) {
+      return res.status(500).json({
+        success: false,
+        error: "Failed to verify resource catalog record."
+      });
+    }
+
+    if (!resourceRecord) {
+      return res.status(404).json({
+        success: false,
+        error: "Resource not found."
+      });
+    }
+
+    if (String(resourceRecord.status || "").trim().toLowerCase() !== "published") {
+      return res.status(400).json({
+        success: false,
+        error: "This resource is not published and cannot be purchased."
+      });
+    }
+
+    // 2. Validate access type & price strictly from authoritative server sources (never req.body)
+    const pricing = getAuthoritativeResourcePricing(cleanResourceId, resourceRecord);
+    const currency = String(pricing.currency || "").trim().toUpperCase();
+    const amountInPaise = toPaiseStrict(pricing.price);
+    if (pricing.accessType !== "paid" || !amountInPaise || currency !== "INR") {
+      return res.status(400).json({
+        success: false,
+        error: "This resource is not configured as a paid INR product and cannot initiate paid checkout."
+      });
+    }
+
+    const authoritativePrice = amountInPaise / 100;
+
+    // 2b. Prevent authenticated user double-purchase of already owned active resource
+    if (authenticatedUser) {
+      const { data: existingActivePurchase, error: activePurErr } = await dbClient
+        .from("resource_purchases")
+        .select("id, resource_id, status")
+        .eq("user_id", authenticatedUser.id)
+        .eq("resource_id", resourceRecord.id)
+        .eq("status", "active")
+        .maybeSingle();
+
+      if (activePurErr) {
+        console.warn("[Create Resource Order] Ownership pre-check notice:", activePurErr.message);
+      } else if (existingActivePurchase) {
+        return res.status(409).json({
+          success: false,
+          alreadyPurchased: true,
+          code: "DUPLICATE_USER_RESOURCE_PURCHASE",
+          error: "You already own active access to this resource.",
+          resourceId: resourceRecord.id
+        });
+      }
+    }
 
     // 3. Retrieve server Razorpay client
     const razorpay = getRazorpayClient();
@@ -1224,131 +1571,305 @@ router.post("/verify-resource-payment", async (req, res) => {
       });
     }
 
-    // 2. Fetch authoritative resource price from database
-    const dbClient = getSupabaseDbClient(authHeader) || getSupabaseServerClient();
-    let resourceRecord = null;
-    if (dbClient) {
-      const isUUID = isValidUUID(resourceId.trim());
-      const query = dbClient.from("resources").select("*");
-      const { data } = isUUID
-        ? await query.eq("id", resourceId.trim()).maybeSingle()
-        : await query.eq("slug", resourceId.trim()).maybeSingle();
-      resourceRecord = data;
+    // 2. Fetch authoritative published resource price from database (NEVER trust req.body)
+    const cleanResourceId = resourceId.trim();
+    const cleanOrderId = razorpay_order_id.trim();
+    const cleanPaymentId = razorpay_payment_id.trim();
+
+    const dbClient = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    if (!dbClient) {
+      return res.status(503).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Database service is not currently available."
+      });
     }
 
-    const pricing = getAuthoritativeResourcePricing(resourceId.trim(), resourceRecord, req.body);
-    const amount = pricing.price;
-    const currency = pricing.currency;
+    const isUUID = isValidUUID(cleanResourceId);
+    const query = dbClient.from("resources").select("*");
+    const { data: resourceRecord, error: resourceError } = isUUID
+      ? await query.eq("id", cleanResourceId).maybeSingle()
+      : await query.eq("slug", cleanResourceId).maybeSingle();
 
-    // 2b. Gateway reconciliation with Razorpay API (order amount & payment status)
+    if (resourceError) {
+      return res.status(500).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Failed to verify resource catalog record."
+      });
+    }
+
+    if (!resourceRecord) {
+      return res.status(404).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Resource not found."
+      });
+    }
+
+    if (String(resourceRecord.status || "").trim().toLowerCase() !== "published") {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "This resource is not currently published for paid verification."
+      });
+    }
+
+    const pricing = getAuthoritativeResourcePricing(cleanResourceId, resourceRecord);
+    const expectedAmountInPaise = toPaiseStrict(pricing.price);
+    const expectedCurrency = String(pricing.currency || "").trim().toUpperCase();
+    if (pricing.accessType !== "paid" || !expectedAmountInPaise || expectedCurrency !== "INR") {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Resource is not an eligible paid INR product."
+      });
+    }
+
+    const amount = expectedAmountInPaise / 100;
+    const currency = expectedCurrency;
+
+    // 2b. Authoritative Razorpay gateway reconciliation (FAIL CLOSED if client unavailable)
     const razorpay = getRazorpayClient();
-    if (razorpay) {
-      let rzpOrder = null;
-      let rzpPayment = null;
-      try {
-        [rzpOrder, rzpPayment] = await Promise.all([
-          razorpay.orders.fetch(razorpay_order_id.trim()),
-          razorpay.payments.fetch(razorpay_payment_id.trim())
-        ]);
-      } catch (rzpFetchErr) {
-        const errDesc = rzpFetchErr?.error?.description || rzpFetchErr?.message || "Payment or order not found on gateway.";
-        console.warn(`[Resource Verification] Gateway fetch rejected: ${errDesc}`);
-        return res.status(400).json({
+    if (!razorpay) {
+      return res.status(503).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Payment gateway client is unavailable on the server."
+      });
+    }
+
+    let rzpOrder = null;
+    let rzpPayment = null;
+    try {
+      [rzpOrder, rzpPayment] = await Promise.all([
+        razorpay.orders.fetch(cleanOrderId),
+        razorpay.payments.fetch(cleanPaymentId)
+      ]);
+    } catch (rzpFetchErr) {
+      const errDesc = rzpFetchErr?.error?.description || rzpFetchErr?.message || "Payment or order not found on gateway.";
+      console.warn(`[Resource Verification] Gateway fetch rejected: ${errDesc}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: `Payment verification failed on gateway: ${errDesc}`
+      });
+    }
+
+    if (!rzpOrder || !rzpPayment) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Gateway payment or order could not be retrieved."
+      });
+    }
+
+    if (String(rzpPayment.status || "").toLowerCase() !== "captured") {
+      console.warn(`[Resource Verification] Rejected uncaptured payment: status=${rzpPayment?.status}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: `Payment status is ${rzpPayment?.status || "unknown"}. Only captured payments can unlock resources.`
+      });
+    }
+
+    if (rzpPayment.order_id !== cleanOrderId || rzpOrder.id !== cleanOrderId) {
+      console.warn(`[Resource Verification] Mismatched order ID: payment.order_id=${rzpPayment.order_id}, order.id=${rzpOrder.id}, expected=${cleanOrderId}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Payment does not match the specified order ID."
+      });
+    }
+
+    const rzpPayAmountPaise = Number(rzpPayment.amount);
+    const rzpOrdAmountPaise = Number(rzpOrder.amount);
+    if (
+      !Number.isSafeInteger(rzpPayAmountPaise) ||
+      !Number.isSafeInteger(rzpOrdAmountPaise) ||
+      rzpPayAmountPaise !== expectedAmountInPaise ||
+      rzpOrdAmountPaise !== expectedAmountInPaise
+    ) {
+      console.warn(`[Resource Verification] Amount mismatch: paid=${rzpPayment.amount}, order=${rzpOrder.amount}, expected=${expectedAmountInPaise}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Payment amount does not match authoritative resource price."
+      });
+    }
+
+    if ((rzpPayment.currency || "").toUpperCase() !== expectedCurrency || (rzpOrder.currency || "").toUpperCase() !== expectedCurrency) {
+      console.warn(`[Resource Verification] Currency mismatch: paid=${rzpPayment.currency}, order=${rzpOrder.currency}, expected=${expectedCurrency}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Payment currency does not match authoritative resource currency."
+      });
+    }
+
+    const rzpNotes = rzpOrder.notes || {};
+    if (String(rzpNotes.itemType || "").trim().toLowerCase() !== "resource") {
+      console.warn(`[Resource Verification] Cross-item rejection: order itemType=${rzpNotes.itemType || "missing"}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Gateway order item type is not a resource purchase."
+      });
+    }
+
+    const noteResourceId = String(rzpNotes.resourceId || "").trim();
+    const matchesTargetResource = Boolean(
+      noteResourceId &&
+      (noteResourceId === String(resourceRecord.id).trim() ||
+       (resourceRecord.slug && noteResourceId === String(resourceRecord.slug).trim()))
+    );
+    if (!matchesTargetResource) {
+      console.warn(`[Resource Verification] Order resourceId note mismatch: note=${noteResourceId}, expected=${resourceRecord.id}`);
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        fulfilled: false,
+        error: "Order was not created for this resource."
+      });
+    }
+
+    const isAdminCaller = Boolean(authenticatedUser && checkIsAdmin(authenticatedUser));
+    const noteUserId = String(rzpNotes.userId || "").trim();
+    if (noteUserId) {
+      if (!authenticatedUser || (authenticatedUser.id !== noteUserId && !isAdminCaller)) {
+        return res.status(403).json({
           success: false,
           verified: false,
-          error: `Payment verification failed on gateway: ${errDesc}`
+          fulfilled: false,
+          error: "Forbidden: Resource order belongs to a different authenticated user."
         });
       }
-
-      if (!rzpPayment || rzpPayment.status !== "captured") {
-        console.warn(`[Resource Verification] Rejected uncaptured payment: status=${rzpPayment?.status}`);
-        return res.status(400).json({
+    } else if (customerDetails?.email) {
+      const suppliedEmail = String(customerDetails.email || "").trim().toLowerCase();
+      const noteEmail = String(rzpNotes.customerEmail || "").trim().toLowerCase();
+      const payEmail = String(rzpPayment.email || "").trim().toLowerCase();
+      if (noteEmail && suppliedEmail.slice(0, 50) !== noteEmail.slice(0, 50)) {
+        return res.status(403).json({
           success: false,
           verified: false,
-          error: `Payment status is ${rzpPayment?.status || "unknown"}. Only captured payments can unlock resources.`
+          fulfilled: false,
+          error: "Forbidden: Guest email does not match order metadata."
         });
       }
-
-      if (rzpPayment.order_id && rzpPayment.order_id !== razorpay_order_id.trim()) {
-        console.warn(`[Resource Verification] Mismatched order ID: payment.order_id=${rzpPayment.order_id}, expected=${razorpay_order_id}`);
-        return res.status(400).json({
+      if (!noteEmail && payEmail && suppliedEmail !== payEmail) {
+        return res.status(403).json({
           success: false,
           verified: false,
-          error: "Payment does not match the specified order ID."
+          fulfilled: false,
+          error: "Forbidden: Guest email does not match payment email."
         });
-      }
-
-      const expectedAmountInPaise = Math.round(amount * 100);
-      if (expectedAmountInPaise > 0 && rzpPayment.amount !== expectedAmountInPaise) {
-        console.warn(`[Resource Verification] Amount mismatch: paid ${rzpPayment.amount} paise, expected ${expectedAmountInPaise} paise`);
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          error: "Payment amount does not match authoritative resource price."
-        });
-      }
-
-      const expectedCurrency = currency.toUpperCase();
-      if ((rzpPayment.currency || "").toUpperCase() !== expectedCurrency) {
-        console.warn(`[Resource Verification] Currency mismatch: paid ${rzpPayment.currency}, expected ${expectedCurrency}`);
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          error: "Payment currency does not match authoritative resource currency."
-        });
-      }
-
-      if (rzpOrder) {
-        if (rzpOrder.amount !== expectedAmountInPaise) {
-          console.warn(`[Resource Verification] Order amount mismatch: order=${rzpOrder.amount}, expected=${expectedAmountInPaise}`);
-          return res.status(400).json({
-            success: false,
-            verified: false,
-            error: "Order amount does not match authoritative resource price."
-          });
-        }
-        if ((rzpOrder.currency || "").toUpperCase() !== expectedCurrency) {
-          return res.status(400).json({
-            success: false,
-            verified: false,
-            error: "Order currency does not match authoritative resource currency."
-          });
-        }
-        if (rzpOrder.notes?.resourceId && rzpOrder.notes.resourceId !== (resourceRecord?.id || resourceId.trim())) {
-          console.warn(`[Resource Verification] Order resourceId note mismatch: note=${rzpOrder.notes.resourceId}, expected=${resourceRecord?.id}`);
-          return res.status(400).json({
-            success: false,
-            verified: false,
-            error: "Order was not created for this resource."
-          });
-        }
       }
     }
+
+    // Strict buyer attribution: Admin recovery/verification MUST NEVER overwrite user_id with admin.id
+    // or customer_email with admin.email. Guest orders keep user_id = null; user orders keep noteUserId.
+    const attributedUserId = noteUserId
+      ? noteUserId
+      : isAdminCaller
+      ? null
+      : (authenticatedUser?.id || null);
+
+    const buyerEmail = String(
+      customerDetails?.email ||
+      rzpNotes.customerEmail ||
+      rzpPayment.email ||
+      (!isAdminCaller ? authenticatedUser?.email : "") ||
+      ""
+    ).trim().toLowerCase();
+
+    const buyerName = String(
+      customerDetails?.name ||
+      rzpNotes.customerName ||
+      (!isAdminCaller ? (authenticatedUser?.user_metadata?.full_name || "") : "") ||
+      ""
+    ).trim();
+
+    const buyerPhone = String(
+      customerDetails?.phone ||
+      rzpNotes.customerPhone ||
+      rzpPayment.contact ||
+      ""
+    ).trim();
 
     // 3. Atomic fulfillment into public.resource_purchases and public.payments
     const fulfillment = await fulfillResourcePurchase({
-      userId: authenticatedUser?.id || null,
+      userId: attributedUserId,
       resourceId: resourceRecord?.id || resourceId.trim(),
       amount,
       currency,
-      orderId: razorpay_order_id.trim(),
-      paymentId: razorpay_payment_id.trim(),
-      customerName: customerDetails?.name || "",
-      customerEmail: customerDetails?.email || authenticatedUser?.email || "",
-      customerPhone: customerDetails?.phone || "",
+      orderId: cleanOrderId,
+      paymentId: cleanPaymentId,
+      customerName: buyerName,
+      customerEmail: buyerEmail,
+      customerPhone: buyerPhone,
       resourceTitle: resourceRecord?.title || resourceRecord?.name || "Digital Resource"
     });
 
     if (!fulfillment.success) {
-      return res.status(500).json({
+      const isRetryable = Boolean(
+        fulfillment.retryable ||
+        fulfillment.code === "MIGRATION_PENDING" ||
+        fulfillment.code === "RPC_UNAVAILABLE" ||
+        fulfillment.code === "SERVICE_KEY_MISSING"
+      );
+      const statusCode = isRetryable
+        ? 503
+        : fulfillment.code === "DUPLICATE_USER_RESOURCE_PURCHASE" || fulfillment.code === "IDEMPOTENCY_CONFLICT"
+        ? 409
+        : ["AMOUNT_MISMATCH", "INVALID_CURRENCY", "INVALID_PARAMETERS", "INVALID_AMOUNT", "INVALID_RESOURCE_PRICING", "RESOURCE_UNAVAILABLE"].includes(fulfillment.code)
+        ? 400
+        : 500;
+
+      return res.status(statusCode).json({
         success: false,
         verified: true,
         fulfilled: false,
+        retryable: isRetryable,
+        code: fulfillment.code || "FULFILLMENT_FAILED",
         error: fulfillment.error || "Failed to finalize resource purchase record."
       });
     }
 
-    const cleanPaymentId = razorpay_payment_id.trim();
+    // Mint dedicated signed guest resource access token ONLY after verified fulfillment for guest orders
+    let resourceAccessToken = null;
+    if (!attributedUserId) {
+      const tokenResult = tryGenerateGuestResourceToken({
+        paymentId: cleanPaymentId,
+        orderId: cleanOrderId,
+        resourceId: resourceRecord.id,
+        email: buyerEmail || fulfillment.purchase?.customer_email || "",
+        phone: buyerPhone || fulfillment.purchase?.customer_phone || ""
+      });
+      if (!tokenResult.ok || !tokenResult.token) {
+        return res.status(503).json({
+          success: false,
+          verified: true,
+          fulfilled: true,
+          code: "RESOURCE_TOKEN_SECRET_MISSING",
+          error: tokenResult.error || "Guest resource access signing secret is not configured cleanly."
+        });
+      }
+      resourceAccessToken = tokenResult.token;
+    }
+
     const invoiceToken = tryGenerateSignedInvoiceToken(cleanPaymentId);
     const invoiceDownloadUrl = invoiceToken ? buildSignedInvoiceUrl(cleanPaymentId, invoiceToken) : null;
 
@@ -1364,6 +1885,7 @@ router.post("/verify-resource-payment", async (req, res) => {
       orderId: razorpay_order_id.trim(),
       paymentId: cleanPaymentId,
       resourceId: resourceRecord?.id || resourceId.trim(),
+      ...(resourceAccessToken ? { resourceAccessToken } : {}),
       ...(invoiceToken ? { invoiceToken, invoiceDownloadUrl } : {})
     });
   } catch (err) {
@@ -1416,48 +1938,206 @@ router.post("/recover-lead", async (req, res) => {
       });
     }
 
-    const dbClient = getSupabaseDbClient(authHeader) || getSupabaseServerClient();
+    const dbClient = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    if (!dbClient) {
+      return res.status(503).json({
+        success: false,
+        payment_verified: false,
+        lead_status: "failed",
+        error: "Database service unavailable for lead recovery."
+      });
+    }
+
     const razorpay = getRazorpayClient();
 
-    // 1. Authoritative verification: Ensure the payment actually exists and is captured
-    let paymentVerified = false;
-    let dbPurchase = null;
+    // 1. Resolve authoritative target resource record, published status, and pricing FIRST
+    const isUUID = isValidUUID(cleanResourceId);
+    const resQuery = dbClient.from("resources").select("*");
+    const { data: resourceRecord, error: resourceErr } = isUUID
+      ? await resQuery.eq("id", cleanResourceId).maybeSingle()
+      : await resQuery.eq("slug", cleanResourceId).maybeSingle();
 
-    if (dbClient) {
-      // Check resource_purchases
-      const { data: purchase } = await dbClient
+    if (resourceErr) {
+      return res.status(500).json({
+        success: false,
+        payment_verified: false,
+        lead_status: "failed",
+        error: "Failed to verify resource catalog record."
+      });
+    }
+
+    if (!resourceRecord) {
+      return res.status(404).json({
+        success: false,
+        payment_verified: false,
+        lead_status: "failed",
+        error: "Resource not found."
+      });
+    }
+
+    if (String(resourceRecord.status || "").trim().toLowerCase() !== "published") {
+      return res.status(400).json({
+        success: false,
+        payment_verified: false,
+        lead_status: "failed",
+        error: "Resource is not published and cannot recover leads."
+      });
+    }
+
+    const pricing = getAuthoritativeResourcePricing(cleanResourceId, resourceRecord);
+    const expectedAmountInPaise = toPaiseStrict(pricing.price);
+    if (pricing.accessType !== "paid" || !expectedAmountInPaise || String(pricing.currency || "").toUpperCase() !== "INR") {
+      return res.status(400).json({
+        success: false,
+        payment_verified: false,
+        lead_status: "failed",
+        error: "Resource is not an active or verifiable paid INR asset for lead recovery."
+      });
+    }
+
+    const authoritativePrice = expectedAmountInPaise / 100;
+    const canonicalResourceId = String(resourceRecord.id || "").trim();
+    const allowedResourceIdentifiers = [
+      canonicalResourceId,
+      ...(resourceRecord.slug ? [String(resourceRecord.slug).trim()] : [])
+    ].filter(Boolean);
+    const resourceTitle = resourceRecord.title || resourceRecord.name || "Digital Resource Toolkit";
+
+    // 2. Authoritative verification, user ownership & signed guest resource token enforcement
+    const isAdminCaller = Boolean(authenticatedUser && checkIsAdmin(authenticatedUser));
+    let paymentVerified = false;
+    let ownershipDenied = false;
+    let ownershipDenialReason = "Forbidden: Lead recovery requires authentication matching the purchase owner or a signed guest resource access token.";
+    let dbPurchase = null;
+    let dbPayment = null;
+    let gatewayOrder = null;
+    let gatewayPayment = null;
+    let resolvedAsUserOwned = false;
+
+    const [{ data: purchase }, { data: payment }] = await Promise.all([
+      dbClient
         .from("resource_purchases")
         .select("*")
         .eq("razorpay_payment_id", cleanPaymentId)
-        .maybeSingle();
+        .eq("razorpay_order_id", cleanOrderId)
+        .eq("resource_id", canonicalResourceId)
+        .eq("status", "active")
+        .eq("currency", "INR")
+        .maybeSingle(),
+      dbClient
+        .from("payments")
+        .select("*")
+        .eq("razorpay_payment_id", cleanPaymentId)
+        .eq("razorpay_order_id", cleanOrderId)
+        .eq("item_type", "resource")
+        .eq("item_id", canonicalResourceId)
+        .eq("status", "captured")
+        .eq("currency", "INR")
+        .maybeSingle()
+    ]);
 
-      if (purchase) {
-        paymentVerified = true;
-        dbPurchase = purchase;
-      } else {
-        // Check payments ledger
-        const { data: payment } = await dbClient
-          .from("payments")
-          .select("*")
-          .eq("razorpay_payment_id", cleanPaymentId)
-          .eq("status", "captured")
-          .maybeSingle();
-
-        if (payment) {
-          paymentVerified = true;
-        }
+    if (purchase) {
+      const ownership = evaluateRecordOwnership(purchase.user_id, authenticatedUser);
+      if (!ownership.allowed) {
+        ownershipDenied = true;
+      } else if (!ownership.isGuest) {
+        resolvedAsUserOwned = true;
+      }
+    }
+    if (!ownershipDenied && payment) {
+      const ownership = evaluateRecordOwnership(payment.user_id, authenticatedUser);
+      if (!ownership.allowed) {
+        ownershipDenied = true;
+      } else if (!ownership.isGuest) {
+        resolvedAsUserOwned = true;
       }
     }
 
-    // If not verified in database, check authoritative gateway status
-    if (!paymentVerified && razorpay) {
+    if (!ownershipDenied) {
+      if (purchase && toPaiseStrict(purchase.amount) === expectedAmountInPaise) {
+        paymentVerified = true;
+        dbPurchase = purchase;
+      }
+      if (payment && toPaiseStrict(payment.amount) === expectedAmountInPaise) {
+        paymentVerified = true;
+        dbPayment = payment;
+      }
+    }
+
+    // If not verified in database (and ownership not already denied), check authoritative gateway metadata
+    if (!paymentVerified && !ownershipDenied && razorpay) {
       try {
-        const rzpPayment = await razorpay.payments.fetch(cleanPaymentId);
-        if (rzpPayment && rzpPayment.status === "captured" && rzpPayment.order_id === cleanOrderId) {
-          paymentVerified = true;
+        const [rzpPayment, rzpOrder] = await Promise.all([
+          razorpay.payments.fetch(cleanPaymentId),
+          razorpay.orders.fetch(cleanOrderId)
+        ]);
+        gatewayPayment = rzpPayment;
+        gatewayOrder = rzpOrder;
+        const notes = rzpOrder?.notes || {};
+        const noteResourceId = String(notes.resourceId || notes.resource_id || "").trim();
+        const noteUserId = String(notes.userId || "").trim();
+        const ownership = evaluateRecordOwnership(noteUserId, authenticatedUser);
+
+        if (!ownership.allowed) {
+          ownershipDenied = true;
+        } else {
+          if (!ownership.isGuest) {
+            resolvedAsUserOwned = true;
+          }
+          if (
+            rzpPayment &&
+            rzpOrder &&
+            String(rzpPayment.status || "").toLowerCase() === "captured" &&
+            rzpPayment.order_id === cleanOrderId &&
+            rzpOrder.id === cleanOrderId &&
+            String(rzpPayment.currency || "").toUpperCase() === "INR" &&
+            String(rzpOrder.currency || "").toUpperCase() === "INR" &&
+            Number.isSafeInteger(Number(rzpPayment.amount)) &&
+            Number.isSafeInteger(Number(rzpOrder.amount)) &&
+            Number(rzpPayment.amount) === expectedAmountInPaise &&
+            Number(rzpOrder.amount) === expectedAmountInPaise &&
+            String(notes.itemType || "").trim().toLowerCase() === "resource" &&
+            allowedResourceIdentifiers.includes(noteResourceId)
+          ) {
+            paymentVerified = true;
+          }
         }
       } catch (gatewayErr) {
         console.warn(`[Lead Recovery] Gateway verification notice: ${gatewayErr?.message}`);
+      }
+    }
+
+    if (ownershipDenied) {
+      return res.status(403).json({
+        success: false,
+        payment_verified: false,
+        lead_status: "failed",
+        error: ownershipDenialReason
+      });
+    }
+
+    // Enforce signed guest resource access token whenever the request is NOT an authenticated user-owned record or admin
+    if (!isAdminCaller && !resolvedAsUserOwned) {
+      const guestAuth = authorizeGuestResourceTransaction({
+        req,
+        paymentId: cleanPaymentId,
+        orderId: cleanOrderId,
+        allowedResourceIds: [canonicalResourceId],
+        dbPurchase: dbPurchase || purchase,
+        dbPayment: dbPayment || payment,
+        gatewayOrderNotes: gatewayOrder?.notes || null,
+        gatewayPayment,
+        suppliedEmail: customerDetails?.email || "",
+        suppliedPhone: customerDetails?.phone || ""
+      });
+      if (!guestAuth.allowed) {
+        return res.status(403).json({
+          success: false,
+          payment_verified: false,
+          lead_status: "failed",
+          code: guestAuth.code,
+          error: guestAuth.reason
+        });
       }
     }
 
@@ -1466,43 +2146,26 @@ router.post("/recover-lead", async (req, res) => {
         success: false,
         payment_verified: false,
         lead_status: "failed",
-        error: "Payment could not be verified against ledger records or gateway. Lead recovery rejected."
+        error: "Payment could not be verified for this resource against ledger records or gateway. Lead recovery rejected."
       });
     }
 
-    // 2. Idempotency Check: check if lead already exists in crm_leads for this payment
-    if (dbClient) {
-      const { data: existingLeads } = await dbClient
-        .from("crm_leads")
-        .select("id, status")
-        .ilike("notes", `%${cleanPaymentId}%`)
-        .limit(1);
+    // 3. Idempotency Check: check if lead already exists in crm_leads for this payment
+    const { data: existingLeads } = await dbClient
+      .from("crm_leads")
+      .select("id, status")
+      .ilike("notes", `%${cleanPaymentId}%`)
+      .limit(1);
 
-      if (existingLeads && existingLeads.length > 0) {
-        return res.json({
-          success: true,
-          payment_verified: true,
-          lead_status: "already_exists",
-          lead_id: existingLeads[0].id,
-          message: "CRM lead is already registered and synchronized for this purchase."
-        });
-      }
+    if (existingLeads && existingLeads.length > 0) {
+      return res.json({
+        success: true,
+        payment_verified: true,
+        lead_status: "already_exists",
+        lead_id: existingLeads[0].id,
+        message: "CRM lead is already registered and synchronized for this purchase."
+      });
     }
-
-    // 3. Resolve authoritative resource pricing & metadata
-    let resourceRecord = null;
-    if (dbClient) {
-      const isUUID = isValidUUID(cleanResourceId);
-      const query = dbClient.from("resources").select("*");
-      const { data } = isUUID
-        ? await query.eq("id", cleanResourceId).maybeSingle()
-        : await query.eq("slug", cleanResourceId).maybeSingle();
-      resourceRecord = data;
-    }
-
-    const pricing = getAuthoritativeResourcePricing(cleanResourceId, resourceRecord, req.body);
-    const authoritativePrice = pricing.price;
-    const resourceTitle = resourceRecord?.title || resourceRecord?.name || "Digital Resource Toolkit";
 
     // 4. Safely insert lead into public.crm_leads with generated UUID
     const leadEmail = (customerDetails?.email || authenticatedUser?.email || dbPurchase?.customer_email || "").trim().toLowerCase();
@@ -1651,6 +2314,207 @@ function getAllowedResourceIdsForAuthorization(targetResourceRecord) {
 }
 
 /**
+ * Enforces fail-closed record ownership across DB and gateway fallback paths.
+ * A non-null owner user_id NEVER authorizes an unauthenticated (null) caller.
+ */
+export function evaluateRecordOwnership(ownerUserId, authenticatedUser) {
+  const cleanOwnerId = ownerUserId != null ? String(ownerUserId).trim() : "";
+  if (cleanOwnerId) {
+    if (!authenticatedUser) {
+      return {
+        allowed: false,
+        denied: true,
+        isGuest: false,
+        reason: "Authentication required for user-owned purchase."
+      };
+    }
+    if (String(authenticatedUser.id || "").trim() === cleanOwnerId || checkIsAdmin(authenticatedUser)) {
+      return { allowed: true, denied: false, isGuest: false };
+    }
+    return {
+      allowed: false,
+      denied: true,
+      isGuest: false,
+      reason: "Authenticated user does not match purchase owner."
+    };
+  }
+  return { allowed: true, denied: false, isGuest: true };
+}
+
+/**
+ * Verifies cryptographically signed guest resource access token + identity binding.
+ * Rejects unauthenticated orderId + paymentId alone with explicit failure codes.
+ */
+function authorizeGuestResourceTransaction({
+  req,
+  paymentId,
+  orderId,
+  allowedResourceIds,
+  dbPurchase = null,
+  dbPayment = null,
+  gatewayOrderNotes = null,
+  gatewayPayment = null,
+  suppliedEmail = "",
+  suppliedPhone = ""
+}) {
+  const rawToken = extractResourceAccessToken(req);
+  if (!rawToken) {
+    return {
+      allowed: false,
+      code: "MISSING_GUEST_TOKEN",
+      reason: "Forbidden: A signed guest resource access token is required for guest resource access."
+    };
+  }
+
+  const tokenCheck = verifyGuestResourceToken(rawToken, {
+    paymentId,
+    orderId,
+    allowedResourceIds
+  });
+  if (!tokenCheck.valid) {
+    return {
+      allowed: false,
+      code: tokenCheck.code || "INVALID_GUEST_TOKEN",
+      reason: tokenCheck.reason || "Forbidden: Invalid or expired guest resource access token."
+    };
+  }
+
+  const identityCheck = verifyTokenGuestIdentityBinding(tokenCheck.payload, {
+    orderId,
+    paymentId,
+    authoritativeEmails: [
+      dbPurchase?.customer_email,
+      dbPayment?.customer_email,
+      gatewayOrderNotes?.customerEmail,
+      gatewayPayment?.email
+    ],
+    authoritativePhones: [
+      dbPurchase?.customer_phone,
+      gatewayOrderNotes?.customerPhone,
+      gatewayPayment?.contact
+    ],
+    suppliedEmail,
+    suppliedPhone
+  });
+  if (!identityCheck.valid) {
+    return {
+      allowed: false,
+      code: identityCheck.code || "GUEST_IDENTITY_MISMATCH",
+      reason: identityCheck.reason || "Forbidden: Guest identity mismatch."
+    };
+  }
+
+  return { allowed: true, payload: tokenCheck.payload };
+}
+
+/**
+ * Dynamically resolves exact authoritative integer-paise expectations from `public.resources`
+ * for the target resource and (when the target is a bundle child) the parent bundle record.
+ * Never hardcodes fallback bundle prices (e.g. 29900).
+ */
+async function resolveResourceAccessAuthoritative(
+  supabaseServer,
+  resourceRecord,
+  { allowArchivedExistingOwner = false } = {}
+) {
+  const expectedPaiseById = new Map();
+  const archivedExpectedPaiseById = new Map();
+  const targetId = String(resourceRecord?.id || "").trim();
+  const recordStatus = String(resourceRecord?.status || "").trim().toLowerCase();
+
+  if (recordStatus === "published") {
+    const pricing = getAuthoritativeResourcePricing(targetId, resourceRecord);
+    if (pricing.accessType === "free") {
+      return {
+        isFree: true,
+        pricing,
+        expectedPaiseById,
+        archivedExpectedPaiseById,
+        allAllowedIds: getAllowedResourceIdsForAuthorization(resourceRecord)
+      };
+    }
+    const targetPaise = toPaiseStrict(pricing.price);
+    if (pricing.accessType === "paid" && String(pricing.currency || "").toUpperCase() === "INR" && targetPaise) {
+      expectedPaiseById.set(targetId, targetPaise);
+    }
+  } else if (allowArchivedExistingOwner && recordStatus === "archived") {
+    const dbAccess = String(resourceRecord.access_type ?? resourceRecord.accessType ?? "").trim().toLowerCase();
+    const dbCurr = String(resourceRecord.currency || "INR").trim().toUpperCase();
+    const archivedPaise = toPaiseStrict(resourceRecord.price);
+    if (dbAccess === "paid" && dbCurr === "INR" && archivedPaise) {
+      archivedExpectedPaiseById.set(targetId, archivedPaise);
+    }
+  } else {
+    // Draft or unknown status: fail closed with empty maps (never unlocked even via bundle)
+    return {
+      isFree: false,
+      pricing: { accessType: "unavailable", price: 0, currency: "INR" },
+      expectedPaiseById,
+      archivedExpectedPaiseById,
+      allAllowedIds: []
+    };
+  }
+
+  const bundleRel = isBundleOrBundleItem(resourceRecord.id || resourceRecord.slug);
+  if (bundleRel.isChild) {
+    const { data: bundleRow } = await supabaseServer
+      .from("resources")
+      .select("id, slug, title, status, access_type, price, currency")
+      .eq("id", BUNDLE_RESOURCE_ID)
+      .maybeSingle();
+
+    if (bundleRow) {
+      const bStatus = String(bundleRow.status || "").trim().toLowerCase();
+      if (bStatus === "published") {
+        const bPricing = getAuthoritativeResourcePricing(BUNDLE_RESOURCE_ID, bundleRow);
+        const bPaise = toPaiseStrict(bPricing.price);
+        if (bPricing.accessType === "paid" && String(bPricing.currency || "").toUpperCase() === "INR" && bPaise) {
+          expectedPaiseById.set(BUNDLE_RESOURCE_ID, bPaise);
+        }
+      } else if (allowArchivedExistingOwner && bStatus === "archived") {
+        const bAccess = String(bundleRow.access_type ?? bundleRow.accessType ?? "").trim().toLowerCase();
+        const bCurr = String(bundleRow.currency || "INR").trim().toUpperCase();
+        const bPaise = toPaiseStrict(bundleRow.price);
+        if (bAccess === "paid" && bCurr === "INR" && bPaise) {
+          archivedExpectedPaiseById.set(BUNDLE_RESOURCE_ID, bPaise);
+        }
+      }
+    }
+  }
+
+  const combinedIds = Array.from(new Set([
+    ...expectedPaiseById.keys(),
+    ...archivedExpectedPaiseById.keys()
+  ]));
+
+  return {
+    isFree: false,
+    pricing: getAuthoritativeResourcePricing(targetId, resourceRecord),
+    expectedPaiseById,
+    archivedExpectedPaiseById,
+    allAllowedIds: combinedIds
+  };
+}
+
+/**
+ * Resolves a gateway order's notes.resourceId to a canonical resource UUID present in expectedPaiseById.
+ */
+function resolveGatewayMatchedResourceId(orderResourceId, resourceRecord, expectedPaiseById) {
+  const clean = String(orderResourceId || "").trim();
+  if (!clean) return null;
+  if (clean === String(resourceRecord.id).trim() || (resourceRecord.slug && clean === String(resourceRecord.slug).trim())) {
+    return expectedPaiseById.has(String(resourceRecord.id).trim()) ? String(resourceRecord.id).trim() : null;
+  }
+  if (
+    expectedPaiseById.has(BUNDLE_RESOURCE_ID) &&
+    (clean === BUNDLE_RESOURCE_ID || clean === BUNDLE_SLUG)
+  ) {
+    return BUNDLE_RESOURCE_ID;
+  }
+  return null;
+}
+
+/**
  * GET /api/payments/verify-purchase-status
  *
  * Server-authoritative endpoint to verify whether a customer or visitor has a verified paid purchase.
@@ -1683,8 +2547,8 @@ router.get("/verify-purchase-status", async (req, res) => {
     // 1. Fetch resource to verify ID or slug
     const isUUID = isValidUUID(cleanResourceId);
     const { data: resourceRecord } = isUUID
-      ? await supabaseServer.from("resources").select("id, slug, title, access_type, price, currency").eq("id", cleanResourceId).maybeSingle()
-      : await supabaseServer.from("resources").select("id, slug, title, access_type, price, currency").eq("slug", cleanResourceId).maybeSingle();
+      ? await supabaseServer.from("resources").select("id, slug, title, status, access_type, price, currency").eq("id", cleanResourceId).maybeSingle()
+      : await supabaseServer.from("resources").select("id, slug, title, status, access_type, price, currency").eq("slug", cleanResourceId).maybeSingle();
 
     if (!resourceRecord) {
       return res.status(404).json({
@@ -1695,10 +2559,11 @@ router.get("/verify-purchase-status", async (req, res) => {
     }
 
     const resolvedResId = resourceRecord.id;
-    const pricing = getAuthoritativeResourcePricing(cleanResourceId, resourceRecord);
-    const isFree = pricing.accessType !== "paid" || pricing.price <= 0;
+    const accessSpec = await resolveResourceAccessAuthoritative(supabaseServer, resourceRecord, {
+      allowArchivedExistingOwner: Boolean(authenticatedUser)
+    });
 
-    if (isFree) {
+    if (accessSpec.isFree) {
       return res.json({
         success: true,
         verified: true,
@@ -1710,11 +2575,256 @@ router.get("/verify-purchase-status", async (req, res) => {
       });
     }
 
-    const allowedResourceIds = getAllowedResourceIdsForAuthorization(resourceRecord);
-    const expectedAmountInPaise = Math.round(pricing.price * 100);
-    const expectedCurrency = pricing.currency;
+    if ((cleanPaymentId && !cleanOrderId) || (!cleanPaymentId && cleanOrderId)) {
+      return res.status(400).json({
+        success: false,
+        verified: false,
+        error: "Both paymentId and orderId are required for transaction verification."
+      });
+    }
 
-    // 2. Check if authenticated user owns the resource or bundle (Checked first to enable authenticated recovery)
+    const combinedPaiseMap = new Map([
+      ...accessSpec.archivedExpectedPaiseById.entries(),
+      ...accessSpec.expectedPaiseById.entries()
+    ]);
+
+    const isAdminCaller = Boolean(authenticatedUser && checkIsAdmin(authenticatedUser));
+    let ownershipDenied = false;
+    let guestAuthError = null;
+
+    // 2. Check dual-identifier verification when orderId + paymentId (or guest token) are supplied
+    if (cleanPaymentId && cleanOrderId && accessSpec.allAllowedIds.length > 0) {
+      const [{ data: purchaseRecord }, { data: paymentRecord }] = await Promise.all([
+        supabaseServer
+          .from("resource_purchases")
+          .select("id, user_id, customer_email, customer_phone, status, amount, currency, razorpay_order_id, razorpay_payment_id, resource_id")
+          .eq("razorpay_payment_id", cleanPaymentId)
+          .eq("razorpay_order_id", cleanOrderId)
+          .in("resource_id", accessSpec.allAllowedIds)
+          .eq("status", "active")
+          .eq("currency", "INR")
+          .maybeSingle(),
+        supabaseServer
+          .from("payments")
+          .select("id, user_id, status, amount, currency, razorpay_order_id, razorpay_payment_id, item_id, item_type")
+          .eq("razorpay_payment_id", cleanPaymentId)
+          .eq("razorpay_order_id", cleanOrderId)
+          .in("item_id", accessSpec.allAllowedIds)
+          .eq("item_type", "resource")
+          .eq("status", "captured")
+          .eq("currency", "INR")
+          .maybeSingle()
+      ]);
+
+      let isUserOwnedRecord = false;
+      if (purchaseRecord) {
+        const own = evaluateRecordOwnership(purchaseRecord.user_id, authenticatedUser);
+        if (!own.allowed) ownershipDenied = true;
+        else if (!own.isGuest) isUserOwnedRecord = true;
+      }
+      if (!ownershipDenied && paymentRecord) {
+        const own = evaluateRecordOwnership(paymentRecord.user_id, authenticatedUser);
+        if (!own.allowed) ownershipDenied = true;
+        else if (!own.isGuest) isUserOwnedRecord = true;
+      }
+
+      if (!ownershipDenied) {
+        if (purchaseRecord) {
+          const purResId = String(purchaseRecord.resource_id || "").trim();
+          const hasUserOwner = Boolean(purchaseRecord.user_id && String(purchaseRecord.user_id).trim());
+          const expectedPaise = hasUserOwner
+            ? combinedPaiseMap.get(purResId)
+            : accessSpec.expectedPaiseById.get(purResId);
+          const actualPaise = toPaiseStrict(purchaseRecord.amount);
+          if (expectedPaise && actualPaise === expectedPaise) {
+            if (!hasUserOwner && !isAdminCaller) {
+              const guestAuth = authorizeGuestResourceTransaction({
+                req,
+                paymentId: cleanPaymentId,
+                orderId: cleanOrderId,
+                allowedResourceIds: accessSpec.allAllowedIds,
+                dbPurchase: purchaseRecord,
+                dbPayment: paymentRecord,
+                suppliedEmail: req.query?.email || ""
+              });
+              if (!guestAuth.allowed) {
+                guestAuthError = guestAuth;
+              }
+            }
+            if (!guestAuthError) {
+              return res.json({
+                success: true,
+                verified: true,
+                resourceId: resolvedResId,
+                orderId: cleanOrderId,
+                paymentId: cleanPaymentId,
+                amount: actualPaise / 100,
+                currency: "INR"
+              });
+            }
+          }
+        }
+
+        if (!guestAuthError && paymentRecord) {
+          const payResId = String(paymentRecord.item_id || "").trim();
+          const hasUserOwner = Boolean(paymentRecord.user_id && String(paymentRecord.user_id).trim());
+          const expectedPaise = hasUserOwner
+            ? combinedPaiseMap.get(payResId)
+            : accessSpec.expectedPaiseById.get(payResId);
+          const actualPaise = toPaiseStrict(paymentRecord.amount);
+          if (expectedPaise && actualPaise === expectedPaise) {
+            if (!hasUserOwner && !isAdminCaller) {
+              const guestAuth = authorizeGuestResourceTransaction({
+                req,
+                paymentId: cleanPaymentId,
+                orderId: cleanOrderId,
+                allowedResourceIds: accessSpec.allAllowedIds,
+                dbPurchase: purchaseRecord,
+                dbPayment: paymentRecord,
+                suppliedEmail: req.query?.email || ""
+              });
+              if (!guestAuth.allowed) {
+                guestAuthError = guestAuth;
+              }
+            }
+            if (!guestAuthError) {
+              return res.json({
+                success: true,
+                verified: true,
+                resourceId: resolvedResId,
+                orderId: cleanOrderId,
+                paymentId: cleanPaymentId,
+                amount: actualPaise / 100,
+                currency: "INR"
+              });
+            }
+          }
+        }
+      }
+
+      // Gateway reconciliation fallback (published paid resources only, strict integer paise + ownership/guest token)
+      const razorpay = getRazorpayClient();
+      if (
+        !ownershipDenied &&
+        !guestAuthError &&
+        razorpay &&
+        accessSpec.expectedPaiseById.size > 0 &&
+        cleanPaymentId.startsWith("pay_") &&
+        cleanOrderId.startsWith("order_")
+      ) {
+        try {
+          const [rzpPayment, rzpOrder] = await Promise.all([
+            razorpay.payments.fetch(cleanPaymentId),
+            razorpay.orders.fetch(cleanOrderId)
+          ]);
+          if (
+            rzpPayment &&
+            rzpOrder &&
+            String(rzpPayment.status || "").toLowerCase() === "captured" &&
+            String(rzpPayment.currency || "").toUpperCase() === "INR" &&
+            String(rzpOrder.currency || "").toUpperCase() === "INR" &&
+            rzpPayment.order_id === cleanOrderId &&
+            rzpOrder.id === cleanOrderId &&
+            Number.isSafeInteger(Number(rzpPayment.amount)) &&
+            Number(rzpPayment.amount) === Number(rzpOrder.amount)
+          ) {
+            const orderNotes = rzpOrder.notes || {};
+            const orderItemType = String(orderNotes.itemType || "").trim().toLowerCase();
+            const orderResId = String(orderNotes.resourceId || orderNotes.resource_id || "").trim();
+            const matchedCanonicalResId = resolveGatewayMatchedResourceId(
+              orderResId,
+              resourceRecord,
+              accessSpec.expectedPaiseById
+            );
+            const exactExpectedPaise = matchedCanonicalResId
+              ? accessSpec.expectedPaiseById.get(matchedCanonicalResId)
+              : null;
+
+            const ownership = evaluateRecordOwnership(orderNotes.userId, authenticatedUser);
+            if (!ownership.allowed) {
+              ownershipDenied = true;
+            } else {
+              if (!ownership.isGuest) isUserOwnedRecord = true;
+              if (
+                orderItemType === "resource" &&
+                exactExpectedPaise &&
+                Number(rzpPayment.amount) === exactExpectedPaise
+              ) {
+                if (ownership.isGuest && !isAdminCaller) {
+                  const guestAuth = authorizeGuestResourceTransaction({
+                    req,
+                    paymentId: cleanPaymentId,
+                    orderId: cleanOrderId,
+                    allowedResourceIds: accessSpec.allAllowedIds,
+                    dbPurchase: purchaseRecord,
+                    dbPayment: paymentRecord,
+                    gatewayOrderNotes: orderNotes,
+                    gatewayPayment: rzpPayment,
+                    suppliedEmail: req.query?.email || ""
+                  });
+                  if (!guestAuth.allowed) {
+                    guestAuthError = guestAuth;
+                  }
+                }
+                if (!guestAuthError) {
+                  return res.json({
+                    success: true,
+                    verified: true,
+                    resourceId: resolvedResId,
+                    orderId: cleanOrderId,
+                    paymentId: cleanPaymentId,
+                    amount: Number(rzpPayment.amount) / 100,
+                    currency: "INR"
+                  });
+                }
+              }
+            }
+          }
+        } catch {
+          // invalid payment ID or gateway rejection
+        }
+      }
+
+      // If unauthenticated guest supplied transaction IDs but did not satisfy token authorization, fail closed 403
+      if (!authenticatedUser && !ownershipDenied && !guestAuthError) {
+        const fallbackGuestCheck = authorizeGuestResourceTransaction({
+          req,
+          paymentId: cleanPaymentId,
+          orderId: cleanOrderId,
+          allowedResourceIds: accessSpec.allAllowedIds,
+          suppliedEmail: req.query?.email || ""
+        });
+        if (!fallbackGuestCheck.allowed) {
+          guestAuthError = fallbackGuestCheck;
+        }
+      }
+    } else if (!authenticatedUser && extractResourceAccessToken(req)) {
+      return res.status(403).json({
+        success: false,
+        verified: false,
+        code: "MISSING_TRANSACTION_IDS",
+        error: "Forbidden: Guest resource access token requires matching orderId and paymentId."
+      });
+    }
+
+    if (ownershipDenied) {
+      return res.status(403).json({
+        success: false,
+        verified: false,
+        error: "Forbidden: Purchase belongs to an authenticated user account."
+      });
+    }
+
+    if (guestAuthError) {
+      return res.status(403).json({
+        success: false,
+        verified: false,
+        code: guestAuthError.code,
+        error: guestAuthError.reason
+      });
+    }
+
+    // 3. Authenticated user ownership lookup (only when no ownership denial occurred)
     if (authenticatedUser) {
       if (checkIsAdmin(authenticatedUser)) {
         return res.json({
@@ -1727,178 +2837,56 @@ router.get("/verify-purchase-status", async (req, res) => {
         });
       }
 
-      const { data: userPurchases } = await supabaseServer
-        .from("resource_purchases")
-        .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, resource_id")
-        .eq("user_id", authenticatedUser.id)
-        .in("resource_id", allowedResourceIds)
-        .eq("status", "active")
-        .eq("currency", "INR")
-        .gt("amount", 0)
-        .maybeSingle();
+      if (accessSpec.allAllowedIds.length > 0) {
+        const { data: userPurchases } = await supabaseServer
+          .from("resource_purchases")
+          .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, resource_id")
+          .eq("user_id", authenticatedUser.id)
+          .in("resource_id", accessSpec.allAllowedIds)
+          .eq("status", "active")
+          .eq("currency", "INR");
 
-      if (
-        userPurchases &&
-        String(userPurchases.currency || "").toUpperCase() === "INR" &&
-        Number(userPurchases.amount) > 0
-      ) {
-        return res.json({
-          success: true,
-          verified: true,
-          resourceId: resolvedResId,
-          orderId: userPurchases.razorpay_order_id,
-          paymentId: userPurchases.razorpay_payment_id,
-          amount: Number(userPurchases.amount) || Number(resourceRecord?.price) || 0,
-          currency: "INR"
+        const validPurchase = (userPurchases || []).find((row) => {
+          const expPaise = combinedPaiseMap.get(String(row.resource_id || "").trim());
+          return expPaise && toPaiseStrict(row.amount) === expPaise;
         });
-      }
 
-      const { data: userPayment } = await supabaseServer
-        .from("payments")
-        .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, item_id")
-        .eq("user_id", authenticatedUser.id)
-        .eq("item_type", "resource")
-        .in("item_id", allowedResourceIds)
-        .eq("status", "captured")
-        .eq("currency", "INR")
-        .gt("amount", 0)
-        .maybeSingle();
+        if (validPurchase) {
+          return res.json({
+            success: true,
+            verified: true,
+            resourceId: resolvedResId,
+            orderId: validPurchase.razorpay_order_id,
+            paymentId: validPurchase.razorpay_payment_id,
+            amount: Number(validPurchase.amount),
+            currency: "INR"
+          });
+        }
 
-      if (
-        userPayment &&
-        String(userPayment.currency || "").toUpperCase() === "INR" &&
-        Number(userPayment.amount) > 0
-      ) {
-        return res.json({
-          success: true,
-          verified: true,
-          resourceId: resolvedResId,
-          orderId: userPayment.razorpay_order_id,
-          paymentId: userPayment.razorpay_payment_id,
-          amount: Number(userPayment.amount) || Number(resourceRecord?.price) || 0,
-          currency: "INR"
+        const { data: userPayments } = await supabaseServer
+          .from("payments")
+          .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, item_id")
+          .eq("user_id", authenticatedUser.id)
+          .eq("item_type", "resource")
+          .in("item_id", accessSpec.allAllowedIds)
+          .eq("status", "captured")
+          .eq("currency", "INR");
+
+        const validPayment = (userPayments || []).find((row) => {
+          const expPaise = combinedPaiseMap.get(String(row.item_id || "").trim());
+          return expPaise && toPaiseStrict(row.amount) === expPaise;
         });
-      }
-    }
 
-    // 3. Guest verification: require both matching identifiers
-    if (cleanPaymentId || cleanOrderId) {
-      if (!cleanPaymentId || !cleanOrderId) {
-        return res.status(400).json({
-          success: false,
-          verified: false,
-          error: "Both paymentId and orderId are required for guest purchase verification."
-        });
-      }
-
-      // Check public.resource_purchases for matching paymentId AND orderId
-      const { data: purchaseRecord } = await supabaseServer
-        .from("resource_purchases")
-        .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, resource_id")
-        .eq("razorpay_payment_id", cleanPaymentId)
-        .eq("razorpay_order_id", cleanOrderId)
-        .in("resource_id", allowedResourceIds)
-        .eq("status", "active")
-        .eq("currency", "INR")
-        .gt("amount", 0)
-        .maybeSingle();
-
-      if (
-        purchaseRecord &&
-        purchaseRecord.razorpay_order_id === cleanOrderId &&
-        purchaseRecord.razorpay_payment_id === cleanPaymentId &&
-        String(purchaseRecord.currency || "").toUpperCase() === "INR" &&
-        Number(purchaseRecord.amount) > 0
-      ) {
-        return res.json({
-          success: true,
-          verified: true,
-          resourceId: resolvedResId,
-          orderId: cleanOrderId,
-          paymentId: cleanPaymentId,
-          amount: Number(purchaseRecord.amount) || Number(resourceRecord.price) || 0,
-          currency: "INR"
-        });
-      }
-
-      // Check public.payments for matching paymentId AND orderId
-      const { data: paymentRecord } = await supabaseServer
-        .from("payments")
-        .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, item_id, item_type")
-        .eq("razorpay_payment_id", cleanPaymentId)
-        .eq("razorpay_order_id", cleanOrderId)
-        .in("item_id", allowedResourceIds)
-        .eq("item_type", "resource")
-        .eq("status", "captured")
-        .eq("currency", "INR")
-        .gt("amount", 0)
-        .maybeSingle();
-
-      if (
-        paymentRecord &&
-        paymentRecord.razorpay_order_id === cleanOrderId &&
-        paymentRecord.razorpay_payment_id === cleanPaymentId &&
-        String(paymentRecord.currency || "").toUpperCase() === "INR" &&
-        Number(paymentRecord.amount) > 0
-      ) {
-        return res.json({
-          success: true,
-          verified: true,
-          resourceId: resolvedResId,
-          orderId: cleanOrderId,
-          paymentId: cleanPaymentId,
-          amount: Number(paymentRecord.amount) || Number(resourceRecord.price) || 0,
-          currency: "INR"
-        });
-      }
-
-      // Gateway reconciliation fallback with strict amount, currency, and resource verification
-      const razorpay = getRazorpayClient();
-      if (razorpay && cleanPaymentId.startsWith("pay_") && cleanOrderId.startsWith("order_")) {
-        try {
-          const rzpPayment = await razorpay.payments.fetch(cleanPaymentId);
-          if (
-            rzpPayment &&
-            rzpPayment.status === "captured" &&
-            String(rzpPayment.currency || "").toUpperCase() === "INR" &&
-            Number(rzpPayment.amount) > 0 &&
-            rzpPayment.order_id === cleanOrderId
-          ) {
-            const isDirectMatch = Number(rzpPayment.amount) === expectedAmountInPaise;
-            const isBundleMatch = allowedResourceIds.includes(BUNDLE_RESOURCE_ID) && Number(rzpPayment.amount) === 29900;
-
-            if (isDirectMatch || isBundleMatch) {
-              const rzpOrder = await razorpay.orders.fetch(cleanOrderId);
-              if (
-                rzpOrder &&
-                rzpOrder.id === cleanOrderId &&
-                Number(rzpPayment.amount) === Number(rzpOrder.amount) &&
-                String(rzpOrder.currency || "").toUpperCase() === "INR"
-              ) {
-                const orderNotes = rzpOrder.notes || {};
-                const orderItemType = orderNotes.itemType;
-                const orderResId = orderNotes.resourceId || orderNotes.resource_id;
-
-                if (
-                  orderItemType === "resource" &&
-                  orderResId &&
-                  allowedResourceIds.includes(orderResId)
-                ) {
-                  return res.json({
-                    success: true,
-                    verified: true,
-                    resourceId: resolvedResId,
-                    orderId: cleanOrderId,
-                    paymentId: cleanPaymentId,
-                    amount: (rzpPayment.amount || 0) / 100,
-                    currency: "INR"
-                  });
-                }
-              }
-            }
-          }
-        } catch (rzpErr) {
-          // invalid payment ID or gateway rejection
+        if (validPayment) {
+          return res.json({
+            success: true,
+            verified: true,
+            resourceId: resolvedResId,
+            orderId: validPayment.razorpay_order_id,
+            paymentId: validPayment.razorpay_payment_id,
+            amount: Number(validPayment.amount),
+            currency: "INR"
+          });
         }
       }
     }
@@ -1954,14 +2942,15 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
       return res.status(404).json({ success: false, error: "Resource not found." });
     }
 
-    const pricing = getAuthoritativeResourcePricing(cleanResourceId, resourceRecord);
-    const isPaid = pricing.accessType === "paid" && pricing.price > 0;
+    const accessSpec = await resolveResourceAccessAuthoritative(supabaseServer, resourceRecord, {
+      allowArchivedExistingOwner: Boolean(authenticatedUser)
+    });
 
-    // If it's a free resource, permit retrieval and deliver signed URL or static asset
-    if (!isPaid) {
+    // ONLY legitimately published free resources are served without paid entitlement
+    if (accessSpec.isFree) {
       let freeDownloadUrl = resourceRecord.file_url || resourceRecord.external_url || null;
       const matchedBundleItem = BUNDLE_ITEMS.find((i) => i.id === resourceRecord.id || i.slug === resourceRecord.slug);
-      if (matchedBundleItem) {
+      if (matchedBundleItem && supabaseServer.storage?.from) {
         const { data: sData } = await supabaseServer.storage
           .from("resources")
           .createSignedUrl(matchedBundleItem.storagePath, 3600);
@@ -1979,91 +2968,179 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
       });
     }
 
-    const allowedResourceIds = getAllowedResourceIdsForAuthorization(resourceRecord);
+    const combinedPaiseMap = new Map([
+      ...accessSpec.archivedExpectedPaiseById.entries(),
+      ...accessSpec.expectedPaiseById.entries()
+    ]);
 
-    // If paid, verify authorization
+    const isAdminCaller = Boolean(authenticatedUser && checkIsAdmin(authenticatedUser));
     let isAuthorized = false;
+    let ownershipDenied = false;
 
-    // Check paymentId and orderId against database (strict dual-identifier requirement + user ownership)
-    if (cleanPaymentId && cleanOrderId) {
-      const { data: pRecord } = await supabaseServer
-        .from("payments")
-        .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, item_id, item_type, user_id")
-        .eq("razorpay_payment_id", cleanPaymentId)
-        .eq("razorpay_order_id", cleanOrderId)
-        .in("item_id", allowedResourceIds)
-        .eq("item_type", "resource")
-        .eq("status", "captured")
-        .eq("currency", "INR")
-        .gt("amount", 0)
-        .maybeSingle();
-
-      if (
-        pRecord &&
-        pRecord.razorpay_order_id === cleanOrderId &&
-        pRecord.razorpay_payment_id === cleanPaymentId &&
-        String(pRecord.currency || "").toUpperCase() === "INR"
-      ) {
-        // Enforce ownership: if user is logged in, payment must either belong to this user or have no user_id (guest)
-        if (!authenticatedUser || !pRecord.user_id || pRecord.user_id === authenticatedUser.id) {
-          isAuthorized = true;
-        }
-      }
-
-      if (!isAuthorized) {
-        const { data: purRecord } = await supabaseServer
-          .from("resource_purchases")
-          .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, resource_id, user_id")
+    // 2. Dual-identifier verification against DB ledger & Razorpay gateway
+    if (cleanPaymentId && cleanOrderId && accessSpec.allAllowedIds.length > 0) {
+      const [{ data: pRecord }, { data: purRecord }] = await Promise.all([
+        supabaseServer
+          .from("payments")
+          .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, item_id, item_type, user_id")
           .eq("razorpay_payment_id", cleanPaymentId)
           .eq("razorpay_order_id", cleanOrderId)
-          .in("resource_id", allowedResourceIds)
+          .in("item_id", accessSpec.allAllowedIds)
+          .eq("item_type", "resource")
+          .eq("status", "captured")
+          .eq("currency", "INR")
+          .maybeSingle(),
+        supabaseServer
+          .from("resource_purchases")
+          .select("id, status, amount, currency, razorpay_order_id, razorpay_payment_id, resource_id, user_id, customer_email, customer_phone")
+          .eq("razorpay_payment_id", cleanPaymentId)
+          .eq("razorpay_order_id", cleanOrderId)
+          .in("resource_id", accessSpec.allAllowedIds)
           .eq("status", "active")
           .eq("currency", "INR")
-          .gt("amount", 0)
-          .maybeSingle();
+          .maybeSingle()
+      ]);
 
+      if (pRecord && !evaluateRecordOwnership(pRecord.user_id, authenticatedUser).allowed) {
+        ownershipDenied = true;
+      }
+      if (!ownershipDenied && purRecord && !evaluateRecordOwnership(purRecord.user_id, authenticatedUser).allowed) {
+        ownershipDenied = true;
+      }
+
+      if (!ownershipDenied && pRecord) {
+        const payResId = String(pRecord.item_id || "").trim();
+        const hasUserOwner = Boolean(pRecord.user_id && String(pRecord.user_id).trim());
+        const expectedPaise = hasUserOwner
+          ? combinedPaiseMap.get(payResId)
+          : accessSpec.expectedPaiseById.get(payResId);
         if (
-          purRecord &&
-          purRecord.razorpay_order_id === cleanOrderId &&
-          purRecord.razorpay_payment_id === cleanPaymentId &&
-          String(purRecord.currency || "").toUpperCase() === "INR"
+          pRecord.razorpay_order_id === cleanOrderId &&
+          pRecord.razorpay_payment_id === cleanPaymentId &&
+          String(pRecord.currency || "").toUpperCase() === "INR" &&
+          expectedPaise &&
+          toPaiseStrict(pRecord.amount) === expectedPaise
         ) {
-          // Enforce ownership
-          if (!authenticatedUser || !purRecord.user_id || purRecord.user_id === authenticatedUser.id) {
+          if (hasUserOwner || isAdminCaller) {
             isAuthorized = true;
+          } else {
+            const guestAuth = authorizeGuestResourceTransaction({
+              req,
+              paymentId: cleanPaymentId,
+              orderId: cleanOrderId,
+              allowedResourceIds: payResId === BUNDLE_RESOURCE_ID ? [BUNDLE_RESOURCE_ID, BUNDLE_SLUG] : [payResId],
+              dbPurchase: purRecord,
+              dbPayment: pRecord,
+              suppliedEmail: req.body?.email || ""
+            });
+            if (guestAuth.allowed) {
+              isAuthorized = true;
+            } else {
+              ownershipDenied = true;
+            }
           }
         }
       }
 
-      // Check with Razorpay gateway directly if not in DB yet
-      if (!isAuthorized && cleanPaymentId.startsWith("pay_") && cleanOrderId.startsWith("order_")) {
+      if (!isAuthorized && !ownershipDenied && purRecord) {
+        const purResId = String(purRecord.resource_id || "").trim();
+        const hasUserOwner = Boolean(purRecord.user_id && String(purRecord.user_id).trim());
+        const expectedPaise = hasUserOwner
+          ? combinedPaiseMap.get(purResId)
+          : accessSpec.expectedPaiseById.get(purResId);
+        if (
+          purRecord.razorpay_order_id === cleanOrderId &&
+          purRecord.razorpay_payment_id === cleanPaymentId &&
+          String(purRecord.currency || "").toUpperCase() === "INR" &&
+          expectedPaise &&
+          toPaiseStrict(purRecord.amount) === expectedPaise
+        ) {
+          if (hasUserOwner || isAdminCaller) {
+            isAuthorized = true;
+          } else {
+            const guestAuth = authorizeGuestResourceTransaction({
+              req,
+              paymentId: cleanPaymentId,
+              orderId: cleanOrderId,
+              allowedResourceIds: purResId === BUNDLE_RESOURCE_ID ? [BUNDLE_RESOURCE_ID, BUNDLE_SLUG] : [purResId],
+              dbPurchase: purRecord,
+              dbPayment: pRecord,
+              suppliedEmail: req.body?.email || ""
+            });
+            if (guestAuth.allowed) {
+              isAuthorized = true;
+            } else {
+              ownershipDenied = true;
+            }
+          }
+        }
+      }
+
+      // Gateway fallback (published paid resources only, strict integer paise + ownership + guest token)
+      if (
+        !isAuthorized &&
+        !ownershipDenied &&
+        accessSpec.expectedPaiseById.size > 0 &&
+        cleanPaymentId.startsWith("pay_") &&
+        cleanOrderId.startsWith("order_")
+      ) {
         const razorpay = getRazorpayClient();
         if (razorpay) {
           try {
-            const rzpPayment = await razorpay.payments.fetch(cleanPaymentId);
+            const [rzpPayment, rzpOrder] = await Promise.all([
+              razorpay.payments.fetch(cleanPaymentId),
+              razorpay.orders.fetch(cleanOrderId)
+            ]);
             if (
               rzpPayment &&
-              rzpPayment.status === "captured" &&
+              rzpOrder &&
+              String(rzpPayment.status || "").toLowerCase() === "captured" &&
               String(rzpPayment.currency || "").toUpperCase() === "INR" &&
-              Number(rzpPayment.amount) > 0 &&
-              rzpPayment.order_id === cleanOrderId
+              String(rzpOrder.currency || "").toUpperCase() === "INR" &&
+              rzpPayment.order_id === cleanOrderId &&
+              rzpOrder.id === cleanOrderId &&
+              Number.isSafeInteger(Number(rzpPayment.amount)) &&
+              Number(rzpPayment.amount) === Number(rzpOrder.amount)
             ) {
-              const rzpOrder = await razorpay.orders.fetch(cleanOrderId);
-              if (
-                rzpOrder &&
-                rzpOrder.id === cleanOrderId &&
-                Number(rzpPayment.amount) === Number(rzpOrder.amount) &&
-                String(rzpOrder.currency || "").toUpperCase() === "INR"
+              const orderNotes = rzpOrder.notes || {};
+              const orderItemType = String(orderNotes.itemType || "").trim().toLowerCase();
+              const orderResId = String(orderNotes.resourceId || orderNotes.resource_id || "").trim();
+              const matchedCanonicalResId = resolveGatewayMatchedResourceId(
+                orderResId,
+                resourceRecord,
+                accessSpec.expectedPaiseById
+              );
+              const exactExpectedPaise = matchedCanonicalResId
+                ? accessSpec.expectedPaiseById.get(matchedCanonicalResId)
+                : null;
+
+              const ownership = evaluateRecordOwnership(orderNotes.userId, authenticatedUser);
+              if (!ownership.allowed) {
+                ownershipDenied = true;
+              } else if (
+                orderItemType === "resource" &&
+                exactExpectedPaise &&
+                Number(rzpPayment.amount) === exactExpectedPaise
               ) {
-                const orderNotes = rzpOrder.notes || {};
-                const orderItemType = orderNotes.itemType;
-                const orderResId = orderNotes.resourceId || orderNotes.resource_id;
-                if (
-                  orderItemType === "resource" &&
-                  orderResId &&
-                  allowedResourceIds.includes(orderResId)
-                ) {
+                if (!ownership.isGuest || isAdminCaller) {
                   isAuthorized = true;
+                } else {
+                  const guestAuth = authorizeGuestResourceTransaction({
+                    req,
+                    paymentId: cleanPaymentId,
+                    orderId: cleanOrderId,
+                    allowedResourceIds: matchedCanonicalResId === BUNDLE_RESOURCE_ID ? [BUNDLE_RESOURCE_ID, BUNDLE_SLUG] : [matchedCanonicalResId],
+                    dbPurchase: purRecord,
+                    dbPayment: pRecord,
+                    gatewayOrderNotes: orderNotes,
+                    gatewayPayment: rzpPayment,
+                    suppliedEmail: req.body?.email || ""
+                  });
+                  if (guestAuth.allowed) {
+                    isAuthorized = true;
+                  } else {
+                    ownershipDenied = true;
+                  }
                 }
               }
             }
@@ -2072,51 +3149,49 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
       }
     }
 
-    // Check authenticated user
-    if (!isAuthorized && authenticatedUser) {
+    // 3. Check authenticated user ownership (unless explicit ownership mismatch occurred)
+    if (!isAuthorized && !ownershipDenied && authenticatedUser) {
       if (checkIsAdmin(authenticatedUser)) {
         isAuthorized = true;
-      } else {
-        const { data: userPayment } = await supabaseServer
+      } else if (accessSpec.allAllowedIds.length > 0) {
+        const { data: userPayments } = await supabaseServer
           .from("payments")
-          .select("id, currency, amount")
+          .select("id, currency, amount, item_id")
           .eq("user_id", authenticatedUser.id)
           .eq("item_type", "resource")
-          .in("item_id", allowedResourceIds)
+          .in("item_id", accessSpec.allAllowedIds)
           .eq("status", "captured")
-          .eq("currency", "INR")
-          .gt("amount", 0)
-          .maybeSingle();
+          .eq("currency", "INR");
 
-        if (
-          userPayment &&
-          String(userPayment.currency || "").toUpperCase() === "INR" &&
-          Number(userPayment.amount) > 0
-        ) {
+        const validUserPay = (userPayments || []).some((row) => {
+          const expPaise = combinedPaiseMap.get(String(row.item_id || "").trim());
+          return expPaise && toPaiseStrict(row.amount) === expPaise;
+        });
+
+        if (validUserPay) {
           isAuthorized = true;
         } else {
-          const { data: userPur } = await supabaseServer
+          const { data: userPurchases } = await supabaseServer
             .from("resource_purchases")
-            .select("id, currency, amount")
+            .select("id, currency, amount, resource_id")
             .eq("user_id", authenticatedUser.id)
-            .in("resource_id", allowedResourceIds)
+            .in("resource_id", accessSpec.allAllowedIds)
             .eq("status", "active")
-            .eq("currency", "INR")
-            .gt("amount", 0)
-            .maybeSingle();
+            .eq("currency", "INR");
 
-          if (
-            userPur &&
-            String(userPur.currency || "").toUpperCase() === "INR" &&
-            Number(userPur.amount) > 0
-          ) {
+          const validUserPur = (userPurchases || []).some((row) => {
+            const expPaise = combinedPaiseMap.get(String(row.resource_id || "").trim());
+            return expPaise && toPaiseStrict(row.amount) === expPaise;
+          });
+
+          if (validUserPur) {
             isAuthorized = true;
           }
         }
       }
     }
 
-    if (!isAuthorized) {
+    if (!isAuthorized || ownershipDenied) {
       return res.status(403).json({
         success: false,
         error: "Unauthorized: A confirmed payment is required to access this paid asset."
@@ -2144,11 +3219,13 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
         (i.slug === "the-ad-budget-breat-even-calculate" && resourceRecord.slug === "the-ad-budget-break-even-calculator")
     );
     if (bundleItem) {
-      const { data: signedData } = await supabaseServer.storage
-        .from("resources")
-        .createSignedUrl(bundleItem.storagePath, 3600);
-      if (signedData?.signedUrl) {
-        finalDownloadUrl = signedData.signedUrl;
+      if (supabaseServer.storage?.from) {
+        const { data: signedData } = await supabaseServer.storage
+          .from("resources")
+          .createSignedUrl(bundleItem.storagePath, 3600);
+        if (signedData?.signedUrl) {
+          finalDownloadUrl = signedData.signedUrl;
+        }
       }
     } else {
       let rawUrl = resourceRecord.file_url || resourceRecord.external_url || null;
@@ -2162,7 +3239,7 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
             objectPath = decodeURIComponent(match[1].split("?")[0]);
           }
         }
-        if (objectPath) {
+        if (objectPath && supabaseServer.storage?.from) {
           const { data: signedData } = await supabaseServer.storage
             .from("resources")
             .createSignedUrl(objectPath, 3600);
@@ -2219,32 +3296,115 @@ async function handleBundleFilesRequest(req, res) {
     }
 
     const { bundleId, orderId, paymentId } = req.method === "POST" ? (req.body || {}) : (req.query || {});
+    const cleanBundleId = bundleId != null ? String(bundleId).trim() : "";
     const cleanPaymentId = paymentId ? String(paymentId).trim() : null;
     const cleanOrderId = orderId ? String(orderId).trim() : null;
 
-    const supabaseServer = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
-    if (!supabaseServer) {
-      return res.status(503).json({ success: false, error: "Database service unavailable." });
+    if (cleanBundleId && cleanBundleId !== BUNDLE_RESOURCE_ID && cleanBundleId !== BUNDLE_SLUG) {
+      return res.status(400).json({
+        success: false,
+        authorized: false,
+        error: "Invalid bundle identifier."
+      });
     }
 
-    let isAuthorized = false;
+    const supabaseServer = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    if (!supabaseServer) {
+      return res.status(503).json({ success: false, authorized: false, error: "Database service unavailable." });
+    }
 
-    // Strict dual-identifier guest payment verification: require BOTH paymentId AND orderId
+    // 1. Resolve canonical bundle resource record from public.resources, require published status & authoritative INR pricing
+    const { data: bundleRecord, error: bundleErr } = await supabaseServer
+      .from("resources")
+      .select("*")
+      .eq("id", BUNDLE_RESOURCE_ID)
+      .maybeSingle();
+
+    if (bundleErr) {
+      return res.status(500).json({
+        success: false,
+        authorized: false,
+        error: "Failed to verify bundle catalog record."
+      });
+    }
+
+    if (!bundleRecord) {
+      return res.status(404).json({
+        success: false,
+        authorized: false,
+        error: "Bundle resource record not found."
+      });
+    }
+
+    if (String(bundleRecord.status || "").trim().toLowerCase() !== "published") {
+      return res.status(403).json({
+        success: false,
+        authorized: false,
+        error: "Unauthorized: This bundle is not currently published."
+      });
+    }
+
+    const pricing = getAuthoritativeResourcePricing(BUNDLE_RESOURCE_ID, bundleRecord);
+    const expectedAmountInPaise = toPaiseStrict(pricing.price);
+    if (
+      pricing.accessType !== "paid" ||
+      !expectedAmountInPaise ||
+      String(pricing.currency || "").toUpperCase() !== "INR"
+    ) {
+      return res.status(400).json({
+        success: false,
+        authorized: false,
+        error: "Bundle resource pricing is not configured as an eligible paid INR product."
+      });
+    }
+
+    const expectedAmountRupees = expectedAmountInPaise / 100;
+    const bundleMetadata = {
+      id: BUNDLE_RESOURCE_ID,
+      slug: BUNDLE_SLUG,
+      title: bundleRecord.title || "Meta Ads Campaign Planner Bundle",
+      price: expectedAmountRupees,
+      currency: "INR"
+    };
+
+    const isAdminCaller = Boolean(authenticatedUser && checkIsAdmin(authenticatedUser));
+    let isAuthorized = false;
+    let ownershipDenied = false;
+
+    // 2. Dual-identifier purchase verification (DB ledger then authoritative Razorpay gateway fallback)
     if (cleanPaymentId && cleanOrderId) {
-      // 1. Check payments table with dual identifiers and integrity constraints
-      const { data: pRecord } = await supabaseServer
-        .from("payments")
-        .select("id, status, item_id, item_type, razorpay_payment_id, razorpay_order_id, currency, amount")
-        .eq("razorpay_payment_id", cleanPaymentId)
-        .eq("razorpay_order_id", cleanOrderId)
-        .eq("item_id", BUNDLE_RESOURCE_ID)
-        .eq("item_type", "resource")
-        .eq("status", "captured")
-        .eq("currency", "INR")
-        .gt("amount", 0)
-        .maybeSingle();
+      const [{ data: pRecord }, { data: purRecord }] = await Promise.all([
+        supabaseServer
+          .from("payments")
+          .select("id, user_id, status, item_id, item_type, razorpay_payment_id, razorpay_order_id, currency, amount")
+          .eq("razorpay_payment_id", cleanPaymentId)
+          .eq("razorpay_order_id", cleanOrderId)
+          .eq("item_id", BUNDLE_RESOURCE_ID)
+          .eq("item_type", "resource")
+          .eq("status", "captured")
+          .eq("currency", "INR")
+          .maybeSingle(),
+        supabaseServer
+          .from("resource_purchases")
+          .select("id, user_id, customer_email, customer_phone, status, resource_id, razorpay_payment_id, razorpay_order_id, currency, amount")
+          .eq("razorpay_payment_id", cleanPaymentId)
+          .eq("razorpay_order_id", cleanOrderId)
+          .eq("resource_id", BUNDLE_RESOURCE_ID)
+          .eq("status", "active")
+          .eq("currency", "INR")
+          .maybeSingle()
+      ]);
+
+      // Reject immediately if either DB record belongs to a user account and caller lacks matching auth
+      if (pRecord && !evaluateRecordOwnership(pRecord.user_id, authenticatedUser).allowed) {
+        ownershipDenied = true;
+      }
+      if (!ownershipDenied && purRecord && !evaluateRecordOwnership(purRecord.user_id, authenticatedUser).allowed) {
+        ownershipDenied = true;
+      }
 
       if (
+        !ownershipDenied &&
         pRecord &&
         pRecord.razorpay_payment_id === cleanPaymentId &&
         pRecord.razorpay_order_id === cleanOrderId &&
@@ -2252,39 +3412,63 @@ async function handleBundleFilesRequest(req, res) {
         pRecord.item_type === "resource" &&
         pRecord.status === "captured" &&
         String(pRecord.currency || "").toUpperCase() === "INR" &&
-        Number(pRecord.amount) > 0
+        toPaiseStrict(pRecord.amount) === expectedAmountInPaise
       ) {
-        isAuthorized = true;
-      }
-
-      // 2. Check resource_purchases table with dual identifiers and integrity constraints
-      if (!isAuthorized) {
-        const { data: purRecord } = await supabaseServer
-          .from("resource_purchases")
-          .select("id, status, resource_id, razorpay_payment_id, razorpay_order_id, currency, amount")
-          .eq("razorpay_payment_id", cleanPaymentId)
-          .eq("razorpay_order_id", cleanOrderId)
-          .eq("resource_id", BUNDLE_RESOURCE_ID)
-          .eq("status", "active")
-          .eq("currency", "INR")
-          .gt("amount", 0)
-          .maybeSingle();
-
-        if (
-          purRecord &&
-          purRecord.razorpay_payment_id === cleanPaymentId &&
-          purRecord.razorpay_order_id === cleanOrderId &&
-          purRecord.resource_id === BUNDLE_RESOURCE_ID &&
-          purRecord.status === "active" &&
-          String(purRecord.currency || "").toUpperCase() === "INR" &&
-          Number(purRecord.amount) > 0
-        ) {
+        const hasUserOwner = Boolean(pRecord.user_id && String(pRecord.user_id).trim());
+        if (hasUserOwner || isAdminCaller) {
           isAuthorized = true;
+        } else {
+          const guestAuth = authorizeGuestResourceTransaction({
+            req,
+            paymentId: cleanPaymentId,
+            orderId: cleanOrderId,
+            allowedResourceIds: [BUNDLE_RESOURCE_ID],
+            dbPurchase: purRecord,
+            dbPayment: pRecord,
+            suppliedEmail: (req.method === "POST" ? req.body?.email : req.query?.email) || ""
+          });
+          if (guestAuth.allowed) {
+            isAuthorized = true;
+          } else {
+            ownershipDenied = true;
+          }
         }
       }
 
-      // 3. Fallback: Query Razorpay gateway directly if webhook fulfillment is delayed
-      if (!isAuthorized && cleanPaymentId.startsWith("pay_") && cleanOrderId.startsWith("order_")) {
+      if (
+        !isAuthorized &&
+        !ownershipDenied &&
+        purRecord &&
+        purRecord.razorpay_payment_id === cleanPaymentId &&
+        purRecord.razorpay_order_id === cleanOrderId &&
+        purRecord.resource_id === BUNDLE_RESOURCE_ID &&
+        purRecord.status === "active" &&
+        String(purRecord.currency || "").toUpperCase() === "INR" &&
+        toPaiseStrict(purRecord.amount) === expectedAmountInPaise
+      ) {
+        const hasUserOwner = Boolean(purRecord.user_id && String(purRecord.user_id).trim());
+        if (hasUserOwner || isAdminCaller) {
+          isAuthorized = true;
+        } else {
+          const guestAuth = authorizeGuestResourceTransaction({
+            req,
+            paymentId: cleanPaymentId,
+            orderId: cleanOrderId,
+            allowedResourceIds: [BUNDLE_RESOURCE_ID],
+            dbPurchase: purRecord,
+            dbPayment: pRecord,
+            suppliedEmail: (req.method === "POST" ? req.body?.email : req.query?.email) || ""
+          });
+          if (guestAuth.allowed) {
+            isAuthorized = true;
+          } else {
+            ownershipDenied = true;
+          }
+        }
+      }
+
+      // 2c. Authoritative Razorpay gateway fallback (fails closed without trusting payment.notes or orderId+paymentId alone)
+      if (!isAuthorized && !ownershipDenied && cleanPaymentId.startsWith("pay_") && cleanOrderId.startsWith("order_")) {
         const razorpay = getRazorpayClient();
         if (razorpay) {
           try {
@@ -2294,35 +3478,56 @@ async function handleBundleFilesRequest(req, res) {
             ]);
 
             if (rzpPayment && rzpOrder) {
-              const paymentCaptured = rzpPayment.status === "captured";
+              const paymentCaptured = String(rzpPayment.status || "").trim().toLowerCase() === "captured";
               const paymentOrderMatches = rzpPayment.order_id === cleanOrderId;
               const orderIdMatches = rzpOrder.id === cleanOrderId;
-              const paymentCurrencyMatches = (rzpPayment.currency || "").toUpperCase() === "INR";
-              const orderCurrencyMatches = (rzpOrder.currency || "").toUpperCase() === "INR";
-              const positivePaymentAmount = Number(rzpPayment.amount) > 0;
-              const amountsMatch = Number(rzpPayment.amount) === Number(rzpOrder.amount);
+              const paymentCurrencyMatches = String(rzpPayment.currency || "").trim().toUpperCase() === "INR";
+              const orderCurrencyMatches = String(rzpOrder.currency || "").trim().toUpperCase() === "INR";
+              const exactPaymentAmountMatches =
+                expectedAmountInPaise > 0 && Number.isSafeInteger(Number(rzpPayment.amount)) && Number(rzpPayment.amount) === expectedAmountInPaise;
+              const exactOrderAmountMatches =
+                expectedAmountInPaise > 0 && Number.isSafeInteger(Number(rzpOrder.amount)) && Number(rzpOrder.amount) === expectedAmountInPaise;
 
               const orderNotes = rzpOrder.notes || {};
-              const paymentNotes = rzpPayment.notes || {};
-              const noteResourceId =
-                orderNotes.resourceId ||
-                orderNotes.resource_id ||
-                paymentNotes.resourceId ||
-                paymentNotes.resource_id;
+              const orderItemTypeMatches = String(orderNotes.itemType || "").trim().toLowerCase() === "resource";
+              const orderResourceId = String(orderNotes.resourceId || orderNotes.resource_id || "").trim();
               const matchesBundleIdentity =
-                noteResourceId === BUNDLE_RESOURCE_ID || noteResourceId === BUNDLE_SLUG;
+                orderResourceId === BUNDLE_RESOURCE_ID || orderResourceId === BUNDLE_SLUG;
 
-              if (
+              const ownership = evaluateRecordOwnership(orderNotes.userId, authenticatedUser);
+              if (!ownership.allowed) {
+                ownershipDenied = true;
+              } else if (
                 paymentCaptured &&
                 paymentOrderMatches &&
                 orderIdMatches &&
                 paymentCurrencyMatches &&
                 orderCurrencyMatches &&
-                positivePaymentAmount &&
-                amountsMatch &&
+                exactPaymentAmountMatches &&
+                exactOrderAmountMatches &&
+                orderItemTypeMatches &&
                 matchesBundleIdentity
               ) {
-                isAuthorized = true;
+                if (!ownership.isGuest || isAdminCaller) {
+                  isAuthorized = true;
+                } else {
+                  const guestAuth = authorizeGuestResourceTransaction({
+                    req,
+                    paymentId: cleanPaymentId,
+                    orderId: cleanOrderId,
+                    allowedResourceIds: [BUNDLE_RESOURCE_ID],
+                    dbPurchase: purRecord,
+                    dbPayment: pRecord,
+                    gatewayOrderNotes: orderNotes,
+                    gatewayPayment: rzpPayment,
+                    suppliedEmail: (req.method === "POST" ? req.body?.email : req.query?.email) || ""
+                  });
+                  if (guestAuth.allowed) {
+                    isAuthorized = true;
+                  } else {
+                    ownershipDenied = true;
+                  }
+                }
               }
             }
           } catch (gatewayErr) {
@@ -2332,63 +3537,74 @@ async function handleBundleFilesRequest(req, res) {
       }
     }
 
-    // Check authenticated user
-    if (!isAuthorized && authenticatedUser) {
+    // 3. Check authenticated user ownership (unless explicit ownership mismatch occurred on supplied credentials)
+    if (!isAuthorized && !ownershipDenied && authenticatedUser) {
       if (checkIsAdmin(authenticatedUser)) {
         isAuthorized = true;
       } else {
-        const { data: userPayment } = await supabaseServer
+        const { data: userPayments } = await supabaseServer
           .from("payments")
-          .select("id")
+          .select("id, amount, currency")
           .eq("user_id", authenticatedUser.id)
           .eq("item_type", "resource")
           .eq("item_id", BUNDLE_RESOURCE_ID)
           .eq("status", "captured")
-          .maybeSingle();
+          .eq("currency", "INR");
 
-        if (userPayment) {
+        const hasValidUserPayment = (userPayments || []).some(
+          (row) => String(row.currency || "").toUpperCase() === "INR" && toPaiseStrict(row.amount) === expectedAmountInPaise
+        );
+
+        if (hasValidUserPayment) {
           isAuthorized = true;
         } else {
-          const { data: userPur } = await supabaseServer
+          const { data: userPurchases } = await supabaseServer
             .from("resource_purchases")
-            .select("id")
+            .select("id, amount, currency")
             .eq("user_id", authenticatedUser.id)
             .eq("resource_id", BUNDLE_RESOURCE_ID)
             .eq("status", "active")
-            .maybeSingle();
+            .eq("currency", "INR");
 
-          if (userPur) {
+          const hasValidUserPurchase = (userPurchases || []).some(
+            (row) => String(row.currency || "").toUpperCase() === "INR" && toPaiseStrict(row.amount) === expectedAmountInPaise
+          );
+
+          if (hasValidUserPurchase) {
             isAuthorized = true;
           }
         }
       }
     }
 
-    if (!isAuthorized) {
+    if (!isAuthorized || ownershipDenied) {
       return res.status(403).json({
         success: false,
         authorized: false,
         error: "Unauthorized: A confirmed purchase of the Meta Ads Campaign Planner Bundle is required to access these assets.",
-        bundle: {
-          id: BUNDLE_RESOURCE_ID,
-          slug: BUNDLE_SLUG,
-          title: "Meta Ads Campaign Planner Bundle",
-          price: 299,
-          currency: "INR"
-        }
+        bundle: bundleMetadata
       });
     }
 
-    // Generate signed URLs for all 4 bundle files
+    // Generate signed URLs for all 4 bundle files ONLY after full authorization
     const signedFiles = [];
     for (const item of BUNDLE_ITEMS) {
-      const { data: sData } = await supabaseServer.storage
-        .from("resources")
-        .createSignedUrl(item.storagePath, 3600);
-
-      let fileUrl = sData?.signedUrl || null;
+      let fileUrl = null;
+      if (supabaseServer.storage?.from) {
+        const { data: sData } = await supabaseServer.storage
+          .from("resources")
+          .createSignedUrl(item.storagePath, 3600);
+        fileUrl = sData?.signedUrl || null;
+      }
       if (!fileUrl) {
         const token = generateAssetAccessToken(item.id, cleanPaymentId || authenticatedUser?.id || "bundle-authorized");
+        if (!token) {
+          return res.status(503).json({
+            success: false,
+            authorized: false,
+            error: "Asset delivery service is temporarily unconfigured."
+          });
+        }
         fileUrl = `/api/payments/download-paid-asset?token=${token}`;
       }
 
@@ -2407,18 +3623,12 @@ async function handleBundleFilesRequest(req, res) {
     return res.json({
       success: true,
       authorized: true,
-      bundle: {
-        id: BUNDLE_RESOURCE_ID,
-        slug: BUNDLE_SLUG,
-        title: "Meta Ads Campaign Planner Bundle",
-        price: 299,
-        currency: "INR"
-      },
+      bundle: bundleMetadata,
       files: signedFiles
     });
   } catch (err) {
     console.error("[Bundle Files] Unexpected error:", err);
-    return res.status(500).json({ success: false, error: "Failed to generate authorized bundle downloads." });
+    return res.status(500).json({ success: false, authorized: false, error: "Failed to generate authorized bundle downloads." });
   }
 }
 
@@ -2743,10 +3953,10 @@ export function verifyInvoicePaymentAuthorization({
       }
     }
 
-    // 3. Expected Amount verification: require a valid, positive expected amount before using gateway capture
+    // 3. Expected Amount verification: strictly require integer paise precision
     const rawExpectedAmount = paymentRecord?.amount ?? bookingRecord?.total_amount ?? resourceRecord?.amount;
-    const expectedAmount = Number(rawExpectedAmount);
-    if (rawExpectedAmount === null || rawExpectedAmount === undefined || isNaN(expectedAmount) || !isFinite(expectedAmount) || expectedAmount <= 0) {
+    const expectedPaise = toPaiseStrict(rawExpectedAmount);
+    if (!expectedPaise) {
       return {
         authorized: false,
         statusCode: 400,
@@ -2754,7 +3964,7 @@ export function verifyInvoicePaymentAuthorization({
       };
     }
 
-    // 4. Gateway Amount verification: reject when missing, null, non-numeric, invalid, or mismatched
+    // 4. Gateway Amount verification: require safe integer paise and exact paise equality (zero tolerance drift)
     if (rzpPayment.amount === null || rzpPayment.amount === undefined || typeof rzpPayment.amount === "boolean" || String(rzpPayment.amount).trim() === "") {
       return {
         authorized: false,
@@ -2764,20 +3974,19 @@ export function verifyInvoicePaymentAuthorization({
     }
 
     const rzpAmountPaise = Number(rzpPayment.amount);
-    if (isNaN(rzpAmountPaise) || !isFinite(rzpAmountPaise) || rzpAmountPaise <= 0) {
+    if (!Number.isSafeInteger(rzpAmountPaise) || rzpAmountPaise <= 0) {
       return {
         authorized: false,
         statusCode: 400,
-        error: `Cannot generate tax invoice: Invalid or non-numeric gateway payment amount (${rzpPayment.amount}).`
+        error: `Cannot generate tax invoice: Invalid or non-integer gateway payment amount (${rzpPayment.amount}).`
       };
     }
 
-    const rzpAmountInRupees = rzpAmountPaise / 100;
-    if (Math.abs(rzpAmountInRupees - expectedAmount) > 0.01) {
+    if (rzpAmountPaise !== expectedPaise) {
       return {
         authorized: false,
         statusCode: 400,
-        error: `Cannot generate tax invoice: Payment amount mismatch (gateway: ₹${rzpAmountInRupees}, expected: ₹${expectedAmount}).`
+        error: `Cannot generate tax invoice: Payment amount mismatch (gateway: ₹${rzpAmountPaise / 100}, expected: ₹${expectedPaise / 100}).`
       };
     }
 
@@ -3080,36 +4289,12 @@ async function handleInvoiceOrCreditNoteRequest(req, res, { forceCreditNote = fa
         }
       }
 
-      const requestedRefundIdParam = req.query.refundId || req.body?.refundId;
-      const rawRefundId = String(
-        (isAdmin || isGatewayRefunded || hasPriorCreditNote ? requestedRefundIdParam : null) ||
-        paymentRecord?.refund_id ||
-        `rfnd_${cleanPayId}`
-      ).trim();
+      const requestedRefundIdParamRaw = req.query.refundId || req.body?.refundId;
+      const requestedRefundIdParam = requestedRefundIdParamRaw ? String(requestedRefundIdParamRaw).trim() : null;
+      const rawRequestedAmountParam = req.query.refundAmount ?? req.body?.refundAmount;
 
-      const rawRequestedAmount = (isAdmin || isGatewayRefunded) ? (req.query.refundAmount ?? req.body?.refundAmount) : undefined;
-      const gatewayRefundedRupees = isGatewayRefunded && Number(rzpPayment?.amount_refunded || 0) > 0
-        ? Number((Number(rzpPayment.amount_refunded) / 100).toFixed(2))
-        : null;
-      const requestedRefundAmount = rawRequestedAmount !== undefined
-        ? Number(rawRequestedAmount)
-        : (gatewayRefundedRupees || amount);
-
-      // F-01: Validate requested refund amount is a positive, finite number
-      if (isNaN(requestedRefundAmount) || !isFinite(requestedRefundAmount) || requestedRefundAmount <= 0) {
-        return res.status(400).json({
-          success: false,
-          error: `Invalid refund amount: "${rawRequestedAmount}". Refund amount must be a positive finite number greater than zero.`
-        });
-      }
-
-      // Check if refund_id was already processed (Idempotency)
-      const existingForRefundId = priorCreditNotes.find(cn => cn.refund_id === rawRefundId);
-      if (existingForRefundId) {
-        existingCreditNoteRow = existingForRefundId;
-        finalCreditNoteNumber = existingForRefundId.credit_note_number;
-      } else if (!isAdmin && !isLedgerRefunded && !isGatewayRefunded && hasPriorCreditNote) {
-        // Non-admin user on a partially refunded payment can retrieve an existing credit note, never mint a new unverified one
+      // Fast reject non-admin users attempting to pass arbitrary refundId when no verified gateway/ledger refund justifies minting
+      if (!isAdmin && !isLedgerRefunded && !isGatewayRefunded && hasPriorCreditNote) {
         if (requestedRefundIdParam) {
           return res.status(403).json({
             success: false,
@@ -3121,28 +4306,192 @@ async function handleInvoiceOrCreditNoteRequest(req, res, { forceCreditNote = fa
         finalCreditNoteNumber = priorCreditNotes[0].credit_note_number;
       }
 
-      if (!isAdmin && isGatewayRefunded && gatewayRefundedRupees !== null && requestedRefundAmount > gatewayRefundedRupees) {
+      let rawRefundId = null;
+      let requestedRefundAmount = null;
+
+      // Retrieval fast-path ONLY when no explicit refundId parameter was passed AND an existing credit note already exists and payment isn't minting an unrecorded refund
+      if (!existingCreditNoteRow && !requestedRefundIdParam && hasPriorCreditNote && isLedgerRefunded) {
+        existingCreditNoteRow = priorCreditNotes[0];
+        finalCreditNoteNumber = priorCreditNotes[0].credit_note_number;
+        rawRefundId = existingCreditNoteRow.refund_id;
+        requestedRefundAmount = Number(existingCreditNoteRow.amount || amount);
+      }
+
+      // Whenever an explicit refundId is supplied OR a new credit note must be issued, verify directly against Razorpay Refunds API (fail closed)
+      if (!existingCreditNoteRow || requestedRefundIdParam) {
+        const razorpay = getRazorpayClient();
+        const hasMultipleRefundApi = Boolean(razorpay && typeof razorpay.payments?.fetchMultipleRefund === "function");
+        const hasSingleRefundApi = Boolean(razorpay && typeof razorpay.payments?.fetchRefund === "function");
+        if (!razorpay || (!hasMultipleRefundApi && !hasSingleRefundApi)) {
+          return res.status(503).json({
+            success: false,
+            code: "GATEWAY_REFUND_VERIFICATION_UNAVAILABLE",
+            error: "Gateway refund verification service is unavailable."
+          });
+        }
+
+        const targetRefundId = requestedRefundIdParam || (paymentRecord?.refund_id ? String(paymentRecord.refund_id).trim() : null);
+
+        let gatewayRefunds = [];
+        try {
+          if (hasMultipleRefundApi) {
+            const refundCol = await razorpay.payments.fetchMultipleRefund(cleanPayId);
+            gatewayRefunds = Array.isArray(refundCol?.items)
+              ? refundCol.items
+              : (Array.isArray(refundCol) ? refundCol : []);
+          } else if (targetRefundId && hasSingleRefundApi) {
+            const singleRefund = await razorpay.payments.fetchRefund(cleanPayId, targetRefundId);
+            if (singleRefund) gatewayRefunds = [singleRefund];
+          }
+        } catch (rzpRefundErr) {
+          console.warn("[Credit Note] Razorpay refund verification failed:", rzpRefundErr?.error?.description || rzpRefundErr?.message || rzpRefundErr);
+          return res.status(502).json({
+            success: false,
+            code: "GATEWAY_REFUND_FETCH_FAILED",
+            error: "Failed to verify refund record with Razorpay gateway."
+          });
+        }
+
+        const processedGatewayRefunds = gatewayRefunds.filter(
+          (r) =>
+            r &&
+            String(r.payment_id || "").trim() === cleanPayId &&
+            String(r.status || "").trim().toLowerCase() === "processed" &&
+            (!r.currency || String(r.currency).trim().toUpperCase() === currency) &&
+            Number(r.amount) > 0
+        );
+
+        let verifiedRefund = null;
+        if (targetRefundId) {
+          const matched = gatewayRefunds.find((r) => r && String(r.id || "").trim() === targetRefundId);
+          if (!matched) {
+            return res.status(400).json({
+              success: false,
+              code: "REFUND_NOT_FOUND_ON_GATEWAY",
+              error: `Refund ID "${targetRefundId}" was not found for payment ${cleanPayId} on Razorpay.`
+            });
+          }
+          if (String(matched.payment_id || "").trim() !== cleanPayId) {
+            return res.status(400).json({
+              success: false,
+              code: "REFUND_PAYMENT_MISMATCH",
+              error: `Refund ID "${targetRefundId}" does not belong to payment ${cleanPayId}.`
+            });
+          }
+          if (String(matched.status || "").trim().toLowerCase() !== "processed") {
+            return res.status(400).json({
+              success: false,
+              code: "REFUND_NOT_PROCESSED",
+              error: `Refund "${targetRefundId}" is not in processed status (status: ${matched.status || "unknown"}).`
+            });
+          }
+          if (matched.currency && String(matched.currency).trim().toUpperCase() !== currency) {
+            return res.status(400).json({
+              success: false,
+              code: "REFUND_CURRENCY_MISMATCH",
+              error: `Refund "${targetRefundId}" currency mismatch.`
+            });
+          }
+          verifiedRefund = matched;
+        } else {
+          // No refundId param passed: locate an unissued processed refund, or an already-recorded processed refund
+          const unissuedRefund = processedGatewayRefunds.find(
+            (r) => !priorCreditNotes.some((cn) => cn.refund_id === r.id)
+          );
+          verifiedRefund = unissuedRefund || processedGatewayRefunds[0] || null;
+          if (!verifiedRefund) {
+            return res.status(400).json({
+              success: false,
+              code: "REFUND_NOT_VERIFIED",
+              error: `No processed Razorpay refund exists for payment ${cleanPayId}.`
+            });
+          }
+        }
+
+        const verifiedRefundId = String(verifiedRefund.id || "").trim();
+        const verifiedRefundPaise = Number(verifiedRefund.amount);
+        if (!verifiedRefundId || !Number.isSafeInteger(verifiedRefundPaise) || verifiedRefundPaise <= 0) {
+          return res.status(400).json({
+            success: false,
+            code: "INVALID_GATEWAY_REFUND",
+            error: "Gateway refund record returned an invalid ID or amount."
+          });
+        }
+        const verifiedRefundAmount = verifiedRefundPaise / 100;
+
+        if (rawRequestedAmountParam !== undefined) {
+          const parsedRequestedPaise = toPaiseStrict(rawRequestedAmountParam);
+          if (!parsedRequestedPaise) {
+            return res.status(400).json({
+              success: false,
+              error: `Invalid refund amount: "${rawRequestedAmountParam}". Refund amount must be a positive finite number (max 2 decimals) greater than zero.`
+            });
+          }
+          if (parsedRequestedPaise !== verifiedRefundPaise) {
+            return res.status(400).json({
+              success: false,
+              code: "REFUND_AMOUNT_MISMATCH",
+              error: `Requested refund amount ₹${parsedRequestedPaise / 100} does not match gateway verified refund amount ₹${verifiedRefundAmount}.`
+            });
+          }
+        }
+
+        rawRefundId = verifiedRefundId;
+        requestedRefundAmount = verifiedRefundAmount;
+
+        // Idempotent retrieval if a credit note already exists for this exact verified refund_id
+        const existingForRefundId = priorCreditNotes.find(cn => cn.refund_id === rawRefundId);
+        if (existingForRefundId) {
+          existingCreditNoteRow = existingForRefundId;
+          finalCreditNoteNumber = existingForRefundId.credit_note_number;
+          requestedRefundAmount = Number(existingForRefundId.amount || verifiedRefundAmount);
+        }
+      }
+
+      if (!rawRefundId) {
+        rawRefundId = existingCreditNoteRow?.refund_id || paymentRecord?.refund_id || null;
+      }
+
+      if (!existingCreditNoteRow && (!rawRefundId || !Number.isFinite(requestedRefundAmount) || requestedRefundAmount <= 0)) {
         return res.status(400).json({
           success: false,
-          error: `Requested refund amount ₹${requestedRefundAmount} exceeds gateway verified refunded amount ₹${gatewayRefundedRupees}.`
+          code: "REFUND_NOT_VERIFIED",
+          error: "A verified gateway refund is required to issue a credit note."
         });
       }
 
-      const priorRefundTotal = priorCreditNotes
-        .filter(cn => cn.refund_id !== rawRefundId)
-        .reduce((sum, cn) => sum + Number(cn.amount || 0), 0);
+      const baseAmountPaise = toPaiseStrict(amount);
+      if (!baseAmountPaise) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_PAYMENT_AMOUNT",
+          error: "Original payment amount is invalid or missing for credit note calculation."
+        });
+      }
 
-      const remainingEligibleBalance = Math.max(0, Number((amount - priorRefundTotal).toFixed(2)));
+      const rzpCapturedPaise = rzpPayment?.amount != null ? Number(rzpPayment.amount) : null;
+      const originalCapturedPaise = Number.isSafeInteger(rzpCapturedPaise) && rzpCapturedPaise > 0
+        ? rzpCapturedPaise
+        : baseAmountPaise;
+      const effectiveCapPaise = Math.min(baseAmountPaise, originalCapturedPaise);
+
+      const priorRefundPaise = priorCreditNotes
+        .filter(cn => cn.refund_id !== rawRefundId)
+        .reduce((sum, cn) => sum + (toPaiseStrict(cn.amount) ?? 0), 0);
+
+      const remainingEligiblePaise = Math.max(0, effectiveCapPaise - priorRefundPaise);
+      const requestedRefundPaise = toPaiseStrict(requestedRefundAmount) ?? 0;
 
       // F-01: Reject excessive refunds (NO SILENT CLAMPING!)
-      if (!existingCreditNoteRow && requestedRefundAmount > remainingEligibleBalance) {
+      if (!existingCreditNoteRow && (!requestedRefundPaise || requestedRefundPaise > remainingEligiblePaise)) {
         return res.status(400).json({
           success: false,
-          error: `Refund amount ₹${requestedRefundAmount} exceeds remaining eligible refundable balance of ₹${remainingEligibleBalance} (Original payment: ₹${amount}, Prior refunds: ₹${priorRefundTotal}). Excessive refund rejected.`
+          code: "REFUND_LIMIT_EXCEEDED",
+          error: `Refund amount ₹${requestedRefundPaise / 100} exceeds remaining eligible refundable balance of ₹${remainingEligiblePaise / 100} (Original payment: ₹${effectiveCapPaise / 100}, Prior refunds: ₹${priorRefundPaise / 100}). Excessive refund rejected.`
         });
       }
 
-      const isPartialRefund = (priorRefundTotal + requestedRefundAmount) < amount;
+      const isPartialRefund = (priorRefundPaise + requestedRefundPaise) < effectiveCapPaise;
       const refundDate = paymentRecord?.updated_at || new Date().toISOString();
 
       // If no credit note exists yet for this refund_id, allocate atomically via RPC only (SEC-02 Compliance)

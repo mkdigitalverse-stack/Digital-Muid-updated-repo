@@ -8,6 +8,7 @@ import {
   getAuthoritativePaidResourceInfo,
   AUTHORITATIVE_PAID_RESOURCES
 } from '../constants/authoritativePaidResources';
+import { getStoredGuestResourceToken } from './paymentService';
 
 /**
  * Transforms a raw row from public.resource_purchases into a domain ResourcePurchase object.
@@ -754,7 +755,7 @@ export const resourceService = {
    */
   async deliverResource(
     resource: Resource,
-    options?: { isAuthorized?: boolean; orderId?: string; paymentId?: string }
+    options?: { isAuthorized?: boolean; orderId?: string; paymentId?: string; resourceAccessToken?: string }
   ): Promise<{ success: boolean; error?: string }> {
     if (!resource) {
       console.error('[Resource Delivery Error] No resource object provided');
@@ -778,17 +779,22 @@ export const resourceService = {
         const authHeader = authSessionData?.session?.access_token
           ? `Bearer ${authSessionData.session.access_token}`
           : undefined;
+        const guestResourceToken =
+          options?.resourceAccessToken ||
+          getStoredGuestResourceToken(resource.id, options?.orderId, options?.paymentId);
 
         const verifyResp = await fetch('/api/payments/get-resource-download-url', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            ...(authHeader ? { Authorization: authHeader } : {})
+            ...(authHeader ? { Authorization: authHeader } : {}),
+            ...(guestResourceToken ? { 'x-resource-access-token': guestResourceToken } : {})
           },
           body: JSON.stringify({
             resourceId: resource.id,
             orderId: options?.orderId,
-            paymentId: options?.paymentId
+            paymentId: options?.paymentId,
+            ...(guestResourceToken ? { resourceAccessToken: guestResourceToken } : {})
           })
         });
 
@@ -1220,7 +1226,10 @@ export const resourceService = {
    * Fetches the 4 authorized deliverable files for the Meta Ads Campaign Planner Bundle.
    * Calls the server-side /api/payments/bundle-files endpoint which verifies payment status.
    */
-  async fetchBundleFiles(bundleId: string, options?: { orderId?: string; paymentId?: string }): Promise<{
+  async fetchBundleFiles(
+    bundleId: string,
+    options?: { orderId?: string; paymentId?: string; resourceAccessToken?: string }
+  ): Promise<{
     success: boolean;
     authorized: boolean;
     bundle?: any;
@@ -1243,6 +1252,9 @@ export const resourceService = {
       const authHeader = authSessionData?.session?.access_token
         ? `Bearer ${authSessionData.session.access_token}`
         : undefined;
+      const guestResourceToken =
+        options?.resourceAccessToken ||
+        getStoredGuestResourceToken(bundleId, options?.orderId, options?.paymentId);
 
       const query = new URLSearchParams({
         bundleId,
@@ -1252,7 +1264,8 @@ export const resourceService = {
 
       const resp = await fetch(`/api/payments/bundle-files?${query.toString()}`, {
         headers: {
-          ...(authHeader ? { Authorization: authHeader } : {})
+          ...(authHeader ? { Authorization: authHeader } : {}),
+          ...(guestResourceToken ? { 'x-resource-access-token': guestResourceToken } : {})
         }
       });
       const data = await resp.json();

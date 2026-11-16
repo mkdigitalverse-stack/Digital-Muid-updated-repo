@@ -814,6 +814,9 @@ export interface VerifyResourcePaymentResult {
   alreadyFulfilled?: boolean;
   orderId?: string;
   paymentId?: string;
+  resourceAccessToken?: string;
+  code?: string;
+  retryable?: boolean;
   lead_status?: 'saved' | 'already_exists' | 'failed' | 'pending' | 'skipped';
   lead_id?: string | null;
   error?: string;

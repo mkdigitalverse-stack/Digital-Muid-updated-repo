@@ -499,6 +499,14 @@ export const paymentService = {
       });
 
       const result: VerifyResourcePaymentResult = await response.json();
+      if (result.success && result.verified && result.resourceAccessToken) {
+        saveStoredGuestResourceToken({
+          resourceId: (result as any).resourceId || params.resourceId,
+          orderId: result.orderId || params.razorpay_order_id,
+          paymentId: result.paymentId || params.razorpay_payment_id,
+          token: result.resourceAccessToken
+        });
+      }
       return result;
     } catch (err: any) {
       console.error('[PaymentService] Error verifying resource payment:', err);
@@ -518,6 +526,7 @@ export const paymentService = {
     orderId: string;
     paymentId: string;
     resourceId: string;
+    resourceAccessToken?: string;
     customerDetails?: {
       name?: string;
       email?: string;
@@ -526,8 +535,13 @@ export const paymentService = {
     };
   }): Promise<RecoverLeadResult> {
     try {
+      const resolvedGuestToken =
+        params.resourceAccessToken ||
+        getStoredGuestResourceToken(params.resourceId, params.orderId, params.paymentId);
+
       const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...(resolvedGuestToken ? { 'x-resource-access-token': resolvedGuestToken } : {})
       };
 
       if (isSupabaseConfigured()) {
@@ -540,7 +554,10 @@ export const paymentService = {
       const response = await fetch('/api/payments/recover-lead', {
         method: 'POST',
         headers,
-        body: JSON.stringify(params)
+        body: JSON.stringify({
+          ...params,
+          ...(resolvedGuestToken ? { resourceAccessToken: resolvedGuestToken } : {})
+        })
       });
 
       const result: RecoverLeadResult = await response.json();
@@ -556,4 +573,67 @@ export const paymentService = {
     }
   }
 };
+
+const BUNDLE_CANONICAL_ID = '2d50e5e3-711d-4461-a70d-0ed54dd29f17';
+const BUNDLE_CANONICAL_SLUG = 'meta-ads-campaign-planner-bundle';
+const GUEST_TOKEN_STORAGE_PREFIX = 'dm_guest_res_tok_';
+const GUEST_TX_TOKEN_STORAGE_PREFIX = 'dm_guest_res_tx_';
+
+export function saveStoredGuestResourceToken(params: {
+  resourceId?: string | null;
+  orderId?: string | null;
+  paymentId?: string | null;
+  token?: string | null;
+}): void {
+  if (typeof window === 'undefined' || !window.sessionStorage) return;
+  const token = String(params.token || '').trim();
+  const orderId = String(params.orderId || '').trim();
+  const paymentId = String(params.paymentId || '').trim();
+  const resourceId = String(params.resourceId || '').trim();
+  if (!token || !orderId || !paymentId) return;
+
+  try {
+    if (resourceId) {
+      window.sessionStorage.setItem(`${GUEST_TOKEN_STORAGE_PREFIX}${resourceId}_${orderId}_${paymentId}`, token);
+      if (resourceId === BUNDLE_CANONICAL_ID || resourceId === BUNDLE_CANONICAL_SLUG) {
+        window.sessionStorage.setItem(`${GUEST_TOKEN_STORAGE_PREFIX}${BUNDLE_CANONICAL_ID}_${orderId}_${paymentId}`, token);
+        window.sessionStorage.setItem(`${GUEST_TOKEN_STORAGE_PREFIX}${BUNDLE_CANONICAL_SLUG}_${orderId}_${paymentId}`, token);
+      }
+    }
+    window.sessionStorage.setItem(`${GUEST_TX_TOKEN_STORAGE_PREFIX}${orderId}_${paymentId}`, token);
+  } catch {
+    // Ignore storage quota/privacy mode failures cleanly
+  }
+}
+
+export function getStoredGuestResourceToken(
+  resourceId?: string | null,
+  orderId?: string | null,
+  paymentId?: string | null
+): string | null {
+  if (typeof window === 'undefined' || !window.sessionStorage) return null;
+  const cleanOrderId = String(orderId || '').trim();
+  const cleanPaymentId = String(paymentId || '').trim();
+  const cleanResourceId = String(resourceId || '').trim();
+  if (!cleanOrderId || !cleanPaymentId) return null;
+
+  try {
+    if (cleanResourceId) {
+      const exact = window.sessionStorage.getItem(
+        `${GUEST_TOKEN_STORAGE_PREFIX}${cleanResourceId}_${cleanOrderId}_${cleanPaymentId}`
+      );
+      if (exact) return exact;
+      if (cleanResourceId === BUNDLE_CANONICAL_ID || cleanResourceId === BUNDLE_CANONICAL_SLUG) {
+        const aliasKey = cleanResourceId === BUNDLE_CANONICAL_ID ? BUNDLE_CANONICAL_SLUG : BUNDLE_CANONICAL_ID;
+        const aliasVal = window.sessionStorage.getItem(
+          `${GUEST_TOKEN_STORAGE_PREFIX}${aliasKey}_${cleanOrderId}_${cleanPaymentId}`
+        );
+        if (aliasVal) return aliasVal;
+      }
+    }
+    return window.sessionStorage.getItem(`${GUEST_TX_TOKEN_STORAGE_PREFIX}${cleanOrderId}_${cleanPaymentId}`);
+  } catch {
+    return null;
+  }
+}
 

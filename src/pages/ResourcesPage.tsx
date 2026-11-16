@@ -328,6 +328,7 @@ export const ResourcesPage: React.FC<ResourcesPageProps> = ({
                 orderId: response.razorpay_order_id,
                 paymentId: response.razorpay_payment_id,
                 resourceId: unlocked.id,
+                resourceAccessToken: verifyResult.resourceAccessToken,
                 customerDetails: {
                   name: name.trim(),
                   email: email.trim(),

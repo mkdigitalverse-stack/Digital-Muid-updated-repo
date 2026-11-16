@@ -20,11 +20,14 @@ process.env.RAZORPAY_KEY_ID = "rzp_test_remediation_12345";
 process.env.RAZORPAY_KEY_SECRET = "rzp_test_secret_at_least_32_bytes_long_12345";
 process.env.RAZORPAY_WEBHOOK_SECRET = "whsec_test_remediation_secret_987654321";
 process.env.INVOICE_TOKEN_HMAC_SECRET = "inv_hmac_test_secret_entropy_32_bytes_minimum_ok!";
+process.env.RESOURCE_TOKEN_HMAC_SECRET = "res_hmac_test_secret_entropy_32_bytes_minimum_ok!";
+process.env.ASSET_TOKEN_HMAC_SECRET = "asset_hmac_test_secret_entropy_32_bytes_minimum_ok!";
 
 const { default: paymentRoutes, resetPaymentRateLimits, verifySignedInvoiceToken } = await import("../server/paymentRoutes.js");
 const { handleRazorpayWebhook } = await import("../server/paymentWebhook.js");
 const { setMockSupabaseServerClient } = await import("../server/supabaseServer.js");
 const { setMockRazorpayClient } = await import("../server/razorpay.js");
+const { verifyGuestResourceToken } = await import("../server/resourceToken.js");
 const {
   buildConsultationConfirmationEmailHtml,
   buildResourceDeliveryEmailHtml
@@ -59,7 +62,7 @@ function createStatefulMockDb() {
       { id: "11111111-1111-4111-8111-111111111111", slug: "meta-ads-mastery", title: "Meta Ads Mastery", price: 4999, currency: "INR", status: "published" }
     ],
     resources: [
-      { id: "2d50e5e3-711d-4461-a70d-0ed54dd29f17", slug: "meta-ads-bundle", title: "Meta Ads Campaign Bundle", access_type: "paid", price: 299, currency: "INR" }
+      { id: "2d50e5e3-711d-4461-a70d-0ed54dd29f17", slug: "meta-ads-bundle", title: "Meta Ads Campaign Bundle", status: "published", access_type: "paid", price: 299, currency: "INR" }
     ],
     consultation_products: [
       { id: "31bbb9bf-ce10-4da4-a517-dfc673f9b875", name: "Business Growth Consultation", base_price: 499, gst_rate: 0.18, currency: "INR", active: true }
@@ -84,9 +87,12 @@ function createStatefulMockDb() {
     let payload = null;
     let upsertConflict = null;
 
+    let limitCount = null;
+
     const matchRow = (row) => {
       for (const f of filters) {
         if (f.type === "eq" && row[f.col] !== f.val) return false;
+        if (f.type === "in" && (!Array.isArray(f.val) || !f.val.includes(row[f.col]))) return false;
         if (f.type === "ilike" && !String(row[f.col] || "").toLowerCase().includes(String(f.val).replace(/%/g, "").toLowerCase())) return false;
       }
       if (orClause) {
@@ -103,7 +109,10 @@ function createStatefulMockDb() {
     const execute = async (singleMode = null) => {
       const rows = state[table] || [];
       if (op === "select") {
-        const matched = rows.filter(matchRow);
+        let matched = rows.filter(matchRow);
+        if (typeof limitCount === "number" && limitCount >= 0) {
+          matched = matched.slice(0, limitCount);
+        }
         if (singleMode === "maybeSingle") return { data: matched[0] || null, error: null };
         if (singleMode === "single") return { data: matched[0] || null, error: matched[0] ? null : { message: "Not found" } };
         return { data: matched, error: null };
@@ -149,9 +158,10 @@ function createStatefulMockDb() {
       upsert(data, opts) { op = "upsert"; payload = data; upsertConflict = opts?.onConflict; return builder; },
       update(data) { op = "update"; payload = data; return builder; },
       eq(col, val) { filters.push({ type: "eq", col, val }); return builder; },
+      in(col, val) { filters.push({ type: "in", col, val }); return builder; },
       ilike(col, val) { filters.push({ type: "ilike", col, val }); return builder; },
       or(clause) { orClause = clause; return builder; },
-      limit() { return builder; },
+      limit(n) { limitCount = n; return builder; },
       maybeSingle() { return execute("maybeSingle"); },
       single() { return execute("single"); },
       then(resolve, reject) { return execute(null).then(resolve, reject); }
@@ -264,6 +274,153 @@ function createStatefulMockDb() {
           error: null
         };
       }
+      if (fnName === "fulfill_consultation_payment") {
+        const product = state.consultation_products.find(
+          (cp) => cp.id === params.p_product_id && cp.active
+        );
+        if (!product) {
+          return { data: { success: false, code: "PRODUCT_NOT_FOUND", error: "Consultation product not found" }, error: null };
+        }
+        const basePaise = Math.round(Number(product.base_price) * 100);
+        const gstPaise = Math.round(basePaise * Number(product.gst_rate ?? 0.18));
+        const expectedTotal = (basePaise + gstPaise) / 100;
+        if (Math.round(Number(params.p_amount) * 100) !== basePaise + gstPaise) {
+          return { data: { success: false, code: "AMOUNT_MISMATCH", error: `Amount mismatch: expected ${expectedTotal}` }, error: null };
+        }
+        const existingPay = state.payments.find(
+          (p) => p.razorpay_payment_id === params.p_payment_id || p.razorpay_order_id === params.p_order_id
+        );
+        const existingBkg = state.bookings.find(
+          (b) => b.payment_id === params.p_payment_id || b.razorpay_order_id === params.p_order_id
+        );
+        if (existingPay && existingBkg) {
+          return {
+            data: {
+              success: true,
+              fulfilled: true,
+              already_fulfilled: true,
+              booking: existingBkg,
+              payment: existingPay
+            },
+            error: null
+          };
+        }
+        const bkg = {
+          id: `bkg_${crypto.randomUUID()}`,
+          booking_code: params.p_booking_details?.booking_code || `DM-${new Date().getFullYear()}-0001`,
+          customer_email: params.p_booking_details?.customerEmail || null,
+          customer_name: params.p_booking_details?.customerName || null,
+          customer_phone: params.p_booking_details?.customerPhone || null,
+          booking_date: params.p_booking_details?.date || null,
+          booking_time: params.p_booking_details?.time || null,
+          base_amount: basePaise / 100,
+          gst_rate: Number(product.gst_rate ?? 0.18),
+          gst_amount: gstPaise / 100,
+          total_amount: expectedTotal,
+          currency: params.p_currency || "INR",
+          payment_id: params.p_payment_id,
+          razorpay_order_id: params.p_order_id,
+          meeting_link: null,
+          status: "confirmed",
+          user_id: params.p_user_id || null,
+          created_at: new Date().toISOString()
+        };
+        const pay = {
+          id: crypto.randomUUID(),
+          user_id: params.p_user_id || null,
+          customer_email: params.p_booking_details?.customerEmail || null,
+          item_type: "consultation",
+          item_id: params.p_product_id,
+          item_title: product.name,
+          amount: expectedTotal,
+          currency: params.p_currency || "INR",
+          razorpay_order_id: params.p_order_id,
+          razorpay_payment_id: params.p_payment_id,
+          status: "captured",
+          created_at: new Date().toISOString()
+        };
+        state.bookings.push(bkg);
+        state.payments.push(pay);
+        return {
+          data: {
+            success: true,
+            fulfilled: true,
+            already_fulfilled: false,
+            booking: bkg,
+            payment: pay
+          },
+          error: null
+        };
+      }
+      if (fnName === "fulfill_resource_purchase") {
+        const resRec = state.resources.find((r) => r.id === params.p_resource_id);
+        if (!resRec || String(resRec.status || "").toLowerCase() !== "published") {
+          return { data: { success: false, code: "RESOURCE_UNAVAILABLE", error: "Resource unavailable" }, error: null };
+        }
+        const expectedPaise = Math.round(Number(resRec.price) * 100);
+        if (Math.round(Number(params.p_amount) * 100) !== expectedPaise) {
+          return { data: { success: false, code: "AMOUNT_MISMATCH", error: "Amount mismatch" }, error: null };
+        }
+        const existingPur = state.resource_purchases.find(
+          (rp) => rp.razorpay_payment_id === params.p_payment_id || rp.razorpay_order_id === params.p_order_id
+        );
+        const existingPay = state.payments.find(
+          (p) => p.razorpay_payment_id === params.p_payment_id || p.razorpay_order_id === params.p_order_id
+        );
+        if (existingPur && existingPay) {
+          return {
+            data: {
+              success: true,
+              fulfilled: true,
+              already_fulfilled: true,
+              purchase: existingPur,
+              payment: existingPay,
+              lead_status: "already_exists"
+            },
+            error: null
+          };
+        }
+        const newPur = {
+          id: crypto.randomUUID(),
+          user_id: params.p_user_id || null,
+          customer_email: params.p_customer_email || null,
+          customer_phone: params.p_customer_phone || null,
+          resource_id: params.p_resource_id,
+          razorpay_order_id: params.p_order_id,
+          razorpay_payment_id: params.p_payment_id,
+          amount: expectedPaise / 100,
+          currency: params.p_currency || "INR",
+          status: "active",
+          created_at: new Date().toISOString()
+        };
+        const newPay = {
+          id: crypto.randomUUID(),
+          user_id: params.p_user_id || null,
+          customer_email: params.p_customer_email || null,
+          item_type: "resource",
+          item_id: params.p_resource_id,
+          item_title: params.p_resource_title || resRec.title,
+          amount: expectedPaise / 100,
+          currency: params.p_currency || "INR",
+          razorpay_order_id: params.p_order_id,
+          razorpay_payment_id: params.p_payment_id,
+          status: "captured",
+          created_at: new Date().toISOString()
+        };
+        state.resource_purchases.push(newPur);
+        state.payments.push(newPay);
+        return {
+          data: {
+            success: true,
+            fulfilled: true,
+            already_fulfilled: false,
+            purchase: newPur,
+            payment: newPay,
+            lead_status: "saved"
+          },
+          error: null
+        };
+      }
       return { data: null, error: new Error(`Unknown RPC: ${fnName}`) };
     }
   };
@@ -274,11 +431,13 @@ function createStatefulMockDb() {
 function createMockRazorpay() {
   const gatewayPayments = new Map();
   const gatewayOrders = new Map();
+  const gatewayRefunds = new Map();
   let fetchCalls = 0;
 
   return {
     gatewayPayments,
     gatewayOrders,
+    gatewayRefunds,
     getFetchCalls: () => fetchCalls,
     resetFetchCalls: () => { fetchCalls = 0; },
     client: {
@@ -288,6 +447,18 @@ function createMockRazorpay() {
           const p = gatewayPayments.get(id);
           if (!p) throw { error: { description: "Payment not found" } };
           return p;
+        },
+        async fetchMultipleRefund(paymentId) {
+          fetchCalls += 1;
+          const items = gatewayRefunds.get(paymentId) || [];
+          return { entity: "collection", count: items.length, items };
+        },
+        async fetchRefund(paymentId, refundId) {
+          fetchCalls += 1;
+          const items = gatewayRefunds.get(paymentId) || [];
+          const found = items.find((r) => r.id === refundId);
+          if (!found) throw { error: { description: "Refund not found" } };
+          return found;
         }
       },
       orders: {
@@ -440,6 +611,9 @@ async function main() {
         created_at: new Date().toISOString()
       });
       mockRzp.gatewayPayments.set("pay_fix1_ref", { id: "pay_fix1_ref", order_id: "order_fix1_ref", amount: 499900, amount_refunded: 499900, currency: "INR", status: "refunded" });
+      mockRzp.gatewayRefunds.set("pay_fix1_ref", [
+        { id: "rfnd_legit_001", payment_id: "pay_fix1_ref", amount: 499900, currency: "INR", status: "processed" }
+      ]);
 
       const res = await fetch(`${baseUrl}/api/payments/invoice/pay_fix1_ref?type=credit-note&format=json`, {
         headers: { Authorization: "Bearer token-owner-1" }
@@ -517,6 +691,10 @@ async function main() {
         created_at: new Date().toISOString()
       });
       mockRzp.gatewayPayments.set("pay_fix1_adm", { id: "pay_fix1_adm", order_id: "order_fix1_adm", amount: 100000, currency: "INR", status: "captured" });
+      mockRzp.gatewayRefunds.set("pay_fix1_adm", [
+        { id: "rfnd_adm_1", payment_id: "pay_fix1_adm", amount: 40000, currency: "INR", status: "processed" },
+        { id: "rfnd_adm_2", payment_id: "pay_fix1_adm", amount: 70000, currency: "INR", status: "processed" }
+      ]);
 
       const admOk = await fetch(`${baseUrl}/api/payments/invoice/pay_fix1_adm?type=credit-note&refundId=rfnd_adm_1&refundAmount=400&format=json`, {
         headers: { Authorization: "Bearer token-admin" }
@@ -658,7 +836,7 @@ async function main() {
               id: "order_wh_crs_auth",
               amount: 499900,
               currency: "INR",
-              notes: { courseId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222" }
+              notes: { itemType: "course", courseId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222" }
             }
           },
           payment: {
@@ -751,7 +929,7 @@ async function main() {
       const wrongCur = await sendWebhook({
         event: "order.paid",
         payload: {
-          order: { entity: { id: "order_expected_cur", amount: 29900, currency: "INR", notes: { courseId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222" } } },
+          order: { entity: { id: "order_expected_cur", amount: 29900, currency: "INR", notes: { itemType: "course", courseId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222" } } },
           payment: { entity: { id: "pay_w3", order_id: "order_expected_cur", amount: 29900, currency: "USD", status: "captured" } }
         }
       });
@@ -796,7 +974,7 @@ async function main() {
               id: "order_wh_crs_ok",
               amount: 499900,
               currency: "INR",
-              notes: { courseId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222" }
+              notes: { itemType: "course", courseId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222" }
             }
           },
           payment: {
@@ -856,8 +1034,17 @@ async function main() {
       setMockSupabaseServerClient(client);
       const orderId = "order_con_valid_01";
       const payId = "pay_con_valid_01";
-      mockRzp.gatewayOrders.set(orderId, { id: orderId, amount: 58900, currency: "INR", notes: { productId: "31bbb9bf-ce10-4da4-a517-dfc673f9b875" } });
-      mockRzp.gatewayPayments.set(payId, { id: payId, order_id: orderId, amount: 58900, currency: "INR", status: "captured", email: "guestcon@example.com" });
+      mockRzp.gatewayOrders.set(orderId, {
+        id: orderId,
+        amount: 58882,
+        currency: "INR",
+        notes: {
+          itemType: "consultation",
+          productId: "31bbb9bf-ce10-4da4-a517-dfc673f9b875",
+          customerEmail: "guestcon@example.com"
+        }
+      });
+      mockRzp.gatewayPayments.set(payId, { id: payId, order_id: orderId, amount: 58882, currency: "INR", status: "captured", email: "guestcon@example.com" });
 
       const sig = signRazorpayCheckout(orderId, payId);
       const res = await fetch(`${baseUrl}/api/payments/verify-consultation-payment`, {
@@ -913,7 +1100,7 @@ async function main() {
       const orderId = "order_res_guest_ok";
       const payId = "pay_res_guest_ok";
       const resId = "2d50e5e3-711d-4461-a70d-0ed54dd29f17";
-      mockRzp.gatewayOrders.set(orderId, { id: orderId, amount: 29900, currency: "INR", notes: { resourceId: resId } });
+      mockRzp.gatewayOrders.set(orderId, { id: orderId, amount: 29900, currency: "INR", notes: { itemType: "resource", resourceId: resId } });
       mockRzp.gatewayPayments.set(payId, { id: payId, order_id: orderId, amount: 29900, currency: "INR", status: "captured", email: "resguest@example.com" });
 
       const sig = signRazorpayCheckout(orderId, payId);
@@ -934,6 +1121,28 @@ async function main() {
       assert.strictEqual(verifyBody.fulfilled, true);
       assert.ok(verifyBody.invoiceToken);
       assert.strictEqual(verifySignedInvoiceToken(payId, verifyBody.invoiceToken), true);
+      assert.ok(verifyBody.resourceAccessToken);
+      assert.strictEqual(
+        verifyGuestResourceToken(verifyBody.resourceAccessToken, { paymentId: payId, orderId, resourceId: resId }).valid,
+        true
+      );
+
+      // Guest orderId + paymentId without signed resourceAccessToken is rejected (403)
+      const noTokStatusRes = await fetch(`${baseUrl}/api/payments/verify-purchase-status?resourceId=${resId}&orderId=${orderId}&paymentId=${payId}`);
+      assert.strictEqual(noTokStatusRes.status, 403);
+
+      // With signed guest resourceAccessToken, verify-purchase-status and bundle-files succeed (200)
+      const tokStatusRes = await fetch(`${baseUrl}/api/payments/verify-purchase-status?resourceId=${resId}&orderId=${orderId}&paymentId=${payId}`, {
+        headers: { "x-resource-access-token": verifyBody.resourceAccessToken }
+      });
+      assert.strictEqual(tokStatusRes.status, 200);
+      assert.strictEqual((await tokStatusRes.json()).verified, true);
+
+      const tokBundleRes = await fetch(`${baseUrl}/api/payments/bundle-files?bundleId=${resId}&orderId=${orderId}&paymentId=${payId}`, {
+        headers: { "x-resource-access-token": verifyBody.resourceAccessToken }
+      });
+      assert.strictEqual(tokBundleRes.status, 200);
+      assert.strictEqual((await tokBundleRes.json()).authorized, true);
 
       // End-to-end guest download using returned invoiceDownloadUrl
       const invRes = await fetch(`${baseUrl}${verifyBody.invoiceDownloadUrl}&format=json`);
@@ -963,6 +1172,24 @@ async function main() {
 
       const crsOrder = "order_crs_auth_01";
       const crsPay = "pay_crs_auth_01";
+      mockRzp.gatewayOrders.set(crsOrder, {
+        id: crsOrder,
+        amount: 499900,
+        currency: "INR",
+        notes: {
+          itemType: "course",
+          courseId: "11111111-1111-4111-8111-111111111111",
+          userId: "10000000-0000-4000-8000-000000000001"
+        }
+      });
+      mockRzp.gatewayPayments.set(crsPay, {
+        id: crsPay,
+        order_id: crsOrder,
+        amount: 499900,
+        currency: "INR",
+        status: "captured",
+        email: "owner@example.com"
+      });
       const crsSig = signRazorpayCheckout(crsOrder, crsPay);
       const crsRes = await fetch(`${baseUrl}/api/payments/verify-course-payment`, {
         method: "POST",
@@ -1006,8 +1233,12 @@ async function main() {
       // Verify fail-closed behavior when HMAC secret is absent
       const savedInv = process.env.INVOICE_TOKEN_HMAC_SECRET;
       const savedRzp = process.env.RAZORPAY_KEY_SECRET;
+      const savedAsset = process.env.ASSET_TOKEN_HMAC_SECRET;
+      const savedPay = process.env.PAYMENT_VERIFICATION_SECRET;
       delete process.env.INVOICE_TOKEN_HMAC_SECRET;
       delete process.env.RAZORPAY_KEY_SECRET;
+      delete process.env.ASSET_TOKEN_HMAC_SECRET;
+      delete process.env.PAYMENT_VERIFICATION_SECRET;
       try {
         const noSecretHtml = buildResourceDeliveryEmailHtml({
           customerName: "Guest Buyer",
@@ -1022,6 +1253,8 @@ async function main() {
       } finally {
         process.env.INVOICE_TOKEN_HMAC_SECRET = savedInv;
         process.env.RAZORPAY_KEY_SECRET = savedRzp;
+        if (savedAsset !== undefined) process.env.ASSET_TOKEN_HMAC_SECRET = savedAsset;
+        if (savedPay !== undefined) process.env.PAYMENT_VERIFICATION_SECRET = savedPay;
       }
     });
   } finally {

@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { resourceService } from '../services/resourceService';
+import { getStoredGuestResourceToken, saveStoredGuestResourceToken } from '../services/paymentService';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { analytics } from '../utils/analytics';
 import { Resource } from '../types';
 import {
@@ -29,16 +31,18 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
     orderId: string | null;
     paymentId: string | null;
     amount: string | null;
+    resourceAccessToken: string | null;
   }>(() => {
     if (typeof window === 'undefined') {
-      return { resourceId: null, orderId: null, paymentId: null, amount: null };
+      return { resourceId: null, orderId: null, paymentId: null, amount: null, resourceAccessToken: null };
     }
     const searchParams = new URLSearchParams(window.location.search);
     return {
       resourceId: searchParams.get('resourceId') || searchParams.get('id') || searchParams.get('slug'),
       orderId: searchParams.get('orderId') || searchParams.get('order_id'),
       paymentId: searchParams.get('paymentId') || searchParams.get('payment_id'),
-      amount: searchParams.get('amount')
+      amount: searchParams.get('amount'),
+      resourceAccessToken: searchParams.get('resourceAccessToken') || searchParams.get('resource_access_token')
     };
   });
 
@@ -63,12 +67,23 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
     const ordId = searchParams.get('orderId') || searchParams.get('order_id');
     const payId = searchParams.get('paymentId') || searchParams.get('payment_id');
     const amt = searchParams.get('amount');
+    const resToken = searchParams.get('resourceAccessToken') || searchParams.get('resource_access_token');
+
+    if (resToken && ordId && payId) {
+      saveStoredGuestResourceToken({
+        resourceId: resId,
+        orderId: ordId,
+        paymentId: payId,
+        token: resToken
+      });
+    }
 
     setQueryParams({
       resourceId: resId,
       orderId: ordId,
       paymentId: payId,
-      amount: amt
+      amount: amt,
+      resourceAccessToken: resToken
     });
 
     if (!resId) {
@@ -127,7 +142,22 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
           ...(queryParams.paymentId ? { paymentId: queryParams.paymentId } : {})
         });
 
-        const resp = await fetch(`/api/payments/verify-purchase-status?${query.toString()}`);
+        const { data: authSessionData } = isSupabaseConfigured()
+          ? await supabase.auth.getSession()
+          : { data: { session: null } };
+        const authHeader = authSessionData?.session?.access_token
+          ? `Bearer ${authSessionData.session.access_token}`
+          : undefined;
+        const guestToken =
+          queryParams.resourceAccessToken ||
+          getStoredGuestResourceToken(matchedResource.id, queryParams.orderId, queryParams.paymentId);
+
+        const resp = await fetch(`/api/payments/verify-purchase-status?${query.toString()}`, {
+          headers: {
+            ...(authHeader ? { Authorization: authHeader } : {}),
+            ...(guestToken ? { 'x-resource-access-token': guestToken } : {})
+          }
+        });
         const data = await resp.json();
 
         if (isMounted) {
@@ -215,10 +245,18 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
         orderId: verifiedDetails?.orderId || queryParams.orderId || undefined
       });
 
+      const resolvedOrderId = verifiedDetails?.orderId || queryParams.orderId || undefined;
+      const resolvedPaymentId = verifiedDetails?.paymentId || queryParams.paymentId || undefined;
+      const guestToken =
+        queryParams.resourceAccessToken ||
+        getStoredGuestResourceToken(matchedResource.id, resolvedOrderId, resolvedPaymentId) ||
+        undefined;
+
       const delivery = await resourceService.deliverResource(matchedResource, {
         isAuthorized: true,
-        orderId: verifiedDetails?.orderId || queryParams.orderId || undefined,
-        paymentId: verifiedDetails?.paymentId || queryParams.paymentId || undefined
+        orderId: resolvedOrderId,
+        paymentId: resolvedPaymentId,
+        resourceAccessToken: guestToken
       });
 
       if ((delivery as any).isBundle) {

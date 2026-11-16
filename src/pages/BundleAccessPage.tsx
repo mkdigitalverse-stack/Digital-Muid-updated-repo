@@ -327,6 +327,7 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
                 orderId: response.razorpay_order_id,
                 paymentId: response.razorpay_payment_id,
                 resourceId: '2d50e5e3-711d-4461-a70d-0ed54dd29f17',
+                resourceAccessToken: verifyResult.resourceAccessToken,
                 customerDetails: {
                   name: checkoutName.trim(),
                   email: checkoutEmail.trim(),
@@ -343,7 +344,8 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
             // Reload bundle files with new payment token
             const freshFiles = await resourceService.fetchBundleFiles('2d50e5e3-711d-4461-a70d-0ed54dd29f17', {
               orderId: response.razorpay_order_id,
-              paymentId: response.razorpay_payment_id
+              paymentId: response.razorpay_payment_id,
+              resourceAccessToken: verifyResult.resourceAccessToken
             });
 
             if (freshFiles.success && freshFiles.files) {

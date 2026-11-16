@@ -1,4 +1,3 @@
-import crypto from "crypto";
 import { getSupabaseServerClient, isValidUUID } from "./supabaseServer.js";
 import {
   sendCourseAccessEmail,
@@ -7,6 +6,194 @@ import {
   hasAlreadySent
 } from "./mailerService.js";
 import { assertSideEffectAllowed } from "./developmentSafetyGate.js";
+
+/**
+ * Strictly converts a rupee amount into integer paise.
+ * Rejects null/undefined/boolean/empty strings, non-finite values, zero/negative values,
+ * sub-paise precision (> 2 decimal places), and unsafe integer overflow.
+ *
+ * @param {number|string|null|undefined} amount
+ * @returns {number|null}
+ */
+export function toPaiseStrict(amount) {
+  if (amount === null || amount === undefined || typeof amount === "boolean" || String(amount).trim() === "") {
+    return null;
+  }
+  const num = Number(amount);
+  if (!Number.isFinite(num) || num <= 0) {
+    return null;
+  }
+  const scaled = num * 100;
+  const rounded = Math.round(scaled);
+  if (!Number.isSafeInteger(rounded) || rounded <= 0 || Math.abs(scaled - rounded) > 1e-6) {
+    return null;
+  }
+  return rounded;
+}
+
+/**
+ * Strictly classifies PostgreSQL / PostgREST RPC failures without conflating
+ * missing-function migrations with overload ambiguity, transient unavailability,
+ * or constraint violations.
+ */
+export function classifyRpcExecutionFailure(err, expectedRpcName, migrationHint, wasThrown = false) {
+  const code = String(err?.code || "").trim();
+  const msg = String(err?.message || err?.error?.description || "").trim();
+  const status = Number(err?.status || err?.statusCode || 0);
+
+  if (msg.startsWith(`Unknown RPC: ${expectedRpcName}`)) {
+    return {
+      success: false,
+      fulfilled: false,
+      retryable: true,
+      code: "MIGRATION_PENDING",
+      error: `Fulfillment RPC '${expectedRpcName}' does not exist in database. Migration ${migrationHint} must be applied.`
+    };
+  }
+
+  if (code === "42883") {
+    return {
+      success: false,
+      fulfilled: false,
+      retryable: true,
+      code: "MIGRATION_PENDING",
+      error: `Fulfillment RPC '${expectedRpcName}' is missing (SQLSTATE 42883). Migration ${migrationHint} must be applied.`
+    };
+  }
+
+  if (code === "PGRST202") {
+    if (/candidate|ambiguous|overload/i.test(msg)) {
+      return {
+        success: false,
+        fulfilled: false,
+        retryable: false,
+        code: "RPC_SCHEMA_ERROR",
+        error: msg || `Ambiguous RPC overload schema error calling '${expectedRpcName}'.`
+      };
+    }
+    return {
+      success: false,
+      fulfilled: false,
+      retryable: true,
+      code: "MIGRATION_PENDING",
+      error: `Fulfillment RPC '${expectedRpcName}' is not present in schema cache (PGRST202). Migration ${migrationHint} must be applied.`
+    };
+  }
+
+  const isTransientTransport =
+    wasThrown ||
+    status >= 500 ||
+    /^(08|57P01|57P03|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN)/i.test(code) ||
+    /fetch failed|network|timeout|timed out|econnrefused|econnreset|etimedout|socket hang up|service unavailable|bad gateway|gateway timeout/i.test(msg);
+
+  if (isTransientTransport) {
+    return {
+      success: false,
+      fulfilled: false,
+      retryable: true,
+      code: "RPC_UNAVAILABLE",
+      error: msg || `Transient database/network unavailability calling '${expectedRpcName}'.`
+    };
+  }
+
+  return {
+    success: false,
+    fulfilled: false,
+    retryable: false,
+    code: code || "RPC_ERROR",
+    error: msg || `Database RPC execution failed for '${expectedRpcName}'.`
+  };
+}
+
+// ==============================================================================
+// AUTHORITATIVE PAID RESOURCES CATALOG & PRICING
+// Guarantees authoritative fail-closed pricing even if DB schema cache lacks columns
+// ==============================================================================
+export const AUTHORITATIVE_PAID_RESOURCES = {
+  // Bundle (All 4 tools)
+  "2d50e5e3-711d-4461-a70d-0ed54dd29f17": { price: 299, accessType: "paid", currency: "INR" },
+  "meta-ads-campaign-planner-bundle": { price: 299, accessType: "paid", currency: "INR" },
+  // Deliverable 1: The Meta Ads Campaign Planner Workbook
+  "27ef2c04-4d4a-4dbe-a702-d4013b2542b9": { price: 129, accessType: "paid", currency: "INR" },
+  "meta-ads-campaign-planner-workbook": { price: 129, accessType: "paid", currency: "INR" },
+  // Deliverable 2: Interactive Ad Budget & Break-Even Calculator
+  "fafe5ffc-3323-4761-9d22-50a2588f6326": { price: 79, accessType: "paid", currency: "INR" },
+  "the-ad-budget-breat-even-calculate": { price: 79, accessType: "paid", currency: "INR" },
+  "the-ad-budget-break-even-calculator": { price: 79, accessType: "paid", currency: "INR" },
+  // Deliverable 3: 10 High-Converting Meta Ads Copy Frameworks
+  "004d374c-d872-4bfe-bf54-8083504e9174": { price: 79, accessType: "paid", currency: "INR" },
+  "10-high-converting-meta-ads-copy-frameworks": { price: 79, accessType: "paid", currency: "INR" },
+  // Deliverable 4: Pre-Launch & Tracking Audit Checklist
+  "6867ecdd-2797-40f0-bdc8-ead20600ac6c": { price: 79, accessType: "paid", currency: "INR" },
+  "pre-launch-tracking-audit-checklist": { price: 79, accessType: "paid", currency: "INR" }
+};
+
+export function getAuthoritativeResourcePricing(idOrSlug, resourceRecord = null) {
+  const clean = String(idOrSlug || "").trim();
+  const known = AUTHORITATIVE_PAID_RESOURCES[clean] ||
+    (resourceRecord?.id && AUTHORITATIVE_PAID_RESOURCES[resourceRecord.id]) ||
+    (resourceRecord?.slug && AUTHORITATIVE_PAID_RESOURCES[resourceRecord.slug]);
+
+  if (!resourceRecord) {
+    return {
+      accessType: "unverified",
+      price: 0,
+      currency: "INR"
+    };
+  }
+
+  const recordStatus = String(resourceRecord.status || "").trim().toLowerCase();
+  if (recordStatus !== "published") {
+    return {
+      accessType: "unavailable",
+      price: 0,
+      currency: "INR"
+    };
+  }
+
+  const dbAccessType = resourceRecord?.access_type ?? resourceRecord?.accessType;
+  const normalizedDbAccessType = dbAccessType != null ? String(dbAccessType).trim().toLowerCase() : null;
+  const rawDbPrice = resourceRecord?.price;
+  const numericDbPrice = rawDbPrice != null ? Number(rawDbPrice) : NaN;
+  const strictDbPaise = normalizedDbAccessType === "paid" ? toPaiseStrict(rawDbPrice) : null;
+
+  if (normalizedDbAccessType === "paid") {
+    if (!strictDbPaise) {
+      return {
+        accessType: "unverified",
+        price: 0,
+        currency: "INR"
+      };
+    }
+    return {
+      accessType: "paid",
+      price: strictDbPaise / 100,
+      currency: String(resourceRecord.currency || "INR").trim().toUpperCase()
+    };
+  }
+
+  if (known) {
+    return {
+      accessType: "paid",
+      price: known.price,
+      currency: known.currency
+    };
+  }
+
+  if (normalizedDbAccessType === "free" || (normalizedDbAccessType == null && numericDbPrice === 0)) {
+    return {
+      accessType: "free",
+      price: 0,
+      currency: String(resourceRecord?.currency || "INR").trim().toUpperCase()
+    };
+  }
+
+  return {
+    accessType: "unverified",
+    price: 0,
+    currency: "INR"
+  };
+}
 
 /**
  * Calculates the authoritative effective course price according to standard business logic:
@@ -112,10 +299,13 @@ export async function fulfillCourseEnrollment({
       };
     }
 
-    if (typeof amount !== "number" || isNaN(amount) || amount <= 0) {
+    const strictAmountPaise = toPaiseStrict(amount);
+    if (!strictAmountPaise) {
       return {
         success: false,
-        error: "A valid positive numeric amount is required for fulfillment.",
+        fulfilled: false,
+        retryable: false,
+        error: "A valid positive numeric INR amount (max 2 decimals) is required for fulfillment.",
         code: "INVALID_AMOUNT"
       };
     }
@@ -123,6 +313,8 @@ export async function fulfillCourseEnrollment({
     if (!currency || typeof currency !== "string") {
       return {
         success: false,
+        fulfilled: false,
+        retryable: false,
         error: "A valid currency code is required for fulfillment.",
         code: "INVALID_CURRENCY"
       };
@@ -137,54 +329,55 @@ export async function fulfillCourseEnrollment({
       return {
         success: false,
         fulfilled: false,
+        retryable: true,
         error: "Server-side Supabase Service Role key is not configured.",
         code: "SERVICE_KEY_MISSING"
       };
     }
 
-    // 3. Invoke atomic PostgreSQL RPC
-    const { data, error } = await supabaseServer.rpc("fulfill_course_enrollment", {
-      p_user_id: userId.trim(),
-      p_course_id: courseId.trim(),
-      p_amount: amount,
-      p_currency: currency.trim().toUpperCase(),
-      p_order_id: orderId.trim(),
-      p_payment_id: paymentId.trim()
-    });
-
-    if (error) {
-      console.error("[Payment Fulfillment] RPC fulfill_course_enrollment error:", error);
-
-      // Detect if RPC function is missing because migration is pending
-      if (
-        error.code === "PGRST202" ||
-        error.message?.includes("function") ||
-        error.message?.includes("does not exist")
-      ) {
-        return {
-          success: false,
-          fulfilled: false,
-          error:
-            "Fulfillment RPC function does not exist in database. Migration 20260921000001_atomic_course_payment_fulfillment.sql must be applied.",
-          code: "MIGRATION_PENDING"
-        };
-      }
-
-      return {
-        success: false,
-        fulfilled: false,
-        error: error.message || "Database RPC execution failed.",
-        code: error.code || "RPC_ERROR"
-      };
+    // 3. Invoke atomic PostgreSQL RPC (fail closed on any RPC failure)
+    let rpcResult;
+    try {
+      rpcResult = await supabaseServer.rpc("fulfill_course_enrollment", {
+        p_user_id: userId.trim(),
+        p_course_id: courseId.trim(),
+        p_amount: strictAmountPaise / 100,
+        p_currency: currency.trim().toUpperCase(),
+        p_order_id: orderId.trim(),
+        p_payment_id: paymentId.trim()
+      });
+    } catch (rpcCallErr) {
+      const classified = classifyRpcExecutionFailure(
+        rpcCallErr,
+        "fulfill_course_enrollment",
+        "20260921000001_atomic_course_payment_fulfillment.sql",
+        true
+      );
+      console.error("[Payment Fulfillment] RPC fulfill_course_enrollment threw:", classified);
+      return classified;
     }
 
-    if (!data || data.success !== true) {
+    const { data, error } = rpcResult || {};
+
+    if (error) {
+      const classified = classifyRpcExecutionFailure(
+        error,
+        "fulfill_course_enrollment",
+        "20260921000001_atomic_course_payment_fulfillment.sql",
+        false
+      );
+      console.error("[Payment Fulfillment] RPC fulfill_course_enrollment error:", classified);
+      return classified;
+    }
+
+    if (!data || typeof data !== "object" || data.success !== true) {
       console.warn("[Payment Fulfillment] RPC returned non-success result:", data);
       return {
         success: false,
         fulfilled: false,
+        retryable: false,
         error: data?.error || "Fulfillment could not be completed.",
-        code: "FULFILLMENT_REJECTED"
+        code: data?.code || "FULFILLMENT_REJECTED"
       };
     }
 
@@ -263,6 +456,7 @@ export async function fulfillCourseEnrollment({
     return {
       success: false,
       fulfilled: false,
+      retryable: true,
       error: err?.message || "An unexpected error occurred during fulfillment.",
       code: "UNEXPECTED_ERROR"
     };
@@ -311,6 +505,7 @@ export async function fulfillConsultationPayment({
       return {
         success: false,
         fulfilled: false,
+        retryable: true,
         error: "Server-side Supabase Service Role client is not configured.",
         code: "SERVICE_KEY_MISSING"
       };
@@ -318,7 +513,31 @@ export async function fulfillConsultationPayment({
 
     const cleanPaymentId = String(paymentId || "").trim();
     const cleanOrderId = String(orderId || "").trim();
-    const targetProductId = isValidUUID(productId) ? productId : "31bbb9bf-ce10-4da4-a517-dfc673f9b875";
+
+    if (!cleanOrderId || !cleanPaymentId) {
+      return {
+        success: false,
+        fulfilled: false,
+        retryable: false,
+        error: "Both orderId and paymentId are required for consultation fulfillment.",
+        code: "MISSING_IDENTIFIERS"
+      };
+    }
+
+    const hasExplicitProductId = productId !== undefined && productId !== null && String(productId).trim() !== "";
+    if (hasExplicitProductId && !isValidUUID(String(productId).trim())) {
+      return {
+        success: false,
+        fulfilled: false,
+        retryable: false,
+        error: "Invalid consultation product ID format.",
+        code: "INVALID_PRODUCT_ID"
+      };
+    }
+
+    const targetProductId = hasExplicitProductId
+      ? String(productId).trim()
+      : "31bbb9bf-ce10-4da4-a517-dfc673f9b875";
 
     // 1. Resolve authoritative product pricing strictly (fail closed if missing/inactive)
     const { data: product } = await supabaseServer
@@ -332,39 +551,95 @@ export async function fulfillConsultationPayment({
       return {
         success: false,
         fulfilled: false,
+        retryable: false,
         error: `Consultation product (${targetProductId}) is inactive or not found. Fulfillment rejected.`,
         code: "PRODUCT_UNAVAILABLE"
       };
     }
 
-    const baseAmount = Number(product?.base_price) || 499;
-    const gstRate = Number(product?.gst_rate) || 0.18;
-    const gstAmount = Number((baseAmount * gstRate).toFixed(2));
-    const totalAmount = Number((baseAmount + gstAmount).toFixed(2));
+    const basePaise = toPaiseStrict(product?.base_price);
+    const gstRate = product?.gst_rate != null ? Number(product.gst_rate) : 0.18;
+    if (!basePaise || !Number.isFinite(gstRate) || gstRate < 0 || gstRate > 1) {
+      return {
+        success: false,
+        fulfilled: false,
+        retryable: false,
+        error: "Invalid consultation product pricing configuration. Fulfillment rejected.",
+        code: "INVALID_PRODUCT_PRICING"
+      };
+    }
+
+    const gstPaise = Math.round(basePaise * gstRate);
+    const totalAmountInPaise = basePaise + gstPaise;
+    if (!Number.isSafeInteger(gstPaise) || !Number.isSafeInteger(totalAmountInPaise) || totalAmountInPaise <= 0) {
+      return {
+        success: false,
+        fulfilled: false,
+        retryable: false,
+        error: "Consultation pricing calculation overflow. Fulfillment rejected.",
+        code: "INVALID_PRODUCT_PRICING"
+      };
+    }
+
+    const baseAmount = basePaise / 100;
+    const gstAmount = gstPaise / 100;
+    const totalAmount = totalAmountInPaise / 100;
+    const providedAmountInPaise = toPaiseStrict(amount);
     const effectiveCurrency = String(currency || product?.currency || "").trim().toUpperCase();
 
     if (!effectiveCurrency || effectiveCurrency !== "INR") {
       return {
         success: false,
         fulfilled: false,
+        retryable: false,
         error: "Invalid or missing currency: Consultation transactions must be denominated in INR.",
         code: "INVALID_CURRENCY"
       };
     }
 
-    const effectiveAmount = (typeof amount === "number" && !isNaN(amount) && amount > 0)
-      ? Number(amount.toFixed(2))
-      : totalAmount;
+    if (!providedAmountInPaise || providedAmountInPaise !== totalAmountInPaise) {
+      return {
+        success: false,
+        fulfilled: false,
+        retryable: false,
+        error: `Amount mismatch: payment amount (${amount}) does not equal authoritative consultation total (${totalAmount}).`,
+        code: "AMOUNT_MISMATCH"
+      };
+    }
+
+    const effectiveAmount = totalAmount;
     const durationMinutes = Number(product?.duration_minutes) || 30;
 
-    // 2. Resolve user_id: If authenticated student, use userId; else check profiles by email
+    // 2. Validate mandatory intake brief parameters before RPC execution
+    const normalizedCustomerEmail = String(
+      bookingDetails?.customerEmail || bookingDetails?.customer_email || ""
+    ).trim().toLowerCase();
+    const rawBookingDate = String(
+      bookingDetails?.date || bookingDetails?.bookingDate || bookingDetails?.booking_date || ""
+    ).trim();
+    const normalizedBookingTime = String(
+      bookingDetails?.time || bookingDetails?.bookingTime || bookingDetails?.booking_time || ""
+    ).trim();
+    const isValidBookingDate = Boolean(rawBookingDate) && !Number.isNaN(Date.parse(rawBookingDate));
+
+    if (!normalizedCustomerEmail || !isValidBookingDate || !normalizedBookingTime) {
+      return {
+        success: false,
+        fulfilled: false,
+        retryable: false,
+        error: "Missing or invalid required intake brief data: customerEmail, valid date, and time slot are mandatory.",
+        code: "INVALID_INTAKE"
+      };
+    }
+
+    // 3. Resolve user_id strictly from explicit authenticated user or matching profile
     let resolvedUserId = isValidUUID(userId) ? userId : null;
-    if (!resolvedUserId && bookingDetails?.customerEmail) {
+    if (!resolvedUserId && normalizedCustomerEmail) {
       try {
         const { data: profile } = await supabaseServer
           .from("profiles")
           .select("id")
-          .eq("email", bookingDetails.customerEmail.trim().toLowerCase())
+          .eq("email", normalizedCustomerEmail)
           .maybeSingle();
         if (profile?.id && isValidUUID(profile.id)) {
           resolvedUserId = profile.id;
@@ -372,399 +647,73 @@ export async function fulfillConsultationPayment({
       } catch {}
     }
 
-    // 3. Prepare intake brief payload
+    // 4. Prepare intake brief payload (NEVER embed order_total_amount client/gateway snapshot)
     const bookingCode = `DM-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    // Genuine Google Meet URL requires Google Calendar API provisioning. Mark as pending if not provided.
     const meetUrl = bookingDetails?.meetUrl || "PENDING_CALENDAR_PROVISIONING";
 
     const intakeDetails = {
-      customerName: String(bookingDetails?.customerName || "").trim(),
-      customerEmail: String(bookingDetails?.customerEmail || "").trim(),
-      customerPhone: String(bookingDetails?.customerPhone || "").trim(),
-      businessName: String(bookingDetails?.businessName || "").trim(),
-      primaryChallenge: String(bookingDetails?.primaryChallenge || "").trim(),
-      desiredOutcome: String(bookingDetails?.desiredOutcome || "").trim(),
+      customerName: String(bookingDetails?.customerName || bookingDetails?.customer_name || "").trim(),
+      customerEmail: normalizedCustomerEmail,
+      customerPhone: String(bookingDetails?.customerPhone || bookingDetails?.customer_phone || "").trim(),
+      businessName: String(bookingDetails?.businessName || bookingDetails?.business_name || "").trim(),
+      primaryChallenge: String(bookingDetails?.primaryChallenge || bookingDetails?.primary_challenge || "").trim(),
+      desiredOutcome: String(bookingDetails?.desiredOutcome || bookingDetails?.desired_outcome || "").trim(),
       website: bookingDetails?.website ? String(bookingDetails.website).trim() : null,
       linkedin: bookingDetails?.linkedin ? String(bookingDetails.linkedin).trim() : null,
-      date: bookingDetails?.date || bookingDetails?.bookingDate || "",
-      time: bookingDetails?.time || bookingDetails?.bookingTime || "",
+      date: rawBookingDate,
+      time: normalizedBookingTime,
       booking_code: bookingCode,
-      meet_url: meetUrl,
-      order_total_amount: bookingDetails?.order_total_amount || effectiveAmount.toFixed(2)
+      meet_url: meetUrl
     };
 
-    // 4. ATOMIC DATABASE TRANSACTION VIA RPC
-    // Tries to execute PostgreSQL atomic RPC fulfill_consultation_payment
-    let rpcSuccess = false;
-    let rpcData = null;
+    // 5. ATOMIC DATABASE TRANSACTION VIA RPC ONLY — FAIL CLOSED (NO JS DUAL-WRITE FALLBACK)
+    let rpcResult;
     try {
-      const { data, error: rpcErr } = await supabaseServer.rpc("fulfill_consultation_payment", {
+      rpcResult = await supabaseServer.rpc("fulfill_consultation_payment", {
         p_user_id: resolvedUserId,
         p_order_id: cleanOrderId,
         p_payment_id: cleanPaymentId,
         p_amount: effectiveAmount,
         p_currency: effectiveCurrency,
         p_booking_details: intakeDetails,
-        p_product_id: product?.id || "31bbb9bf-ce10-4da4-a517-dfc673f9b875"
+        p_product_id: product.id
       });
-
-      if (!rpcErr && data && typeof data === "object") {
-        rpcData = data;
-        if (data.success === false) {
-          console.error("[Consultation Fulfillment] Atomic RPC rejected fulfillment:", data.error);
-          return {
-            success: false,
-            fulfilled: false,
-            error: data.error || "Payment fulfillment rejected by database transaction guard."
-          };
-        }
-        rpcSuccess = true;
-      } else if (rpcErr) {
-        // If the RPC failed due to application constraint (not missing function), fail closed
-        if (rpcErr.code && rpcErr.code !== "PGRST202" && rpcErr.code !== "42883") {
-          console.error("[Consultation Fulfillment] Atomic RPC error:", rpcErr.message || rpcErr);
-          return {
-            success: false,
-            fulfilled: false,
-            error: rpcErr.message || "Database transaction error during consultation fulfillment."
-          };
-        }
-        // PGRST202 / 42883: Function not present in active schema yet; proceed to hardened fallback
-        console.warn("[Consultation Fulfillment] fulfill_consultation_payment RPC not found in schema. Utilizing hardened server-side transactional fallback.");
-      }
     } catch (rpcCallErr) {
-      console.warn("[Consultation Fulfillment] Notice calling RPC, executing hardened fallback:", rpcCallErr?.message);
+      const classified = classifyRpcExecutionFailure(
+        rpcCallErr,
+        "fulfill_consultation_payment",
+        "20261116000001_harden_consultation_rpc_amount_validation.sql",
+        true
+      );
+      console.error("[Consultation Fulfillment] Atomic RPC threw (failing closed):", classified);
+      return classified;
     }
 
-    if (rpcSuccess && rpcData) {
-      // Dispatches confirmation email if not already sent, even if booking was previously recorded
-      (async () => {
-        try {
-          if (await hasAlreadySent(cleanPaymentId, "consultation_confirmation")) {
-            console.log(`[Consultation Fulfillment] Consultation confirmation already sent for ${cleanPaymentId}, skipping.`);
-            return;
-          }
+    const { data: rpcData, error: rpcErr } = rpcResult || {};
 
-          if (intakeDetails.customerEmail) {
-            await sendConsultationConfirmationEmail({
-              to: intakeDetails.customerEmail,
-              customerName: intakeDetails.customerName || "Valued Client",
-              bookingCode: rpcData.booking?.booking_code || bookingCode,
-              bookingDate: rpcData.booking?.booking_date || intakeDetails.date,
-              bookingTime: rpcData.booking?.booking_time || intakeDetails.time,
-              durationMinutes,
-              meetUrl: rpcData.booking?.meet_url || meetUrl,
-              primaryChallenge: intakeDetails.primaryChallenge || "Business Growth Strategy",
-              amount: totalAmount,
-              currency,
-              baseAmount,
-              gstAmount,
-              orderId: cleanOrderId,
-              paymentId: cleanPaymentId
-            });
-          }
-        } catch (mailErr) {
-          console.warn("[Consultation Fulfillment] Notice dispatching consultation email:", mailErr?.message || mailErr);
-        }
-      })();
-
-      return {
-        success: true,
-        fulfilled: true,
-        already_fulfilled: Boolean(rpcData.already_fulfilled),
-        healed_ledger: Boolean(rpcData.healed_ledger),
-        booking: rpcData.booking,
-        payment: rpcData.payment,
-        orderId: cleanOrderId,
-        paymentId: cleanPaymentId
-      };
+    if (rpcErr) {
+      const classified = classifyRpcExecutionFailure(
+        rpcErr,
+        "fulfill_consultation_payment",
+        "20261116000001_harden_consultation_rpc_amount_validation.sql",
+        false
+      );
+      console.error("[Consultation Fulfillment] Atomic RPC failed (failing closed):", classified);
+      return classified;
     }
 
-    // --------------------------------------------------------------------------
-    // 5. HARDENED SERVER-SIDE DUAL-WRITE FALLBACK
-    // Used when RPC is pending migration deployment.
-    // --------------------------------------------------------------------------
-
-    // 5A. Check existing payment and booking records
-    const { data: existingPayment } = await supabaseServer
-      .from("payments")
-      .select("*")
-      .eq("razorpay_payment_id", cleanPaymentId)
-      .maybeSingle();
-
-    const { data: existingBooking } = await supabaseServer
-      .from("bookings")
-      .select("*")
-      .or(`payment_id.eq.${cleanPaymentId},razorpay_order_id.eq.${cleanOrderId}`)
-      .maybeSingle();
-
-    // Security cross-check: Confirm existing payment belongs to the exact same order
-    if (existingPayment && existingPayment.razorpay_order_id !== cleanOrderId) {
-      console.error(`[Consultation Fulfillment] Security rejection: Payment ${cleanPaymentId} belongs to order ${existingPayment.razorpay_order_id}, not ${cleanOrderId}`);
+    if (!rpcData || typeof rpcData !== "object" || rpcData.success !== true) {
+      console.error("[Consultation Fulfillment] Atomic RPC rejected fulfillment:", rpcData?.error);
       return {
         success: false,
         fulfilled: false,
-        error: "Security violation: payment ID is associated with a different order."
+        retryable: false,
+        code: rpcData?.code || "FULFILLMENT_REJECTED",
+        error: rpcData?.error || "Payment fulfillment rejected by database transaction guard."
       };
     }
 
-    // 5B. Heal Incomplete State: Booking exists, but Payment Ledger is missing
-    if (existingBooking && !existingPayment) {
-      console.log(`[Consultation Fulfillment] Healing incomplete state: Booking exists for order ${cleanOrderId}, writing missing payment ledger.`);
-      const { data: healedPayment, error: healErr } = await supabaseServer
-        .from("payments")
-        .insert({
-          user_id: resolvedUserId || null,
-          item_type: "consultation",
-          item_id: product?.id || "31bbb9bf-ce10-4da4-a517-dfc673f9b875",
-          item_title: product?.name || "Business Growth & Scaling Consultation",
-          amount: totalAmount,
-          currency,
-          razorpay_order_id: cleanOrderId,
-          razorpay_payment_id: cleanPaymentId,
-          status: "captured",
-          created_at: new Date().toISOString()
-        })
-        .select()
-        .single();
-
-      if (healErr) {
-        console.error("[Consultation Fulfillment] Failed to heal payment ledger record:", healErr);
-      }
-
-      // Safe retry of email if previously skipped or failed
-      (async () => {
-        try {
-          if (!await hasAlreadySent(cleanPaymentId, "consultation_confirmation")) {
-            const emailToUse = existingBooking.customer_email || intakeDetails.customerEmail;
-            if (emailToUse) {
-              await sendConsultationConfirmationEmail({
-                to: emailToUse,
-                customerName: existingBooking.customer_name || intakeDetails.customerName || "Valued Client",
-                bookingCode: existingBooking.booking_code || bookingCode,
-                bookingDate: existingBooking.booking_date || intakeDetails.date,
-                bookingTime: existingBooking.booking_time || intakeDetails.time,
-                durationMinutes,
-                meetUrl: existingBooking.meet_url || meetUrl,
-                primaryChallenge: existingBooking.primary_challenge || intakeDetails.primaryChallenge || "Business Growth Strategy",
-                amount: totalAmount,
-                currency,
-                baseAmount,
-                gstAmount,
-                orderId: cleanOrderId,
-                paymentId: cleanPaymentId
-              });
-            }
-          }
-        } catch (mailErr) {
-          console.warn("[Consultation Fulfillment] Notice dispatching consultation email in heal branch:", mailErr?.message || mailErr);
-        }
-      })();
-
-      return {
-        success: true,
-        fulfilled: true,
-        already_fulfilled: true,
-        healed_ledger: true,
-        booking: existingBooking,
-        payment: healedPayment || null,
-        orderId: cleanOrderId,
-        paymentId: cleanPaymentId
-      };
-    }
-
-    // 5C. Fully fulfilled already
-    if (existingPayment && existingBooking) {
-      // Safe retry of confirmation email if payment & booking exist but confirmation email was not sent yet
-      (async () => {
-        try {
-          if (!await hasAlreadySent(cleanPaymentId, "consultation_confirmation")) {
-            console.log(`[Consultation Fulfillment] Booking and payment exist for ${cleanPaymentId}, but email was not sent yet. Dispatching confirmation email.`);
-            const emailToUse = existingBooking.customer_email || intakeDetails.customerEmail;
-            if (emailToUse) {
-              await sendConsultationConfirmationEmail({
-                to: emailToUse,
-                customerName: existingBooking.customer_name || intakeDetails.customerName || "Valued Client",
-                bookingCode: existingBooking.booking_code || bookingCode,
-                bookingDate: existingBooking.booking_date || intakeDetails.date,
-                bookingTime: existingBooking.booking_time || intakeDetails.time,
-                durationMinutes,
-                meetUrl: existingBooking.meet_url || meetUrl,
-                primaryChallenge: existingBooking.primary_challenge || intakeDetails.primaryChallenge || "Business Growth Strategy",
-                amount: totalAmount,
-                currency,
-                baseAmount,
-                gstAmount,
-                orderId: cleanOrderId,
-                paymentId: cleanPaymentId
-              });
-            }
-          } else {
-            console.log(`[Consultation Fulfillment] Payment ${cleanPaymentId} already processed and email already sent. Skipping duplicate email.`);
-          }
-        } catch (mailErr) {
-          console.warn("[Consultation Fulfillment] Notice dispatching consultation email in existing branch:", mailErr?.message || mailErr);
-        }
-      })();
-
-      return {
-        success: true,
-        fulfilled: true,
-        already_fulfilled: true,
-        booking: existingBooking,
-        payment: existingPayment,
-        orderId: cleanOrderId,
-        paymentId: cleanPaymentId
-      };
-    }
-
-    // 5D. Fresh dual-write
-    const bookingPayload = {
-      booking_code: bookingCode,
-      customer_name: intakeDetails.customerName,
-      customer_email: intakeDetails.customerEmail,
-      customer_phone: intakeDetails.customerPhone,
-      business_name: intakeDetails.businessName,
-      primary_challenge: intakeDetails.primaryChallenge,
-      desired_outcome: intakeDetails.desiredOutcome,
-      website: intakeDetails.website,
-      linkedin: intakeDetails.linkedin,
-      booking_date: intakeDetails.date,
-      booking_time: intakeDetails.time,
-      duration_minutes: durationMinutes,
-      base_amount: baseAmount,
-      gst_rate: gstRate,
-      gst_amount: gstAmount,
-      total_amount: effectiveAmount,
-      currency: effectiveCurrency,
-      payment_id: cleanPaymentId,
-      razorpay_order_id: cleanOrderId,
-      payment_status: "paid",
-      calendar_event_id: null,
-      meet_url: meetUrl,
-      status: "confirmed",
-      user_id: resolvedUserId || null,
-      notes: "Booked online with verified Razorpay payment.",
-      created_at: new Date().toISOString()
-    };
-
-    let newBooking = null;
-    const { data: bData, error: bookingError } = await supabaseServer
-      .from("bookings")
-      .insert(bookingPayload)
-      .select()
-      .single();
-
-    if (bookingError) {
-      // Concurrency race: check if another thread inserted it simultaneously
-      if (bookingError.code === "23505") {
-        const { data: racedBooking } = await supabaseServer
-          .from("bookings")
-          .select("*")
-          .or(`payment_id.eq.${cleanPaymentId},razorpay_order_id.eq.${cleanOrderId}`)
-          .maybeSingle();
-
-        if (racedBooking) {
-          newBooking = racedBooking;
-        } else {
-          // Active slot conflict: time slot taken by concurrent transaction.
-          // Captured funds must never be dropped: persist with status 'reschedule_pending' (fits VARCHAR(20) and bypasses active slot index).
-          const conflictPayload = {
-            ...bookingPayload,
-            status: "reschedule_pending",
-            notes: `Slot conflict: Time slot was taken by concurrent checkout. Payment captured (Razorpay ${cleanPaymentId}). Priority reschedule required.`
-          };
-          const { data: conflictBooking, error: conflictErr } = await supabaseServer
-            .from("bookings")
-            .insert(conflictPayload)
-            .select()
-            .single();
-
-          if (conflictErr) {
-            console.error("[Consultation Fulfillment] Error inserting conflicted booking:", conflictErr);
-            return {
-              success: false,
-              fulfilled: false,
-              error: "This time slot or booking reference conflicts with an existing booking."
-            };
-          }
-          newBooking = conflictBooking;
-        }
-      } else {
-        console.error("[Consultation Fulfillment] Error inserting booking:", bookingError);
-        return {
-          success: false,
-          fulfilled: false,
-          error: bookingError.message || "Failed to record consultation booking."
-        };
-      }
-    } else {
-      newBooking = bData;
-    }
-
-    // Insert Payment Ledger (supports guest user_id = null)
-    let paymentRecord = null;
-    const paymentPayload = {
-      user_id: resolvedUserId || null,
-      item_type: "consultation",
-      item_id: product?.id || "31bbb9bf-ce10-4da4-a517-dfc673f9b875",
-      item_title: product?.name || "Business Growth & Scaling Consultation",
-      amount: effectiveAmount,
-      currency: effectiveCurrency,
-      razorpay_order_id: cleanOrderId,
-      razorpay_payment_id: cleanPaymentId,
-      status: "captured",
-      created_at: new Date().toISOString()
-    };
-
-    const { data: pData, error: paymentError } = await supabaseServer
-      .from("payments")
-      .insert(paymentPayload)
-      .select()
-      .single();
-
-    if (paymentError) {
-      if (paymentError.code === "23505") {
-        const { data: racedPayment } = await supabaseServer
-          .from("payments")
-          .select("*")
-          .eq("razorpay_payment_id", cleanPaymentId)
-          .maybeSingle();
-        paymentRecord = racedPayment;
-      } else {
-        console.warn("[Consultation Fulfillment] Notice inserting payment ledger:", paymentError.message);
-      }
-    } else {
-      paymentRecord = pData;
-    }
-
-    // Verify durable ledger record was persisted
-    if (!newBooking && !paymentRecord) {
-      return {
-        success: false,
-        fulfilled: false,
-        error: "Failed to persist consultation booking records to database ledger."
-      };
-    }
-
-    // Record CRM Lead in public.crm_leads in background (non-blocking)
-    try {
-      await supabaseServer.from("crm_leads").insert({
-        name: bookingPayload.customer_name,
-        email: bookingPayload.customer_email,
-        phone: bookingPayload.customer_phone,
-        source: "Consultation Intake (Paid)",
-        interest: "1-on-1 Business Growth Consultation",
-        notes: `Booking Code: ${bookingCode}, Date: ${bookingPayload.booking_date} at ${bookingPayload.booking_time}. Challenge: ${bookingPayload.primary_challenge}`,
-        status: "New",
-        amount: totalAmount,
-        created_at: new Date().toISOString()
-      });
-    } catch (leadErr) {
-      console.warn("[Consultation Fulfillment] CRM lead record notice:", leadErr?.message);
-    }
-
-    // Asynchronously dispatch confirmation email only after verified durable persistence
+    // Dispatches confirmation email if not already sent, even if booking was previously recorded
     (async () => {
       try {
         if (await hasAlreadySent(cleanPaymentId, "consultation_confirmation")) {
@@ -772,18 +721,18 @@ export async function fulfillConsultationPayment({
           return;
         }
 
-        if (bookingPayload.customer_email) {
+        if (intakeDetails.customerEmail) {
           await sendConsultationConfirmationEmail({
-            to: bookingPayload.customer_email,
-            customerName: bookingPayload.customer_name || "Valued Client",
-            bookingCode: newBooking?.booking_code || bookingCode,
-            bookingDate: newBooking?.booking_date || bookingPayload.booking_date,
-            bookingTime: newBooking?.booking_time || bookingPayload.booking_time,
+            to: intakeDetails.customerEmail,
+            customerName: intakeDetails.customerName || "Valued Client",
+            bookingCode: rpcData.booking?.booking_code || bookingCode,
+            bookingDate: rpcData.booking?.booking_date || intakeDetails.date,
+            bookingTime: rpcData.booking?.booking_time || intakeDetails.time,
             durationMinutes,
-            meetUrl: newBooking?.meet_url || meetUrl,
-            primaryChallenge: bookingPayload.primary_challenge || "Business Growth Strategy",
+            meetUrl: rpcData.booking?.meeting_link || rpcData.booking?.meet_url || meetUrl,
+            primaryChallenge: intakeDetails.primaryChallenge || "Business Growth Strategy",
             amount: totalAmount,
-            currency,
+            currency: effectiveCurrency,
             baseAmount,
             gstAmount,
             orderId: cleanOrderId,
@@ -798,9 +747,12 @@ export async function fulfillConsultationPayment({
     return {
       success: true,
       fulfilled: true,
-      already_fulfilled: false,
-      booking: newBooking,
-      payment: paymentRecord,
+      already_fulfilled: Boolean(rpcData.already_fulfilled),
+      healed_ledger: Boolean(rpcData.healed_ledger),
+      healed_booking: Boolean(rpcData.healed_booking),
+      slot_conflict: Boolean(rpcData.slot_conflict),
+      booking: rpcData.booking,
+      payment: rpcData.payment,
       orderId: cleanOrderId,
       paymentId: cleanPaymentId
     };
@@ -809,6 +761,8 @@ export async function fulfillConsultationPayment({
     return {
       success: false,
       fulfilled: false,
+      retryable: true,
+      code: "UNEXPECTED_ERROR",
       error: err?.message || "An unexpected error occurred during consultation fulfillment."
     };
   }
@@ -861,261 +815,228 @@ export async function fulfillResourcePurchase({
     }
 
     const supabaseServer = getSupabaseServerClient();
-    const cleanPaymentId = String(paymentId || "").trim();
-    const cleanOrderId = String(orderId || "").trim();
-    const cleanResourceId = String(resourceId || "").trim();
-    const numericAmount = Number(amount) || 0;
-    const finalCurrency = (currency || "INR").toUpperCase();
-
-    // 1. Idempotency Check: Look for existing record with this razorpay_payment_id
-    if (supabaseServer) {
-      const { data: existingPurchase } = await supabaseServer
-        .from("resource_purchases")
-        .select("*")
-        .eq("razorpay_payment_id", cleanPaymentId)
-        .maybeSingle();
-
-      const { data: existingPayment } = await supabaseServer
-        .from("payments")
-        .select("*")
-        .eq("razorpay_payment_id", cleanPaymentId)
-        .maybeSingle();
-
-      if (existingPurchase || existingPayment) {
-        console.log(`[Resource Fulfillment] Payment ${cleanPaymentId} already processed. Returning existing record without duplicate email.`);
-
-        return {
-          success: true,
-          fulfilled: true,
-          already_fulfilled: true,
-          purchase: existingPurchase || null,
-          payment: existingPayment || null,
-          lead_status: "already_exists",
-          orderId: cleanOrderId,
-          paymentId: cleanPaymentId
-        };
-      }
-    }
-
-    // 2. Resolve user_id: If authenticated student, use userId; else search auth.users by email or auto-provision
-    let resolvedUserId = isValidUUID(userId) ? userId : null;
-    if (!resolvedUserId && customerEmail && supabaseServer) {
-      try {
-        const { data: usersData } = await supabaseServer.auth.admin.listUsers();
-        const match = usersData?.users?.find(
-          (u) => u.email?.toLowerCase() === customerEmail.trim().toLowerCase()
-        );
-        if (match?.id && isValidUUID(match.id)) {
-          resolvedUserId = match.id;
-        } else {
-          // Provision authenticated account for buyer so their purchases are permanently bound to student dashboard
-          const tempPassword = `DM_${Math.random().toString(36).slice(2, 10)}!${Date.now()}`;
-          const { data: newUser, error: createErr } = await supabaseServer.auth.admin.createUser({
-            email: customerEmail.trim().toLowerCase(),
-            password: tempPassword,
-            email_confirm: true,
-            user_metadata: {
-              full_name: customerName || "Student Member",
-              phone: customerPhone || null
-            }
-          });
-          if (!createErr && newUser?.user?.id) {
-            resolvedUserId = newUser.user.id;
-          } else {
-            // If user already exists or creation failed, re-query user
-            const { data: retryUsers } = await supabaseServer.auth.admin.listUsers();
-            const retryMatch = retryUsers?.users?.find(
-              (u) => u.email?.toLowerCase() === customerEmail.trim().toLowerCase()
-            );
-            if (retryMatch?.id && isValidUUID(retryMatch.id)) {
-              resolvedUserId = retryMatch.id;
-            }
-          }
-        }
-      } catch (userErr) {
-        console.warn("[Resource Fulfillment] Notice resolving student account:", userErr?.message);
-      }
-    }
-
-    // 3. Insert purchase in public.resource_purchases (if table exists)
-    let purchaseRecord = null;
-    if (supabaseServer && isValidUUID(cleanResourceId)) {
-      const purchasePayload = {
-        user_id: resolvedUserId || null,
-        customer_email: customerEmail ? customerEmail.trim().toLowerCase() : null,
-        customer_phone: customerPhone || null,
-        resource_id: cleanResourceId,
-        razorpay_order_id: cleanOrderId,
-        razorpay_payment_id: cleanPaymentId,
-        amount: numericAmount,
-        currency: finalCurrency,
-        status: "active",
-        purchased_at: new Date().toISOString()
-      };
-
-      try {
-        const { data: newPurchase, error: purchaseError } = await supabaseServer
-          .from("resource_purchases")
-          .upsert(purchasePayload, { onConflict: "razorpay_payment_id" })
-          .select()
-          .maybeSingle();
-
-        if (!purchaseError && newPurchase) {
-          purchaseRecord = newPurchase;
-        } else if (purchaseError && purchaseError.code !== "PGRST205") {
-          console.warn("[Resource Fulfillment] Notice saving resource_purchases row:", purchaseError.message);
-        }
-      } catch (tableErr) {
-        console.warn("[Resource Fulfillment] Notice table resource_purchases check:", tableErr?.message);
-      }
-    }
-
-    // 4. Create payment ledger record in public.payments (authoritative ledger)
-    let paymentRecord = null;
-    if (supabaseServer) {
-      const paymentPayload = {
-        user_id: resolvedUserId || null,
-        item_type: "resource",
-        item_id: cleanResourceId,
-        item_title: resourceTitle || "Digital Resource Toolkit",
-        amount: numericAmount,
-        currency: finalCurrency,
-        razorpay_order_id: cleanOrderId,
-        razorpay_payment_id: cleanPaymentId,
-        status: "captured",
-        created_at: new Date().toISOString()
-      };
-
-      try {
-        const { data: newPayment, error: paymentError } = await supabaseServer
-          .from("payments")
-          .upsert(paymentPayload, { onConflict: "razorpay_payment_id" })
-          .select()
-          .maybeSingle();
-
-        if (!paymentError && newPayment) {
-          paymentRecord = newPayment;
-          // Synchronize invoice_number from payments trigger back to resource_purchases if row exists
-          if (newPayment.invoice_number && purchaseRecord?.id) {
-            try {
-              await supabaseServer
-                .from("resource_purchases")
-                .update({ invoice_number: newPayment.invoice_number })
-                .eq("id", purchaseRecord.id);
-            } catch (invSyncErr) {
-              console.warn("[Resource Fulfillment] Notice syncing invoice_number to resource_purchases:", invSyncErr?.message);
-            }
-          }
-        } else if (paymentError) {
-          console.warn("[Resource Fulfillment] Notice inserting payment ledger:", paymentError.message);
-        }
-      } catch (pErr) {
-        console.warn("[Resource Fulfillment] Payments insert error:", pErr?.message);
-      }
-    }
-
-    // 5. Record CRM Lead in public.crm_leads as Converted buyer (decoupled, idempotent with valid UUID)
-    let leadStatus = "skipped";
-    let leadId = null;
-
-    if (supabaseServer && (customerEmail || customerName)) {
-      try {
-        const cleanEmail = (customerEmail || "").trim().toLowerCase();
-
-        // Idempotency check: see if a lead was already registered with this payment ID
-        const { data: existingLeads } = await supabaseServer
-          .from("crm_leads")
-          .select("id, status")
-          .ilike("notes", `%${cleanPaymentId}%`)
-          .limit(1);
-
-        if (existingLeads && existingLeads.length > 0) {
-          leadStatus = "already_exists";
-          leadId = existingLeads[0].id;
-        } else {
-          const generatedLeadId = crypto.randomUUID();
-          const { data: insertedLead, error: leadErr } = await supabaseServer
-            .from("crm_leads")
-            .insert({
-              id: generatedLeadId,
-              name: customerName || "Resource Buyer",
-              email: cleanEmail,
-              phone: customerPhone || null,
-              source: "Resource Purchase (Paid)",
-              interest: resourceTitle ? `Purchased: ${resourceTitle}` : `Resource ID: ${cleanResourceId}`,
-              notes: `Paid ₹${numericAmount}. Order: ${cleanOrderId}, Payment: ${cleanPaymentId}`,
-              status: "Converted",
-              amount: numericAmount,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .select()
-            .maybeSingle();
-
-          if (leadErr) {
-            console.warn("[Resource Fulfillment] CRM lead record notice (fulfillment unaffected):", leadErr.message);
-            leadStatus = "failed";
-          } else {
-            leadStatus = "saved";
-            leadId = insertedLead?.id || generatedLeadId;
-          }
-        }
-      } catch (leadErr) {
-        console.warn("[Resource Fulfillment] CRM lead record error caught (fulfillment unaffected):", leadErr?.message);
-        leadStatus = "failed";
-      }
-    }
-
-    // Verify that at least one durable ledger record was persisted
-    if (!paymentRecord && !purchaseRecord) {
-      console.error("[Resource Fulfillment] Database transaction failed: Neither payments nor resource_purchases was persisted.");
+    if (!supabaseServer) {
       return {
         success: false,
         fulfilled: false,
-        error: "Failed to persist purchase record to database ledger. Please retry payment verification.",
-        code: "DATABASE_WRITE_FAILED"
+        retryable: true,
+        code: "SERVICE_KEY_MISSING",
+        error: "Server-side Supabase Service Role key is not configured."
       };
     }
 
-    // Asynchronously dispatch resource delivery & receipt email
-    (async () => {
-      try {
-        if (customerEmail) {
-          await sendResourceDeliveryEmail({
-            to: customerEmail,
-            customerName: customerName || "Valued Customer",
-            resourceTitle: resourceTitle || "Digital Resource Toolkit",
-            resourceId: cleanResourceId,
-            amount: numericAmount,
-            currency: finalCurrency,
-            orderId: cleanOrderId,
-            paymentId: cleanPaymentId
-          });
-        }
-      } catch (mailErr) {
-        console.warn("[Resource Fulfillment] Notice dispatching resource email:", mailErr?.message || mailErr);
-      }
-    })();
+    const cleanPaymentId = String(paymentId || "").trim();
+    const cleanOrderId = String(orderId || "").trim();
+    const cleanResourceId = String(resourceId || "").trim();
+    const finalCurrency = String(currency || "").trim().toUpperCase();
 
+    if (!cleanOrderId || !cleanPaymentId || !cleanResourceId) {
+      return {
+        success: false,
+        fulfilled: false,
+        retryable: false,
+        code: "INVALID_PARAMETERS",
+        error: "Valid orderId, paymentId, and resourceId are required for resource fulfillment."
+      };
+    }
+
+    if (finalCurrency !== "INR") {
+      return {
+        success: false,
+        fulfilled: false,
+        retryable: false,
+        code: "INVALID_CURRENCY",
+        error: `Unsupported currency '${finalCurrency || "missing"}'. Only INR resource payments are accepted.`
+      };
+    }
+
+    const providedAmountInPaise = toPaiseStrict(amount);
+    if (!providedAmountInPaise) {
+      return {
+        success: false,
+        fulfilled: false,
+        retryable: false,
+        code: "INVALID_AMOUNT",
+        error: "A positive INR payment amount (max 2 decimals) is required for resource fulfillment."
+      };
+    }
+
+    const hasExplicitUserId = userId !== undefined && userId !== null && String(userId).trim() !== "";
+    if (hasExplicitUserId && !isValidUUID(String(userId).trim())) {
+      return {
+        success: false,
+        fulfilled: false,
+        retryable: false,
+        code: "INVALID_USER_ID",
+        error: "Invalid userId UUID format."
+      };
+    }
+    const providedUserId = hasExplicitUserId ? String(userId).trim() : null;
+
+    // 1. Authoritative resource catalog, published status, and pricing verification
+    const resourceQuery = supabaseServer.from("resources").select("*");
+    const { data: resourceRecord, error: resourceError } = isValidUUID(cleanResourceId)
+      ? await resourceQuery.eq("id", cleanResourceId).maybeSingle()
+      : await resourceQuery.eq("slug", cleanResourceId).maybeSingle();
+
+    if (resourceError) {
+      return {
+        success: false,
+        fulfilled: false,
+        retryable: true,
+        code: "DATABASE_ERROR",
+        error: resourceError.message || "Failed to query authoritative resource catalog record."
+      };
+    }
+
+    if (!resourceRecord) {
+      return {
+        success: false,
+        fulfilled: false,
+        code: "RESOURCE_NOT_FOUND",
+        error: "Resource record was not found in authoritative catalog."
+      };
+    }
+
+    if (String(resourceRecord.status || "").trim().toLowerCase() !== "published") {
+      return {
+        success: false,
+        fulfilled: false,
+        code: "RESOURCE_UNAVAILABLE",
+        error: "Resource is not published and cannot be fulfilled."
+      };
+    }
+
+    const canonicalResourceId = String(resourceRecord.id || "").trim();
+    if (!isValidUUID(canonicalResourceId)) {
+      return {
+        success: false,
+        fulfilled: false,
+        code: "INVALID_RESOURCE_ID",
+        error: "Authoritative resource record does not contain a valid UUID."
+      };
+    }
+
+    const pricing = getAuthoritativeResourcePricing(canonicalResourceId, resourceRecord);
+    const authoritativeAmountInPaise = toPaiseStrict(pricing.price);
+    if (
+      pricing.accessType !== "paid" ||
+      !authoritativeAmountInPaise ||
+      String(pricing.currency || "").toUpperCase() !== "INR"
+    ) {
+      return {
+        success: false,
+        fulfilled: false,
+        code: "INVALID_RESOURCE_PRICING",
+        error: "Resource is not configured as an active paid INR product."
+      };
+    }
+
+    const authoritativeAmount = authoritativeAmountInPaise / 100;
+    if (providedAmountInPaise !== authoritativeAmountInPaise) {
+      return {
+        success: false,
+        fulfilled: false,
+        code: "AMOUNT_MISMATCH",
+        error: `Amount mismatch: expected ₹${authoritativeAmount} INR (${authoritativeAmountInPaise} paise), received ${providedAmountInPaise} paise.`
+      };
+    }
+
+    const effectiveResourceTitle = resourceTitle || resourceRecord.title || resourceRecord.name || "Digital Resource Toolkit";
+    const resolvedUserId = providedUserId; // Never mutate guest user_id: null into arbitrary auth users during fulfillment
+
+    const normalizedCustomerEmail = customerEmail ? String(customerEmail).trim().toLowerCase() : null;
+    const cleanedCustomerName = customerName ? String(customerName).trim() : null;
+    const cleanedCustomerPhone = customerPhone ? String(customerPhone).trim() : null;
+
+    const dispatchResourceDeliveryEmail = (targetPurchase, targetPayment) => {
+      (async () => {
+        try {
+          if (await hasAlreadySent(cleanPaymentId, "resource_delivery")) {
+            console.log(`[Resource Fulfillment] Delivery email already sent for ${cleanPaymentId}, skipping.`);
+            return;
+          }
+          const toEmail = normalizedCustomerEmail || targetPurchase?.customer_email || null;
+          if (toEmail) {
+            await sendResourceDeliveryEmail({
+              to: toEmail,
+              customerName: cleanedCustomerName || targetPurchase?.customer_name || "Valued Customer",
+              resourceTitle: targetPayment?.item_title || effectiveResourceTitle,
+              resourceId: canonicalResourceId,
+              amount: authoritativeAmount,
+              currency: "INR",
+              orderId: cleanOrderId,
+              paymentId: cleanPaymentId
+            });
+          }
+        } catch (mailErr) {
+          console.warn("[Resource Fulfillment] Notice dispatching resource email:", mailErr?.message || mailErr);
+        }
+      })();
+    };
+
+    // 2. Atomic PostgreSQL RPC execution ONLY — FAIL CLOSED (NO JS DUAL-WRITE FALLBACK)
+    let rpcResult;
+    try {
+      rpcResult = await supabaseServer.rpc("fulfill_resource_purchase", {
+        p_user_id: resolvedUserId,
+        p_resource_id: canonicalResourceId,
+        p_amount: authoritativeAmount,
+        p_currency: "INR",
+        p_order_id: cleanOrderId,
+        p_payment_id: cleanPaymentId,
+        p_customer_name: cleanedCustomerName,
+        p_customer_email: normalizedCustomerEmail,
+        p_customer_phone: cleanedCustomerPhone,
+        p_resource_title: effectiveResourceTitle
+      });
+    } catch (rpcCallErr) {
+      const classified = classifyRpcExecutionFailure(
+        rpcCallErr,
+        "fulfill_resource_purchase",
+        "20261116000003_atomic_resource_payment_fulfillment.sql",
+        true
+      );
+      console.error("[Resource Fulfillment] Atomic RPC threw (failing closed):", classified);
+      return classified;
+    }
+
+    const { data: rpcData, error: rpcErr } = rpcResult || {};
+
+    if (rpcErr) {
+      const classified = classifyRpcExecutionFailure(
+        rpcErr,
+        "fulfill_resource_purchase",
+        "20261116000003_atomic_resource_payment_fulfillment.sql",
+        false
+      );
+      console.error("[Resource Fulfillment] Atomic RPC failed (failing closed):", classified);
+      return classified;
+    }
+
+    if (!rpcData || typeof rpcData !== "object" || rpcData.success !== true) {
+      console.error("[Resource Fulfillment] Atomic RPC rejected fulfillment:", rpcData?.error);
+      return {
+        success: false,
+        fulfilled: false,
+        retryable: false,
+        code: rpcData?.code || "FULFILLMENT_REJECTED",
+        error: rpcData?.error || "Resource purchase fulfillment rejected by database transaction guard."
+      };
+    }
+
+    dispatchResourceDeliveryEmail(rpcData.purchase, rpcData.payment);
     return {
       success: true,
       fulfilled: true,
-      already_fulfilled: false,
-      purchase: purchaseRecord || {
-        id: `res_pur_${Date.now()}`,
-        userId: resolvedUserId || "guest",
-        resourceId: cleanResourceId,
-        razorpayOrderId: cleanOrderId,
-        razorpayPaymentId: cleanPaymentId,
-        amount: numericAmount,
-        currency: finalCurrency,
-        status: "active",
-        purchasedAt: new Date().toISOString()
-      },
-      payment: paymentRecord,
-      lead_status: leadStatus,
-      lead_id: leadId,
-      resourceId: cleanResourceId,
+      already_fulfilled: Boolean(rpcData.already_fulfilled),
+      healed_ledger: Boolean(rpcData.healed_ledger),
+      healed_purchase: Boolean(rpcData.healed_purchase),
+      purchase: rpcData.purchase || null,
+      payment: rpcData.payment || null,
+      lead_status: rpcData.lead_status || (rpcData.already_fulfilled ? "already_exists" : "saved"),
+      lead_id: rpcData.lead_id || null,
+      resourceId: canonicalResourceId,
       orderId: cleanOrderId,
       paymentId: cleanPaymentId,
       resolvedUserId
@@ -1125,6 +1046,8 @@ export async function fulfillResourcePurchase({
     return {
       success: false,
       fulfilled: false,
+      retryable: true,
+      code: "UNEXPECTED_ERROR",
       error: err?.message || "An unexpected error occurred during resource fulfillment."
     };
   }

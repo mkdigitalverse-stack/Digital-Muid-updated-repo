@@ -501,6 +501,18 @@ async function main() {
             currency: "INR",
             email: "owner@example.com"
           };
+        },
+        async fetchMultipleRefund(paymentId: string) {
+          const items = paymentId.includes("refund")
+            ? [{ id: "rfnd_live_schema_02", payment_id: paymentId, amount: 118000, currency: "INR", status: "processed" }]
+            : [];
+          return { entity: "collection", count: items.length, items };
+        },
+        async fetchRefund(paymentId: string, refundId: string) {
+          if (paymentId.includes("refund") && refundId === "rfnd_live_schema_02") {
+            return { id: refundId, payment_id: paymentId, amount: 118000, currency: "INR", status: "processed" };
+          }
+          throw { error: { description: "Refund not found" } };
         }
       }
     });

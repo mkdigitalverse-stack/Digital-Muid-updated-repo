@@ -3,11 +3,13 @@ import {
   isWebhookConfigured,
   getRazorpayClient
 } from "./razorpay.js";
-import { isValidUUID } from "./supabaseServer.js";
+import { getSupabaseServerClient, isValidUUID } from "./supabaseServer.js";
 import {
+  calculateAuthoritativeCoursePrice,
   fulfillCourseEnrollment,
   fulfillResourcePurchase,
-  fulfillConsultationPayment
+  fulfillConsultationPayment,
+  toPaiseStrict
 } from "./paymentFulfillment.js";
 
 /**
@@ -107,14 +109,7 @@ export async function handleRazorpayWebhook(req, res) {
         // Attempt asynchronous enrollment / resource fulfillment
         let fulfillmentOutcome = { fulfilled: false };
         try {
-          const initialNotes = paymentEntity?.notes || payload?.payload?.order?.entity?.notes || {};
-          let allNotes = { ...initialNotes };
-          let courseId = allNotes.courseId;
-          let resourceId = allNotes.resourceId;
-          let itemType = allNotes.itemType;
-          let userId = allNotes.userId;
-
-          // Authoritative order retrieval: check payload order entity first, then query gateway SDK if needed
+          // Authoritative order retrieval: check signed payload order entity first, then query gateway SDK if needed
           let authoritativeOrder = null;
           let orderEntityMismatch = false;
           const payloadOrderEntity = payload?.payload?.order?.entity;
@@ -137,17 +132,29 @@ export async function handleRazorpayWebhook(req, res) {
             }
           }
 
-          if (authoritativeOrder?.notes) {
-            // Authoritative order notes strictly take precedence over payment entity notes
-            allNotes = { ...allNotes, ...authoritativeOrder.notes };
-            courseId = authoritativeOrder.notes.courseId || courseId;
-            resourceId = authoritativeOrder.notes.resourceId || resourceId;
-            itemType = authoritativeOrder.notes.itemType || itemType;
-            userId = authoritativeOrder.notes.userId || userId;
-          }
+          // Fail closed whenever Razorpay client is unavailable or authoritative order cannot be retrieved/verified
+          const hasAuthoritativeOrder = Boolean(razorpay && authoritativeOrder && !orderEntityMismatch);
+          const trustedNotes = hasAuthoritativeOrder ? (authoritativeOrder?.notes || {}) : {};
 
-          const amountInPaise = Number(paymentEntity?.amount || 0);
-          const amountInRupees = amountInPaise / 100;
+          const courseId = trustedNotes.courseId;
+          const resourceId = trustedNotes.resourceId;
+          const itemType = trustedNotes.itemType;
+          const normalizedItemType = String(itemType || "").trim().toLowerCase();
+          const userId = trustedNotes.userId;
+
+          const rawPaymentAmount = paymentEntity?.amount;
+          const amountInPaise =
+            (typeof rawPaymentAmount === "number" ||
+              (typeof rawPaymentAmount === "string" && rawPaymentAmount.trim() !== ""))
+              ? Number(rawPaymentAmount)
+              : NaN;
+          const rawOrderAmount = authoritativeOrder?.amount;
+          const orderAmountInPaise =
+            (typeof rawOrderAmount === "number" ||
+              (typeof rawOrderAmount === "string" && rawOrderAmount.trim() !== ""))
+              ? Number(rawOrderAmount)
+              : NaN;
+          const amountInRupees = Number.isSafeInteger(amountInPaise) ? amountInPaise / 100 : NaN;
           const currency = String(paymentEntity?.currency || "").trim().toUpperCase();
 
           const isPaymentCaptured = Boolean(
@@ -161,62 +168,63 @@ export async function handleRazorpayWebhook(req, res) {
             orderId &&
             paymentEntity.order_id === orderId &&
             !orderEntityMismatch &&
-            (!authoritativeOrder || authoritativeOrder.id === orderId)
+            authoritativeOrder &&
+            authoritativeOrder.id === orderId
           );
           const isCurrencyValid = Boolean(
             currency === "INR" &&
-            (!authoritativeOrder || String(authoritativeOrder.currency || "").toUpperCase() === "INR")
+            authoritativeOrder &&
+            String(authoritativeOrder.currency || "").toUpperCase() === "INR"
           );
           const isAmountValid = Boolean(
-            Number.isFinite(amountInPaise) &&
+            Number.isSafeInteger(amountInPaise) &&
             amountInPaise > 0 &&
-            (!authoritativeOrder || (Number(authoritativeOrder.amount) > 0 && Number(amountInPaise) === Number(authoritativeOrder.amount)))
-          );
-          const hasAuthoritativeOrderWhenRequired = Boolean(
-            authoritativeOrder || (event === "payment.captured" && !razorpay)
+            Number.isSafeInteger(orderAmountInPaise) &&
+            orderAmountInPaise > 0 &&
+            amountInPaise === orderAmountInPaise
           );
 
-          if (resourceId || itemType === "resource") {
+          if (!hasAuthoritativeOrder) {
+            console.warn(
+              `[Razorpay Webhook] Rejected fulfillment for ${event} (order ${orderId?.slice(0, 14) || "missing"}): Authoritative order or Razorpay client unavailable.`
+            );
+          } else if (normalizedItemType === "resource") {
             if (!orderId || !paymentId || !paymentEntity) {
               console.warn("[Razorpay Webhook] Resource rejected: Missing order ID, payment ID, or payment entity.");
             } else if (!isPaymentCaptured) {
               console.warn(`[Razorpay Webhook] Resource rejected: Payment ${paymentId?.slice(0, 14)} is not in confirmed captured status (status=${paymentEntity?.status}).`);
             } else if (!isOrderRelationshipValid) {
               console.warn(`[Razorpay Webhook] Resource rejected: Payment order_id mismatch for order ${orderId?.slice(0, 14)}...`);
-            } else if (!hasAuthoritativeOrderWhenRequired) {
-              console.warn(`[Razorpay Webhook] Resource rejected: Authoritative order unavailable for ${event} (order ${orderId?.slice(0, 14)}...).`);
             } else if (!isCurrencyValid) {
               console.warn(`[Razorpay Webhook] Resource rejected: Currency mismatch (expected INR, received ${currency}).`);
             } else if (!isAmountValid) {
               console.warn(`[Razorpay Webhook] Resource rejected: Amount mismatch (order: ${authoritativeOrder?.amount}, payment: ${amountInPaise}).`);
+            } else if (!resourceId || typeof resourceId !== "string" || !resourceId.trim()) {
+              console.warn("[Razorpay Webhook] Resource rejected: Missing resourceId in authoritative order notes.");
             } else {
               fulfillmentOutcome = await fulfillResourcePurchase({
-                userId,
-                resourceId,
+                userId: isValidUUID(userId) ? String(userId).trim() : null,
+                resourceId: resourceId.trim(),
                 amount: amountInRupees,
                 currency,
                 orderId,
                 paymentId,
-                customerName: allNotes.customerName || "",
-                customerEmail: allNotes.customerEmail || paymentEntity?.email || "",
-                customerPhone: allNotes.customerPhone || paymentEntity?.contact || "",
-                resourceTitle: allNotes.resourceTitle || ""
+                customerName: trustedNotes.customerName || "",
+                customerEmail: trustedNotes.customerEmail || paymentEntity?.email || "",
+                customerPhone: trustedNotes.customerPhone || paymentEntity?.contact || "",
+                resourceTitle: trustedNotes.resourceTitle || ""
               });
 
               console.log(
-                `[Razorpay Webhook] Resource fulfillment result for payment ${paymentId?.slice(0, 14)}...: fulfilled=${fulfillmentOutcome.fulfilled}, already_fulfilled=${fulfillmentOutcome.already_fulfilled}`
+                `[Razorpay Webhook] Resource fulfillment result for payment ${paymentId?.slice(0, 14)}...: fulfilled=${Boolean(fulfillmentOutcome.fulfilled)}, already_fulfilled=${Boolean(fulfillmentOutcome.already_fulfilled)}`
               );
             }
-          } else if (
-            itemType === "consultation" ||
-            allNotes.productId === "31bbb9bf-ce10-4da4-a517-dfc673f9b875" ||
-            Boolean(allNotes.bookingDate && (allNotes.customerEmail || paymentEntity?.email))
-          ) {
-            const customerEmail = String(allNotes.customerEmail || paymentEntity?.email || "").trim();
-            const customerName = String(allNotes.customerName || "").trim();
-            const customerPhone = String(allNotes.customerPhone || paymentEntity?.contact || "").trim();
-            const bookingDate = String(allNotes.bookingDate || allNotes.date || "").trim();
-            const bookingTime = String(allNotes.bookingTime || allNotes.time || "").trim();
+          } else if (normalizedItemType === "consultation") {
+            const customerEmail = String(trustedNotes.customerEmail || paymentEntity?.email || "").trim();
+            const customerName = String(trustedNotes.customerName || "").trim();
+            const customerPhone = String(trustedNotes.customerPhone || paymentEntity?.contact || "").trim();
+            const bookingDate = String(trustedNotes.bookingDate || trustedNotes.date || "").trim();
+            const bookingTime = String(trustedNotes.bookingTime || trustedNotes.time || "").trim();
 
             if (!orderId || !paymentId || !paymentEntity) {
               console.warn("[Razorpay Webhook] Consultation rejected: Missing order ID, payment ID, or payment entity.");
@@ -224,8 +232,6 @@ export async function handleRazorpayWebhook(req, res) {
               console.warn(`[Razorpay Webhook] Consultation rejected: Payment ${paymentId?.slice(0, 14)} is not in confirmed captured status.`);
             } else if (!isOrderRelationshipValid) {
               console.warn(`[Razorpay Webhook] Consultation rejected: Payment order_id does not match order ${orderId?.slice(0, 14)}...`);
-            } else if (!authoritativeOrder) {
-              console.warn(`[Razorpay Webhook] Consultation rejected: Authoritative order could not be retrieved from gateway for order ${orderId?.slice(0, 14)}...`);
             } else if (!isCurrencyValid) {
               console.warn(`[Razorpay Webhook] Consultation rejected: Currency mismatch (expected INR, received ${currency})`);
             } else if (!isAmountValid) {
@@ -234,75 +240,113 @@ export async function handleRazorpayWebhook(req, res) {
               console.warn(`[Razorpay Webhook] Consultation rejected: Missing required booking schedule or email metadata.`);
             } else {
               fulfillmentOutcome = await fulfillConsultationPayment({
-                userId: isValidUUID(userId) ? userId : null,
+                userId: isValidUUID(userId) ? String(userId).trim() : null,
                 bookingDetails: {
                   customerName: customerName || "Valued Client",
                   customerEmail,
                   customerPhone,
-                  businessName: String(allNotes.businessName || "").trim(),
-                  primaryChallenge: String(allNotes.primaryChallenge || "Business Growth Strategy").trim(),
-                  desiredOutcome: String(allNotes.desiredOutcome || "").trim(),
-                  website: allNotes.website ? String(allNotes.website).trim() : null,
-                  linkedin: allNotes.linkedin ? String(allNotes.linkedin).trim() : null,
+                  businessName: String(trustedNotes.businessName || "").trim(),
+                  primaryChallenge: String(trustedNotes.primaryChallenge || "Business Growth Strategy").trim(),
+                  desiredOutcome: String(trustedNotes.desiredOutcome || "").trim(),
+                  website: trustedNotes.website ? String(trustedNotes.website).trim() : null,
+                  linkedin: trustedNotes.linkedin ? String(trustedNotes.linkedin).trim() : null,
                   date: bookingDate,
-                  time: bookingTime,
-                  order_total_amount: (amountInPaise / 100).toFixed(2)
+                  time: bookingTime
                 },
                 orderId,
                 paymentId,
                 amount: amountInRupees,
                 currency: currency,
-                productId: allNotes.productId || "31bbb9bf-ce10-4da4-a517-dfc673f9b875"
+                productId: trustedNotes.productId || "31bbb9bf-ce10-4da4-a517-dfc673f9b875"
               });
 
               console.log(
                 `[Razorpay Webhook] Consultation fulfillment outcome for payment ${paymentId?.slice(0, 14)}...: fulfilled=${Boolean(fulfillmentOutcome.fulfilled)}, already_fulfilled=${Boolean(fulfillmentOutcome.already_fulfilled)}`
               );
             }
-          } else if (
-            courseId &&
-            userId &&
-            isValidUUID(courseId) &&
-            isValidUUID(userId) &&
-            paymentId &&
-            orderId
-          ) {
-            if (!paymentEntity || !isPaymentCaptured) {
+          } else if (normalizedItemType === "course") {
+            if (!courseId || !userId || !isValidUUID(courseId) || !isValidUUID(userId) || !paymentId || !orderId) {
+              console.warn(`[Razorpay Webhook] Course rejected: Missing or invalid courseId/userId/orderId/paymentId.`);
+            } else if (!paymentEntity || !isPaymentCaptured) {
               console.warn(`[Razorpay Webhook] Course rejected: Payment ${paymentId?.slice(0, 14)} is not in confirmed captured status (status=${paymentEntity?.status}).`);
             } else if (!isOrderRelationshipValid) {
               console.warn(`[Razorpay Webhook] Course rejected: Payment order_id mismatch for order ${orderId?.slice(0, 14)}...`);
-            } else if (!hasAuthoritativeOrderWhenRequired) {
-              console.warn(`[Razorpay Webhook] Course rejected: Authoritative order unavailable for ${event} (order ${orderId?.slice(0, 14)}...).`);
             } else if (!isCurrencyValid) {
               console.warn(`[Razorpay Webhook] Course rejected: Currency mismatch (expected INR, received ${currency}).`);
             } else if (!isAmountValid) {
               console.warn(`[Razorpay Webhook] Course rejected: Amount mismatch (order: ${authoritativeOrder?.amount}, payment: ${amountInPaise}).`);
             } else {
-              const studentEmail = String(allNotes.customerEmail || paymentEntity?.email || "").trim() || null;
-              const studentName = String(allNotes.customerName || "").trim() || null;
+              const supabaseServer = getSupabaseServerClient();
+              if (!supabaseServer) {
+                console.warn("[Razorpay Webhook] Course rejected: Database service client is unavailable.");
+              } else {
+                const { data: courseRecord, error: courseErr } = await supabaseServer
+                  .from("courses")
+                  .select("id, slug, title, price, offer_price, offer_expires_at, currency, status")
+                  .eq("id", courseId)
+                  .maybeSingle();
 
-              fulfillmentOutcome = await fulfillCourseEnrollment({
-                userId,
-                courseId,
-                amount: amountInRupees,
-                currency,
-                orderId,
-                paymentId,
-                studentEmail,
-                studentName
-              });
+                const courseStatus = String(courseRecord?.status || "").trim().toLowerCase();
+                if (courseErr || !courseRecord || courseStatus !== "published") {
+                  console.warn(`[Razorpay Webhook] Course rejected: Course ${courseId} is not found or not published (status=${courseStatus || "missing"}).`);
+                } else {
+                  const { effectivePrice, currency: courseCurrency } = calculateAuthoritativeCoursePrice(courseRecord);
+                  const expectedCoursePaise = toPaiseStrict(effectivePrice);
+                  if (
+                    !expectedCoursePaise ||
+                    currency !== courseCurrency ||
+                    amountInPaise !== expectedCoursePaise
+                  ) {
+                    console.warn(
+                      `[Razorpay Webhook] Course rejected: Price/currency mismatch (expected ${courseCurrency} ${expectedCoursePaise} paise, got ${currency} ${amountInPaise} paise).`
+                    );
+                  } else {
+                    const studentEmail = String(trustedNotes.customerEmail || paymentEntity?.email || "").trim() || null;
+                    const studentName = String(trustedNotes.customerName || "").trim() || null;
 
-              console.log(
-                `[Razorpay Webhook] Course fulfillment result for payment ${paymentId}: fulfilled=${fulfillmentOutcome.fulfilled}, already_fulfilled=${fulfillmentOutcome.already_fulfilled}`
-              );
+                    fulfillmentOutcome = await fulfillCourseEnrollment({
+                      userId: String(userId).trim(),
+                      courseId: String(courseId).trim(),
+                      amount: expectedCoursePaise / 100,
+                      currency,
+                      orderId,
+                      paymentId,
+                      studentEmail,
+                      studentName
+                    });
+
+                    console.log(
+                      `[Razorpay Webhook] Course fulfillment result for payment ${paymentId}: fulfilled=${Boolean(fulfillmentOutcome.fulfilled)}, already_fulfilled=${Boolean(fulfillmentOutcome.already_fulfilled)}`
+                    );
+                  }
+                }
+              }
             }
           } else {
             console.warn(
-              `[Razorpay Webhook] Insufficient trusted metadata to auto-fulfill webhook event: courseId=${courseId}, resourceId=${resourceId}, itemType=${itemType}, userId=${userId}, paymentId=${paymentId}`
+              `[Razorpay Webhook] Rejected webhook event due to missing or unrecognized authoritative order itemType='${itemType || "missing"}': courseId=${courseId}, resourceId=${resourceId}, userId=${userId}, paymentId=${paymentId}`
             );
           }
         } catch (fErr) {
           console.error("[Razorpay Webhook] Error executing webhook fulfillment:", fErr?.message || fErr);
+          fulfillmentOutcome = {
+            fulfilled: false,
+            retryable: true,
+            code: "RPC_UNAVAILABLE",
+            error: fErr?.message || "Unexpected error executing webhook fulfillment."
+          };
+        }
+
+        if (fulfillmentOutcome?.retryable === true) {
+          return res.status(503).json({
+            status: "retry_required",
+            event,
+            acknowledged: false,
+            fulfilled: false,
+            retryable: true,
+            code: fulfillmentOutcome.code || "RPC_UNAVAILABLE",
+            error: fulfillmentOutcome.error || "Fulfillment service temporarily unavailable."
+          });
         }
 
         return res.status(200).json({
