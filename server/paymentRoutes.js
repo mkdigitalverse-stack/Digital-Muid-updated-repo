@@ -2973,17 +2973,19 @@ async function handleInvoiceOrCreditNoteRequest(req, res, { forceCreditNote = fa
       ""
     ).toLowerCase();
 
-    // 4. Obtain Student Profile & Enrollment data for persistent IDs & Billing Address
+    // 4. Obtain Student Profile & Enrollment data (compatible with verified live schema)
     const targetUserId = paymentRecord?.user_id || bookingRecord?.user_id || resourceRecord?.user_id || user?.id || null;
     let profileData = null;
     try {
       if (targetUserId) {
-        const { data: pData } = await supabaseServer
+        const { data: pData, error: pErr } = await supabaseServer
           .from("profiles")
-          .select("full_name, phone, student_id, state, billing_address")
+          .select("full_name, phone")
           .eq("id", targetUserId)
           .maybeSingle();
-        if (pData) profileData = pData;
+        if (!pErr && pData) {
+          profileData = pData;
+        }
       }
     } catch {}
 
@@ -3009,8 +3011,8 @@ async function handleInvoiceOrCreditNoteRequest(req, res, { forceCreditNote = fa
     const customerName = profileData?.full_name || bookingRecord?.customer_name || resourceRecord?.customer_name || user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split("@")[0] || "Valued Student";
     const customerEmail = paymentRecord?.customer_email || bookingRecord?.customer_email || resourceRecord?.customer_email || rzpPayment?.email || user?.email || "";
     const customerPhone = profileData?.phone || bookingRecord?.customer_phone || resourceRecord?.customer_phone || rzpPayment?.contact || "N/A";
-    const customerState = profileData?.state || bookingRecord?.customer_state || paymentRecord?.customer_state || "";
-    const customerBillingAddress = profileData?.billing_address || "";
+    const customerState = bookingRecord?.customer_state || paymentRecord?.customer_state || "";
+    const customerBillingAddress = "";
     const itemTitle = paymentRecord?.item_title || (bookingRecord ? "Business Growth Strategy Consultation" : (resourceRecord ? "Digital Resource Toolkit / Asset" : "Digital Growth Masterclass"));
     const rawItemType = paymentRecord?.item_type || (bookingRecord ? "consultation" : (resourceRecord ? "resource" : "course"));
     const amount = Number(paymentRecord?.amount || bookingRecord?.total_amount || resourceRecord?.amount || (rzpPayment?.amount ? rzpPayment.amount / 100 : 0));

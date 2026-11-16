@@ -5,16 +5,67 @@ import { formatStudentId } from '../utils/studentId';
 
 export interface ProfileDbRow {
   id: string;
-  student_id?: string | null;
   full_name: string | null;
   avatar_url: string | null;
   phone: string | null;
   headline: string | null;
   bio: string | null;
-  state?: string | null;
-  billing_address?: string | null;
   created_at: string;
   updated_at: string;
+  // Optional forward-compatible V4.3 columns (not yet present in live public.profiles)
+  student_id?: string | null;
+  state?: string | null;
+}
+
+export interface ProfileUpdateInput {
+  fullName?: string | null;
+  avatarUrl?: string | null;
+  phone?: string | null;
+  headline?: string | null;
+  bio?: string | null;
+}
+
+export interface ProfileUpdateDbPayload {
+  full_name?: string;
+  avatar_url?: string | null;
+  phone?: string | null;
+  headline?: string | null;
+  bio?: string | null;
+  updated_at: string;
+}
+
+function normalizeOptionalProfileText(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const trimmed = String(value).trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function buildProfileUpdatePayload(updates: ProfileUpdateInput): ProfileUpdateDbPayload {
+  const payload: ProfileUpdateDbPayload = {
+    updated_at: new Date().toISOString()
+  };
+
+  if (updates.fullName !== undefined && updates.fullName !== null) {
+    const trimmedFullName = String(updates.fullName).trim();
+    if (trimmedFullName.length > 0) {
+      payload.full_name = trimmedFullName;
+    }
+  }
+
+  const normalizedAvatar = normalizeOptionalProfileText(updates.avatarUrl);
+  if (normalizedAvatar !== undefined) payload.avatar_url = normalizedAvatar;
+
+  const normalizedPhone = normalizeOptionalProfileText(updates.phone);
+  if (normalizedPhone !== undefined) payload.phone = normalizedPhone;
+
+  const normalizedHeadline = normalizeOptionalProfileText(updates.headline);
+  if (normalizedHeadline !== undefined) payload.headline = normalizedHeadline;
+
+  const normalizedBio = normalizeOptionalProfileText(updates.bio);
+  if (normalizedBio !== undefined) payload.bio = normalizedBio;
+
+  return payload;
 }
 
 export function mapProfileFromDb(row: ProfileDbRow): UserProfile {
@@ -26,8 +77,7 @@ export function mapProfileFromDb(row: ProfileDbRow): UserProfile {
     phone: row.phone,
     headline: row.headline,
     bio: row.bio,
-    state: row.state,
-    billingAddress: row.billing_address,
+    state: row.state ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -115,37 +165,25 @@ export const profileService = {
   },
 
   /**
-   * Updates an existing profile row.
+   * Updates an existing profile row using strictly verified live columns.
    */
   async updateProfile(
     userId: string,
-    updates: {
-      fullName?: string;
-      avatarUrl?: string;
-      phone?: string;
-      headline?: string;
-      bio?: string;
-      state?: string;
-      billingAddress?: string;
-    }
+    updates: ProfileUpdateInput,
+    client: any = supabase
   ): Promise<{ data: UserProfile | null; error: any }> {
-    if (!isSupabaseConfigured()) {
+    if (client === supabase && !isSupabaseConfigured()) {
       return { data: null, error: 'Database not configured' };
     }
 
     try {
-      const payload: Partial<ProfileDbRow> = {
-        updated_at: new Date().toISOString()
-      };
-      if (updates.fullName !== undefined) payload.full_name = updates.fullName;
-      if (updates.avatarUrl !== undefined) payload.avatar_url = updates.avatarUrl;
-      if (updates.phone !== undefined) payload.phone = updates.phone;
-      if (updates.headline !== undefined) payload.headline = updates.headline;
-      if (updates.bio !== undefined) payload.bio = updates.bio;
-      if (updates.state !== undefined) payload.state = updates.state;
-      if (updates.billingAddress !== undefined) payload.billing_address = updates.billingAddress;
+      if (updates.fullName !== undefined && String(updates.fullName ?? '').trim().length === 0) {
+        return { data: null, error: 'Full name cannot be blank.' };
+      }
 
-      const { data, error } = await supabase
+      const payload = buildProfileUpdatePayload(updates);
+
+      const { data, error } = await client
         .from('profiles')
         .update(payload)
         .eq('id', userId)

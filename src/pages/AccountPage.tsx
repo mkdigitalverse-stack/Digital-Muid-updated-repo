@@ -127,8 +127,6 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
   const [headline, setHeadline] = useState('');
   const [bio, setBio] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
-  const [billingState, setBillingState] = useState('');
-  const [billingAddress, setBillingAddress] = useState('');
 
   // Profile State Status
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -161,8 +159,6 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
       setHeadline(userProfile.headline || '');
       setBio(userProfile.bio || '');
       setAvatarUrl(userProfile.avatarUrl || '');
-      setBillingState(userProfile.state || '');
-      setBillingAddress(userProfile.billingAddress || '');
     } else if (currentUser) {
       const fallbackName =
         currentUser.user_metadata?.full_name ||
@@ -218,12 +214,10 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
     try {
       const res = await updateStudentProfile({
         fullName: fullName.trim(),
-        phone: phone.trim() || undefined,
-        headline: headline.trim() || undefined,
-        bio: bio.trim() || undefined,
-        avatarUrl: avatarUrl.trim() || undefined,
-        state: billingState.trim() || undefined,
-        billingAddress: billingAddress.trim() || undefined
+        phone: phone.trim() || null,
+        headline: headline.trim() || null,
+        bio: bio.trim() || null,
+        avatarUrl: avatarUrl.trim() || null
       });
 
       if (res.success) {
@@ -246,8 +240,17 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
       setHeadline(userProfile.headline || '');
       setBio(userProfile.bio || '');
       setAvatarUrl(userProfile.avatarUrl || '');
-      setBillingState(userProfile.state || '');
-      setBillingAddress(userProfile.billingAddress || '');
+    } else if (currentUser) {
+      const fallbackName =
+        currentUser.user_metadata?.full_name ||
+        currentUser.user_metadata?.name ||
+        currentUser.email?.split('@')[0] ||
+        '';
+      setFullName(fallbackName);
+      setPhone('');
+      setHeadline('');
+      setBio('');
+      setAvatarUrl('');
     }
     setProfileSuccessMsg(null);
     setProfileErrorMsg(null);
@@ -592,41 +595,6 @@ export const AccountPage: React.FC<AccountPageProps> = ({ navigate, initialTab }
                         placeholder="Share a brief overview of your business goals, target skills, or focus areas..."
                         className="w-full p-3.5 rounded-xl border border-slate-300 focus:border-[#FF6B00] focus:ring-1 focus:ring-[#FF6B00] outline-none text-sm text-slate-900 placeholder:text-slate-400 transition-all resize-y"
                       />
-                    </div>
-                  </div>
-
-                  {/* Billing State / Place of Supply for GST */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
-                        State / UT (Place of Supply for GST)
-                      </label>
-                      <input
-                        type="text"
-                        value={billingState}
-                        onChange={(e) => setBillingState(e.target.value)}
-                        placeholder="e.g. Uttar Pradesh, Maharashtra, Delhi"
-                        className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-[#FF6B00] focus:ring-1 focus:ring-[#FF6B00] outline-none text-sm text-slate-900 placeholder:text-slate-400 transition-all"
-                      />
-                      <p className="text-[11px] text-slate-500">
-                        Required for accurate CGST/SGST (intra-state UP) or IGST (inter-state) tax invoicing.
-                      </p>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
-                        Billing Address (Optional)
-                      </label>
-                      <input
-                        type="text"
-                        value={billingAddress}
-                        onChange={(e) => setBillingAddress(e.target.value)}
-                        placeholder="e.g. Street, City, PIN Code"
-                        className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-[#FF6B00] focus:ring-1 focus:ring-[#FF6B00] outline-none text-sm text-slate-900 placeholder:text-slate-400 transition-all"
-                      />
-                      <p className="text-[11px] text-slate-500">
-                        Optional billing address printed on official tax receipts.
-                      </p>
                     </div>
                   </div>
 

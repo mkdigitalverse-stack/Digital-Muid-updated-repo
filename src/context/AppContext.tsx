@@ -1629,21 +1629,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const allowedUpdates: {
       fullName?: string;
-      avatarUrl?: string;
-      phone?: string;
-      headline?: string;
-      bio?: string;
-      state?: string;
-      billingAddress?: string;
+      avatarUrl?: string | null;
+      phone?: string | null;
+      headline?: string | null;
+      bio?: string | null;
     } = {};
 
     if (updates.fullName !== undefined && updates.fullName !== null) allowedUpdates.fullName = updates.fullName;
-    if (updates.avatarUrl !== undefined && updates.avatarUrl !== null) allowedUpdates.avatarUrl = updates.avatarUrl;
-    if (updates.phone !== undefined && updates.phone !== null) allowedUpdates.phone = updates.phone;
-    if (updates.headline !== undefined && updates.headline !== null) allowedUpdates.headline = updates.headline;
-    if (updates.bio !== undefined && updates.bio !== null) allowedUpdates.bio = updates.bio;
-    if (updates.state !== undefined && updates.state !== null) allowedUpdates.state = updates.state;
-    if (updates.billingAddress !== undefined && updates.billingAddress !== null) allowedUpdates.billingAddress = updates.billingAddress;
+    if (updates.avatarUrl !== undefined) allowedUpdates.avatarUrl = updates.avatarUrl;
+    if (updates.phone !== undefined) allowedUpdates.phone = updates.phone;
+    if (updates.headline !== undefined) allowedUpdates.headline = updates.headline;
+    if (updates.bio !== undefined) allowedUpdates.bio = updates.bio;
 
     try {
       const res = await profileService.updateProfile(currentUser.id, allowedUpdates);
