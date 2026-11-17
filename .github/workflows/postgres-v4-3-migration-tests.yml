@@ -1,0 +1,120 @@
+name: Disposable PostgreSQL 17 V4.3 Migration & Concurrency Tests
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/postgres-v4-3-migration-tests.yml'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+jobs:
+  chronological-replay-postgres-17:
+    name: Chronological Migration Replay & Behavioral Tests (PG 17)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci_ephemeral_disposable_pg17_password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    # Workflow-enforced locality: runner connects ONLY to loopback 127.0.0.1:5432 (Docker service port mapping).
+    # Inside the container, SQL bootstrap additionally permits private Docker bridge IPs (RFC1918/ULA)
+    # alongside loopback/Unix socket, while the Node runner requires loopback PGHOST explicitly.
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: ci_ephemeral_disposable_pg17_password
+
+    steps:
+      - name: Mask ephemeral CI database password
+        run: echo "::add-mask::${PGPASSWORD}"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install PostgreSQL 17 client tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+          psql --version
+
+      - name: Verify explicit chronological migration manifest matches repository
+        run: |
+          set -euo pipefail
+          ACTUAL_LIST=$(mktemp)
+          MANIFEST_LIST=$(mktemp)
+          find supabase/migrations -maxdepth 1 -type f -name '*.sql' | LC_ALL=C sort > "$ACTUAL_LIST"
+          grep -vE '^\s*(#|$)' supabase/tests/ci_migration_manifest.txt > "$MANIFEST_LIST"
+          diff -u "$MANIFEST_LIST" "$ACTUAL_LIST"
+          rm -f "$ACTUAL_LIST" "$MANIFEST_LIST"
+
+      - name: Initialize disposable DB and replay all 28 migrations chronologically
+        run: |
+          set -euo pipefail
+          CI_DB="digitalmuid_ci_chronological_replay"
+          export PGDATABASE="$CI_DB"
+          dropdb --if-exists "$CI_DB"
+          createdb "$CI_DB"
+
+          echo "=== Step 1: Applying minimal CI prerequisites bootstrap ==="
+          psql -v ON_ERROR_STOP=1 -d "$CI_DB" -f supabase/tests/ci_bootstrap_prerequisites.sql
+
+          echo "=== Step 2: Replaying explicit chronological migration manifest (no global -1 wrapper) ==="
+          while IFS= read -r migration_file; do
+            [ -n "$migration_file" ] || continue
+            echo "Applying migration: $migration_file"
+            # Execute without --single-transaction so 20261107000002 CONCURRENTLY statements run cleanly
+            psql -v ON_ERROR_STOP=1 -d "$CI_DB" -f "$migration_file"
+          done < supabase/tests/ci_migration_manifest.txt
+
+      - name: Run actual PostgreSQL RPC, privilege, precision & lifecycle integration tests
+        run: |
+          set -euo pipefail
+          CI_DB="digitalmuid_ci_chronological_replay"
+          psql -v ON_ERROR_STOP=1 -d "$CI_DB" -f supabase/tests/v4_3_postgres_integration_test.sql
+
+      - name: Install npm devDependencies and run separate-connection concurrency tests
+        run: |
+          set -euo pipefail
+          export PGDATABASE="digitalmuid_ci_chronological_replay"
+          npm ci --ignore-scripts
+          node supabase/tests/v4_3_postgres_concurrency_test.mjs
+
+      - name: Run isolated static & mocked JS regression suites (kept separate from actual PG results)
+        run: |
+          set -euo pipefail
+          node tests/ci_harness_regression_test.js
+          node tests/p0_payment_security_test.js
+          node tests/v4_3_remediation_regression_test.js
+          node tests/v4_3_unified_migration_audit_test.js
+
+      - name: Always drop disposable test database
+        if: always()
+        run: |
+          set -euo pipefail
+          dropdb --if-exists "digitalmuid_ci_chronological_replay"
