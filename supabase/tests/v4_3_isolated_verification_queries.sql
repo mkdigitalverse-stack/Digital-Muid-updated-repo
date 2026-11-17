@@ -924,7 +924,12 @@ BEGIN
     IF v_row.indexprs IS NOT NULL
        OR v_row.indnkeyatts IS DISTINCT FROM 1
        OR v_row.indnatts IS DISTINCT FROM 1
-       OR v_row.indkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_attnum] THEN
+       OR ARRAY(
+            SELECT u.attnum
+            FROM pg_catalog.unnest(v_row.indkey::SMALLINT[])
+                 WITH ORDINALITY AS u(attnum, ord)
+            ORDER BY u.ord
+          ) IS DISTINCT FROM ARRAY[v_attnum] THEN
       RAISE EXCEPTION '3 FAILURE: Index public.% must index exclusively single column public.%.(%) with zero expressions or INCLUDE columns (indnkeyatts=%, indnatts=%, indkey=%, def=%).',
         v_spec.idx_name, v_spec.tbl_name, v_spec.col_name, v_row.indnkeyatts, v_row.indnatts, v_row.indkey, v_row.idx_def;
     END IF;

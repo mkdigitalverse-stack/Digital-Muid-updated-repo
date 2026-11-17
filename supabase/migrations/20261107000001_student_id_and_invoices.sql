@@ -592,6 +592,12 @@ DECLARE
   v_gate_attnum SMALLINT;
   v_gate_idx RECORD;
   v_gate_pred_regex TEXT;
+  v_gate_ws_pattern TEXT :=
+    ' (?:' || pg_catalog.chr(9)  || '|\\t|\\x09|\\011)'
+    || '(?:' || pg_catalog.chr(10) || '|\\n|\\x0a|\\012)'
+    || '(?:' || pg_catalog.chr(13) || '|\\r|\\x0d|\\015)'
+    || '(?:' || pg_catalog.chr(12) || '|\\f|\\x0c|\\014)'
+    || '(?:' || pg_catalog.chr(11) || '|\\v|\\x0b|\\013)';
   v_candidate RECORD;
   v_payment RECORD;
   v_match_count INTEGER := 0;
@@ -682,7 +688,12 @@ BEGIN
     END IF;
 
     IF v_gate_idx.indexprs IS NOT NULL
-       OR v_gate_idx.indkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_gate_attnum] THEN
+       OR ARRAY(
+            SELECT u.attnum
+            FROM pg_catalog.unnest(v_gate_idx.indkey::SMALLINT[])
+                 WITH ORDINALITY AS u(attnum, ord)
+            ORDER BY u.ord
+          ) IS DISTINCT FROM ARRAY[v_gate_attnum] THEN
       RAISE EXCEPTION 'Credit note processing halted: Index public.% does not exclusively index column public.credit_notes.(%) (%). Complete Phase B or correct the index definition before resuming refunds.',
         v_gate_spec.idx_name, v_gate_spec.col_name, v_gate_idx.idx_def;
     END IF;
@@ -690,7 +701,7 @@ BEGIN
     v_gate_pred_regex :=
       '^\s*\(*\s*' || v_gate_spec.col_name || '\s+IS\s+NOT\s+NULL\s*\)*\s+AND\s+\(*\s*(?:pg_catalog\.)?btrim\(\s*\(*\s*'
       || v_gate_spec.col_name
-      || '(?:\)*(?:::text)?)\s*,\s*E?'' (?:\t|\\t|\\x09|\\011)(?:\n|\\n|\\x0a|\\012)(?:\r|\\r|\\x0d|\\015)(?:\f|\\f|\\x0c|\\014)(?:\v|\\v|\\x0b|\\013)''(?:::text)?\s*\)\s*(?:<>|!=)\s*''''(?:::text)?\s*\)*\s*$';
+      || '(?:\)*(?:::text)?)\s*,\s*E?''' || v_gate_ws_pattern || '''(?:::text)?\s*\)(?:::text)?\s*(?:<>|!=)\s*''''(?:::text)?\s*\)*\s*$';
 
     IF v_gate_idx.indpred IS NULL
        OR v_gate_idx.pred_expr IS NULL

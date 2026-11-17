@@ -73,7 +73,12 @@ BEGIN
       AND i.indisvalid = true
       AND i.indisready = true
       AND i.indexprs IS NULL
-      AND i.indkey::SMALLINT[] = ARRAY[a.attnum]
+      AND ARRAY(
+            SELECT u.attnum
+            FROM pg_catalog.unnest(i.indkey::SMALLINT[])
+                 WITH ORDINALITY AS u(attnum, ord)
+            ORDER BY u.ord
+          ) = ARRAY[a.attnum]
   ) INTO v_has_pay_unique;
 
   IF NOT v_has_pay_unique THEN

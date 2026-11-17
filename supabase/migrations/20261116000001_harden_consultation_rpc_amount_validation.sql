@@ -159,6 +159,12 @@ DECLARE
   v_attnum SMALLINT;
   v_idx RECORD;
   v_pred_regex TEXT;
+  v_ws_pattern TEXT :=
+    ' (?:' || pg_catalog.chr(9)  || '|\\t|\\x09|\\011)'
+    || '(?:' || pg_catalog.chr(10) || '|\\n|\\x0a|\\012)'
+    || '(?:' || pg_catalog.chr(13) || '|\\r|\\x0d|\\015)'
+    || '(?:' || pg_catalog.chr(12) || '|\\f|\\x0c|\\014)'
+    || '(?:' || pg_catalog.chr(11) || '|\\v|\\x0b|\\013)';
 BEGIN
   -- Trim non-null whitespace on payment_id / razorpay_order_id only where needed
   UPDATE public.bookings
@@ -240,7 +246,7 @@ BEGIN
       v_pred_regex :=
         '^\s*\(*\s*' || v_spec.col_name || '\s+IS\s+NOT\s+NULL\s*\)*\s+AND\s+\(*\s*(?:pg_catalog\.)?btrim\(\s*\(*\s*'
         || v_spec.col_name
-        || '(?:\)*(?:::text)?)\s*,\s*E?'' (?:\t|\\t|\\x09|\\011)(?:\n|\\n|\\x0a|\\012)(?:\r|\\r|\\x0d|\\015)(?:\f|\\f|\\x0c|\\014)(?:\v|\\v|\\x0b|\\013)''(?:::text)?\s*\)\s*(?:<>|!=)\s*''''(?:::text)?\s*\)*\s*$';
+        || '(?:\)*(?:::text)?)\s*,\s*E?''' || v_ws_pattern || '''(?:::text)?\s*\)(?:::text)?\s*(?:<>|!=)\s*''''(?:::text)?\s*\)*\s*$';
 
       IF v_idx.table_schema IS DISTINCT FROM 'public'
          OR v_idx.table_name IS DISTINCT FROM 'bookings'
@@ -248,7 +254,12 @@ BEGIN
          OR v_idx.indisvalid IS DISTINCT FROM TRUE
          OR v_idx.indisready IS DISTINCT FROM TRUE
          OR v_idx.indexprs IS NOT NULL
-         OR v_idx.indkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_attnum]
+         OR ARRAY(
+              SELECT u.attnum
+              FROM pg_catalog.unnest(v_idx.indkey::SMALLINT[])
+                   WITH ORDINALITY AS u(attnum, ord)
+              ORDER BY u.ord
+            ) IS DISTINCT FROM ARRAY[v_attnum]
          OR v_idx.indpred IS NULL
          OR v_idx.pred_expr IS NULL
          OR v_idx.pred_expr !~* v_pred_regex THEN

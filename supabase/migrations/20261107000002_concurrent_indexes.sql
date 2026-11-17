@@ -117,6 +117,12 @@ BEGIN
     DECLARE
       v_attnum SMALLINT;
       v_pred_regex TEXT;
+      v_ws_pattern TEXT :=
+        ' (?:' || pg_catalog.chr(9)  || '|\\t|\\x09|\\011)'
+        || '(?:' || pg_catalog.chr(10) || '|\\n|\\x0a|\\012)'
+        || '(?:' || pg_catalog.chr(13) || '|\\r|\\x0d|\\015)'
+        || '(?:' || pg_catalog.chr(12) || '|\\f|\\x0c|\\014)'
+        || '(?:' || pg_catalog.chr(11) || '|\\v|\\x0b|\\013)';
     BEGIN
       SELECT a.attnum INTO v_attnum
       FROM pg_catalog.pg_attribute a
@@ -161,13 +167,18 @@ BEGIN
         v_pred_regex :=
           '^\s*\(*\s*' || v_spec.col_name || '\s+IS\s+NOT\s+NULL\s*\)*\s+AND\s+\(*\s*(?:pg_catalog\.)?btrim\(\s*\(*\s*'
           || v_spec.col_name
-          || '(?:\)*(?:::text)?)\s*,\s*E?'' (?:\t|\\t|\\x09|\\011)(?:\n|\\n|\\x0a|\\012)(?:\r|\\r|\\x0d|\\015)(?:\f|\\f|\\x0c|\\014)(?:\v|\\v|\\x0b|\\013)''(?:::text)?\s*\)\s*(?:<>|!=)\s*''''(?:::text)?\s*\)*\s*$';
+          || '(?:\)*(?:::text)?)\s*,\s*E?''' || v_ws_pattern || '''(?:::text)?\s*\)(?:::text)?\s*(?:<>|!=)\s*''''(?:::text)?\s*\)*\s*$';
 
         IF v_idx.actual_table_schema IS DISTINCT FROM 'public'
            OR v_idx.actual_table IS DISTINCT FROM v_spec.tbl_name
            OR v_idx.indisunique IS DISTINCT FROM v_spec.expect_unique
            OR v_idx.indexprs IS NOT NULL
-           OR v_idx.indkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_attnum]
+           OR ARRAY(
+                SELECT u.attnum
+                FROM pg_catalog.unnest(v_idx.indkey::SMALLINT[])
+                     WITH ORDINALITY AS u(attnum, ord)
+                ORDER BY u.ord
+              ) IS DISTINCT FROM ARRAY[v_attnum]
            OR (v_spec.expect_partial AND (v_idx.indpred IS NULL OR v_idx.pred_expr IS NULL OR v_idx.pred_expr !~* v_pred_regex))
            OR (NOT v_spec.expect_partial AND v_idx.indpred IS NOT NULL) THEN
           RAISE EXCEPTION 'Phase B preflight failed: Existing index public.% has mismatched table/column/uniqueness/predicate (%). Drop with DROP INDEX CONCURRENTLY IF EXISTS public.% before rerunning Phase B.',
@@ -189,7 +200,12 @@ BEGIN
           AND i.indisvalid = true
           AND i.indisunique = v_spec.expect_unique
           AND i.indexprs IS NULL
-          AND i.indkey::SMALLINT[] = ARRAY[v_attnum]
+          AND ARRAY(
+                SELECT u.attnum
+                FROM pg_catalog.unnest(i.indkey::SMALLINT[])
+                     WITH ORDINALITY AS u(attnum, ord)
+                ORDER BY u.ord
+              ) = ARRAY[v_attnum]
         LIMIT 1;
 
         IF FOUND THEN
@@ -282,6 +298,12 @@ DECLARE
   v_row RECORD;
   v_attnum SMALLINT;
   v_pred_regex TEXT;
+  v_ws_pattern TEXT :=
+    ' (?:' || pg_catalog.chr(9)  || '|\\t|\\x09|\\011)'
+    || '(?:' || pg_catalog.chr(10) || '|\\n|\\x0a|\\012)'
+    || '(?:' || pg_catalog.chr(13) || '|\\r|\\x0d|\\015)'
+    || '(?:' || pg_catalog.chr(12) || '|\\f|\\x0c|\\014)'
+    || '(?:' || pg_catalog.chr(11) || '|\\v|\\x0b|\\013)';
   v_verified INTEGER := 0;
 BEGIN
   FOR v_spec IN
@@ -342,13 +364,18 @@ BEGIN
     v_pred_regex :=
       '^\s*\(*\s*' || v_spec.col_name || '\s+IS\s+NOT\s+NULL\s*\)*\s+AND\s+\(*\s*(?:pg_catalog\.)?btrim\(\s*\(*\s*'
       || v_spec.col_name
-      || '(?:\)*(?:::text)?)\s*,\s*E?'' (?:\t|\\t|\\x09|\\011)(?:\n|\\n|\\x0a|\\012)(?:\r|\\r|\\x0d|\\015)(?:\f|\\f|\\x0c|\\014)(?:\v|\\v|\\x0b|\\013)''(?:::text)?\s*\)\s*(?:<>|!=)\s*''''(?:::text)?\s*\)*\s*$';
+      || '(?:\)*(?:::text)?)\s*,\s*E?''' || v_ws_pattern || '''(?:::text)?\s*\)(?:::text)?\s*(?:<>|!=)\s*''''(?:::text)?\s*\)*\s*$';
 
     IF v_row.table_schema IS DISTINCT FROM 'public'
        OR v_row.table_name IS DISTINCT FROM v_spec.tbl_name
        OR v_row.is_unique IS DISTINCT FROM v_spec.expect_unique
        OR v_row.indexprs IS NOT NULL
-       OR v_row.indkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_attnum]
+       OR ARRAY(
+            SELECT u.attnum
+            FROM pg_catalog.unnest(v_row.indkey::SMALLINT[])
+                 WITH ORDINALITY AS u(attnum, ord)
+            ORDER BY u.ord
+          ) IS DISTINCT FROM ARRAY[v_attnum]
        OR (v_spec.expect_partial AND (v_row.indpred IS NULL OR v_row.pred_expr IS NULL OR v_row.pred_expr !~* v_pred_regex))
        OR (NOT v_spec.expect_partial AND v_row.indpred IS NOT NULL) THEN
       RAISE EXCEPTION 'Phase B validation failed: Index public.% definition mismatch (% | predicate=%).',

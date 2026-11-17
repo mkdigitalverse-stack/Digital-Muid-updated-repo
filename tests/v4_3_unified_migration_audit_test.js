@@ -32,6 +32,22 @@ const PHASE_B_SQL = fs.readFileSync(
   path.resolve("supabase/migrations/20261107000002_concurrent_indexes.sql"),
   "utf8"
 );
+const CONSULT_SQL = fs.readFileSync(
+  path.resolve("supabase/migrations/20261116000001_harden_consultation_rpc_amount_validation.sql"),
+  "utf8"
+);
+const COURSE_SQL = fs.readFileSync(
+  path.resolve("supabase/migrations/20261116000002_harden_course_fulfillment_published_check.sql"),
+  "utf8"
+);
+const RESOURCE_SQL = fs.readFileSync(
+  path.resolve("supabase/migrations/20261116000003_atomic_resource_payment_fulfillment.sql"),
+  "utf8"
+);
+const VERIF_SQL = fs.readFileSync(
+  path.resolve("supabase/tests/v4_3_isolated_verification_queries.sql"),
+  "utf8"
+);
 const STAGING_BASELINE_SQL = fs.readFileSync(
   path.resolve("supabase/staging_baseline_review.sql"),
   "utf8"
@@ -77,6 +93,83 @@ function isValidNonNegTwoDecimalMoney(val) {
 
 const ACTIVE_A = stripComments(PHASE_A_SQL);
 const ACTIVE_B = stripComments(PHASE_B_SQL);
+const ACTIVE_CONSULT = stripComments(CONSULT_SQL);
+const ACTIVE_COURSE = stripComments(COURSE_SQL);
+const ACTIVE_RESOURCE = stripComments(RESOURCE_SQL);
+const ACTIVE_VERIF = stripComments(VERIF_SQL);
+
+/**
+ * Static/simulated model of PostgreSQL int2vector (`pg_index.indkey`) normalization:
+ * Raw `indkey::SMALLINT[]` has 0-based lower bound (`lowerBound: 0`), which fails PostgreSQL
+ * `array_eq` against 1-based `ARRAY[...]` (`lowerBound: 1`). Wrapping with
+ * `ARRAY(SELECT u.attnum FROM pg_catalog.unnest(indkey::SMALLINT[]) WITH ORDINALITY AS u(attnum, ord) ORDER BY u.ord)`
+ * normalizes lowerBound to 1 while preserving exact attribute numbers, ordering, INCLUDE columns,
+ * and expression markers (0).
+ */
+function pgArrayEq(a, b) {
+  if (!a || !b) return false;
+  if (a.lowerBound !== b.lowerBound) return false;
+  if (a.values.length !== b.values.length) return false;
+  return a.values.every((v, idx) => v === b.values[idx]);
+}
+
+function normalizeIndkeyWithOrdinality(rawInt2Vector) {
+  return {
+    lowerBound: 1,
+    values: rawInt2Vector.values
+      .map((attnum, idx) => ({ attnum, ord: idx + 1 }))
+      .sort((x, y) => x.ord - y.ord)
+      .map((u) => u.attnum)
+  };
+}
+
+function buildWhitespacePredRegex(colName) {
+  const wsPattern =
+    " (?:\\t|\\\\t|\\\\x09|\\\\011)" +
+    "(?:\\n|\\\\n|\\\\x0a|\\\\012)" +
+    "(?:\\r|\\\\r|\\\\x0d|\\\\015)" +
+    "(?:\\f|\\\\f|\\\\x0c|\\\\014)" +
+    "(?:\\v|\\\\v|\\\\x0b|\\\\013)";
+  return new RegExp(
+    `^\\s*\\(*\\s*${colName}\\s+IS\\s+NOT\\s+NULL\\s*\\)*\\s+AND\\s+\\(*\\s*(?:pg_catalog\\.)?btrim\\(\\s*\\(*\\s*${colName}(?:\\)*(?:::text)?)\\s*,\\s*E?'${wsPattern}'(?:::text)?\\s*\\)(?:::text)?\\s*(?:<>|!=)\\s*''(?:::text)?\\s*\\)*\\s*$`,
+    "i"
+  );
+}
+
+function validateSimulatedIndex(idx, {
+  schema = "public",
+  table,
+  expectUnique = true,
+  expectedAttnums,
+  expectPartial = true,
+  predRegex = null
+}) {
+  if (!idx || idx.schema !== schema) return { ok: false, reason: "MISSING_OR_WRONG_INDEX_SCHEMA" };
+  if (idx.tableSchema !== schema || idx.table !== table) return { ok: false, reason: "WRONG_TABLE" };
+  if (idx.indisunique !== expectUnique) return { ok: false, reason: "UNIQUENESS_MISMATCH" };
+  if (!idx.indisvalid || !idx.indisready) return { ok: false, reason: "INVALID_OR_UNREADY" };
+  if (idx.isExpression || idx.indexprs != null) return { ok: false, reason: "EXPRESSION_INDEX" };
+
+  // In PostgreSQL, pg_index.indkey includes key columns followed by INCLUDE columns (or 0 for expressions)
+  const rawIndkey = {
+    lowerBound: idx.indkeyLowerBound ?? 0,
+    values: [...idx.attnums, ...(idx.includeAttnums || [])]
+  };
+  const normalizedIndkey = normalizeIndkeyWithOrdinality(rawIndkey);
+  const expectedArray = { lowerBound: 1, values: expectedAttnums };
+  if (!pgArrayEq(normalizedIndkey, expectedArray)) {
+    return { ok: false, reason: "INDKEY_MISMATCH" };
+  }
+
+  if (expectPartial) {
+    if (!idx.partialExpr || (predRegex && !predRegex.test(idx.partialExpr))) {
+      return { ok: false, reason: "PREDICATE_MISMATCH" };
+    }
+  } else if (idx.partialExpr != null) {
+    return { ok: false, reason: "UNEXPECTED_PREDICATE" };
+  }
+  return { ok: true, reason: "OK" };
+}
 
 /**
  * Faithful simulator of the HARDENED Phase A Final PL/pgSQL, catalog & trigger logic.
@@ -93,22 +186,26 @@ class HardenedPhaseAPostgresSim {
         tableSchema: "public",
         table: "credit_notes",
         columns: ["credit_note_number"],
+        includeColumns: [],
+        indkeyLowerBound: 0,
         isExpression: false,
         indisunique: true,
         indisvalid: true,
         indisready: true,
-        partialExpr: "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\t\\n\\r\\f\\v'::text) <> ''::text))"
+        partialExpr: "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r\f\v'::text) <> ''::text))"
       },
       idx_credit_notes_refund_id: {
         schema: "public",
         tableSchema: "public",
         table: "credit_notes",
         columns: ["refund_id"],
+        includeColumns: [],
+        indkeyLowerBound: 0,
         isExpression: false,
         indisunique: true,
         indisvalid: true,
         indisready: true,
-        partialExpr: "((refund_id IS NOT NULL) AND (btrim(refund_id, E' \\t\\n\\r\\f\\v'::text) <> ''::text))"
+        partialExpr: "((refund_id IS NOT NULL) AND (btrim(refund_id, ' \t\n\r\f\v'::text) <> ''::text))"
       }
     };
     this.allowedStatuses = new Set([
@@ -342,6 +439,7 @@ class HardenedPhaseAPostgresSim {
       { name: "idx_credit_notes_number", col: "credit_note_number" },
       { name: "idx_credit_notes_refund_id", col: "refund_id" }
     ];
+    const cnAttnums = { id: 1, credit_note_number: 2, refund_id: 3, payment_id: 4, user_id: 5 };
     for (const spec of gateSpecs) {
       const idx = this.pg_index[spec.name];
       if (!idx || idx.schema !== "public") {
@@ -356,13 +454,15 @@ class HardenedPhaseAPostgresSim {
       if (!idx.indisvalid || !idx.indisready) {
         throw new Error(`Credit note processing halted: Required Phase B unique index public.${spec.name} is invalid or not ready.`);
       }
-      if (idx.isExpression || JSON.stringify(idx.columns) !== JSON.stringify([spec.col])) {
+      const rawAttnums = idx.columns.concat(idx.includeColumns || []).map((c) => cnAttnums[c] || 99);
+      const normalizedIndkey = normalizeIndkeyWithOrdinality({
+        lowerBound: idx.indkeyLowerBound ?? 0,
+        values: rawAttnums
+      });
+      if (idx.isExpression || !pgArrayEq(normalizedIndkey, { lowerBound: 1, values: [cnAttnums[spec.col]] })) {
         throw new Error(`Credit note processing halted: Index public.${spec.name} does not exclusively index column public.credit_notes.(${spec.col}).`);
       }
-      const predRegex = new RegExp(
-        `^\\s*\\(*\\s*${spec.col}\\s+IS\\s+NOT\\s+NULL\\s*\\)*\\s+AND\\s+\\(*\\s*(?:pg_catalog\\.)?btrim\\(\\s*\\(*\\s*${spec.col}(?:\\)*(?:::text)?)\\s*,\\s*E?' (?:\\t|\\\\t|\\\\x09|\\\\011)(?:\\n|\\\\n|\\\\x0a|\\\\012)(?:\\r|\\\\r|\\\\x0d|\\\\015)(?:\\f|\\\\f|\\\\x0c|\\\\014)(?:\\v|\\\\v|\\\\x0b|\\\\013)'(?:::text)?\\s*\\)\\s*(?:<>|!=)\\s*''(?:::text)?\\s*\\)*\\s*$`,
-        "i"
-      );
+      const predRegex = buildWhitespacePredRegex(spec.col);
       if (!idx.partialExpr || !predRegex.test(idx.partialExpr)) {
         throw new Error(`Credit note processing halted: Index public.${spec.name} has missing or incorrect partial predicate (${idx.partialExpr || "<none>"}).`);
       }
@@ -708,11 +808,24 @@ runTest("2.1 Phase A inspects legacy column types/defaults and enforces fail-clo
 // =============================================================================
 console.log("\n[3] Credit Note Atomicity, Amount/Currency Policy, Ownership & Phase B Gate");
 
-runTest("3.1 Phase B pg_index gate blocks missing/invalid/unready/wrong-table/wrong-column/non-unique/wrong-predicate indexes", () => {
+runTest("3.1 Phase B pg_index gate blocks missing/invalid/unready/wrong-table/wrong-column/INCLUDE/non-unique/wrong-predicate indexes (static & simulated)", () => {
   const fnBody = ACTIVE_A.match(/CREATE OR REPLACE FUNCTION public\.record_credit_note_with_limit[\s\S]*?\$\$;/)[0];
   assert.ok(fnBody.includes("pg_catalog.pg_attribute"), "Phase A gate must inspect pg_attribute");
   assert.ok(fnBody.includes("pg_catalog.pg_get_expr(i.indpred, i.indrelid)"), "Phase A gate must inspect pg_get_expr(i.indpred, i.indrelid)");
-  assert.ok(fnBody.includes("v_gate_idx.indkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_gate_attnum]"), "Phase A gate must verify exact single column attnum");
+  assert.match(
+    fnBody,
+    /ARRAY\(\s*SELECT\s+u\.attnum\s+FROM\s+pg_catalog\.unnest\(v_gate_idx\.indkey::SMALLINT\[\]\)\s+WITH\s+ORDINALITY\s+AS\s+u\(attnum,\s*ord\)\s+ORDER\s+BY\s+u\.ord\s*\)\s+IS\s+DISTINCT\s+FROM\s+ARRAY\[v_gate_attnum\]/i,
+    "Phase A gate must normalize v_gate_idx.indkey::SMALLINT[] with WITH ORDINALITY ORDER BY before comparing to ARRAY[v_gate_attnum]"
+  );
+  assert.strictEqual(
+    /\bv_gate_idx\.indkey::SMALLINT\[\]\s*(?:IS\s+DISTINCT\s+FROM|=)/i.test(fnBody),
+    false,
+    "Phase A gate must NOT compare unnormalized v_gate_idx.indkey::SMALLINT[] directly"
+  );
+  assert.ok(fnBody.includes("pg_catalog.chr(9)"), "Phase A gate predicate regex must use pg_catalog.chr(9)");
+  assert.ok(fnBody.includes("pg_catalog.chr(12)"), "Phase A gate predicate regex must use pg_catalog.chr(12)");
+  assert.ok(fnBody.includes("pg_catalog.chr(11)"), "Phase A gate predicate regex must use pg_catalog.chr(11)");
+  assert.ok(fnBody.includes("\\)(?:::text)?"), "Phase A gate predicate regex must allow optional ::text cast after btrim(...)");
   assert.ok(fnBody.includes("i.indexprs IS NOT NULL") || fnBody.includes("v_gate_idx.indexprs IS NOT NULL"), "Phase A gate must reject expression indexes");
   assert.ok(fnBody.includes("v_gate_idx.table_name IS DISTINCT FROM 'credit_notes'"), "Phase A gate must verify target table public.credit_notes");
 
@@ -732,10 +845,12 @@ runTest("3.1 Phase B pg_index gate blocks missing/invalid/unready/wrong-table/wr
     { label: "wrong schema", mutate: (d) => { d.pg_index.idx_credit_notes_refund_id.tableSchema = "other_schema"; } },
     { label: "wrong column (user_id)", mutate: (d) => { d.pg_index.idx_credit_notes_number.columns = ["user_id"]; } },
     { label: "multi-column index", mutate: (d) => { d.pg_index.idx_credit_notes_refund_id.columns = ["refund_id", "payment_id"]; } },
+    { label: "INCLUDE-column index", mutate: (d) => { d.pg_index.idx_credit_notes_number.includeColumns = ["id"]; } },
     { label: "expression index", mutate: (d) => { d.pg_index.idx_credit_notes_refund_id.isExpression = true; } },
     { label: "non-unique index", mutate: (d) => { d.pg_index.idx_credit_notes_refund_id.indisunique = false; } },
     { label: "non-partial index (indpred NULL)", mutate: (d) => { d.pg_index.idx_credit_notes_refund_id.partialExpr = null; } },
     { label: "weak predicate (IS NOT NULL only)", mutate: (d) => { d.pg_index.idx_credit_notes_refund_id.partialExpr = "(refund_id IS NOT NULL)"; } },
+    { label: "missing form-feed & vertical-tab in predicate", mutate: (d) => { d.pg_index.idx_credit_notes_number.partialExpr = "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r'::text) <> ''::text))"; } },
     { label: "wrong-column predicate", mutate: (d) => { d.pg_index.idx_credit_notes_refund_id.partialExpr = "((payment_id IS NOT NULL) AND (btrim(payment_id, E' \\t\\n\\r\\f\\v'::text) <> ''::text))"; } }
   ];
 
@@ -940,15 +1055,373 @@ runTest("5.1 Phase A discloses AccessExclusiveLock, large UPDATEs, lock_timeout,
   assert.strictEqual(/\bCREATE\s+(?:UNIQUE\s+)?INDEX\b/i.test(ACTIVE_A), false, "Phase A must contain ZERO active CREATE INDEX statements");
 });
 
-runTest("5.2 Phase B has zero BEGIN/COMMIT, uses CONCURRENTLY cleanly, and validates table/column/predicate for all 8 indexes", () => {
+runTest("5.2 Phase B has zero BEGIN/COMMIT, uses CONCURRENTLY cleanly, and validates table/column/predicate with normalized indkey for all 8 indexes", () => {
   assert.strictEqual(PHASE_B_SQL.includes("BEGIN;"), false);
   assert.strictEqual(PHASE_B_SQL.includes("COMMIT;"), false);
   assert.ok(/idx_credit_notes_number[\s\S]*WHERE credit_note_number IS NOT NULL AND BTRIM\(credit_note_number/i.test(ACTIVE_B));
   assert.ok(ACTIVE_B.includes("pg_get_indexdef(c.oid)"));
   assert.ok(ACTIVE_B.includes("pg_catalog.pg_attribute"));
   assert.ok(ACTIVE_B.includes("pg_catalog.pg_get_expr(i.indpred, i.indrelid)"));
-  assert.ok(ACTIVE_B.includes("indkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_attnum]"));
+  assert.strictEqual(
+    /\bindkey::SMALLINT\[\]\s*(?:IS\s+DISTINCT\s+FROM|=)/i.test(ACTIVE_B),
+    false,
+    "Phase B must contain ZERO unnormalized indkey::SMALLINT[] comparisons"
+  );
+  const preflightDistMatches = ACTIVE_B.match(
+    /ARRAY\(\s*SELECT\s+u\.attnum\s+FROM\s+pg_catalog\.unnest\((?:v_idx|v_row)\.indkey::SMALLINT\[\]\)\s+WITH\s+ORDINALITY\s+AS\s+u\(attnum,\s*ord\)\s+ORDER\s+BY\s+u\.ord\s*\)\s+IS\s+DISTINCT\s+FROM\s+ARRAY\[v_attnum\]/gi
+  ) || [];
+  assert.strictEqual(preflightDistMatches.length, 2, "Phase B preflight and postflight must normalize indkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_attnum]");
+  assert.match(
+    ACTIVE_B,
+    /ARRAY\(\s*SELECT\s+u\.attnum\s+FROM\s+pg_catalog\.unnest\(i\.indkey::SMALLINT\[\]\)\s+WITH\s+ORDINALITY\s+AS\s+u\(attnum,\s*ord\)\s+ORDER\s+BY\s+u\.ord\s*\)\s*=\s*ARRAY\[v_attnum\]/i,
+    "Phase B alias-index check must normalize i.indkey::SMALLINT[] = ARRAY[v_attnum]"
+  );
   assert.ok(ACTIVE_B.includes("IF v_verified <> 8 THEN"));
+});
+
+// =============================================================================
+// 6. INDEX CATALOG NORMALIZATION, PREDICATE CONSISTENCY & EDGE-CASE REGRESSION
+//    (Static SQL inspection + simulated catalog/predicate tests ONLY — NOT PG runtime)
+// =============================================================================
+console.log("\n[6] Index Catalog Normalization, Predicate Consistency & Edge-Case Regression (Static & Simulated)");
+
+runTest("6.1 Static SQL sweep: all 11 indkey comparisons use WITH ORDINALITY ORDER BY, zero broken indkey::SMALLINT[] remain, and predicate regexes align", () => {
+  const sqlTargets = [
+    {
+      name: "20261107000001_student_id_and_invoices.sql",
+      sql: ACTIVE_A,
+      expectedDistinctArrays: ["ARRAY[v_gate_attnum]"],
+      expectedEqualArrays: [],
+      expectWsChrRegexCount: 1
+    },
+    {
+      name: "20261107000002_concurrent_indexes.sql",
+      sql: ACTIVE_B,
+      expectedDistinctArrays: ["ARRAY[v_attnum]", "ARRAY[v_attnum]"],
+      expectedEqualArrays: ["ARRAY[v_attnum]"],
+      expectWsChrRegexCount: 2
+    },
+    {
+      name: "20261116000001_harden_consultation_rpc_amount_validation.sql",
+      sql: ACTIVE_CONSULT,
+      expectedDistinctArrays: ["ARRAY[v_attnum]"],
+      expectedEqualArrays: [],
+      expectWsChrRegexCount: 1
+    },
+    {
+      name: "20261116000002_harden_course_fulfillment_published_check.sql",
+      sql: ACTIVE_COURSE,
+      expectedDistinctArrays: [],
+      expectedEqualArrays: ["ARRAY[a.attnum]"],
+      expectWsChrRegexCount: 0
+    },
+    {
+      name: "20261116000003_atomic_resource_payment_fulfillment.sql",
+      sql: ACTIVE_RESOURCE,
+      expectedDistinctArrays: [
+        "ARRAY[v_user_attnum, v_res_attnum]",
+        "ARRAY[v_attnum]",
+        "ARRAY[v_email_attnum]"
+      ],
+      expectedEqualArrays: ["ARRAY[v_user_attnum, v_res_attnum]"],
+      expectWsChrRegexCount: 1
+    },
+    {
+      name: "v4_3_isolated_verification_queries.sql",
+      sql: ACTIVE_VERIF,
+      expectedDistinctArrays: ["ARRAY[v_attnum]"],
+      expectedEqualArrays: [],
+      expectWsChrRegexCount: 1
+    }
+  ];
+
+  let totalNormalizedCount = 0;
+  for (const target of sqlTargets) {
+    // 1. Zero unnormalized indkey::SMALLINT[] comparisons
+    assert.strictEqual(
+      /\bindkey::SMALLINT\[\]\s*(?:=|IS\s+DISTINCT\s+FROM|<>)/i.test(target.sql),
+      false,
+      `${target.name} still contains unnormalized indkey::SMALLINT[] comparison`
+    );
+
+    // 2. Exact WITH ORDINALITY + ORDER BY normalization counts and exact expected target ARRAY[...] expressions
+    const normRegex =
+      /ARRAY\(\s*SELECT\s+u\.attnum\s+FROM\s+pg_catalog\.unnest\((?:[a-z_]+\.)?indkey::SMALLINT\[\]\)\s+WITH\s+ORDINALITY\s+AS\s+u\(attnum,\s*ord\)\s+ORDER\s+BY\s+u\.ord\s*\)\s+(IS\s+DISTINCT\s+FROM|=)\s+(ARRAY\[[^\]]+\])/gi;
+    const foundDistinct = [];
+    const foundEqual = [];
+    let match;
+    while ((match = normRegex.exec(target.sql)) !== null) {
+      const op = match[1].replace(/\s+/g, " ").toUpperCase();
+      const arr = match[2];
+      if (op === "IS DISTINCT FROM") foundDistinct.push(arr);
+      else foundEqual.push(arr);
+      totalNormalizedCount += 1;
+    }
+
+    assert.deepStrictEqual(
+      foundDistinct,
+      target.expectedDistinctArrays,
+      `${target.name} mismatch in normalized IS DISTINCT FROM ARRAY[...] comparisons`
+    );
+    assert.deepStrictEqual(
+      foundEqual,
+      target.expectedEqualArrays,
+      `${target.name} mismatch in normalized = ARRAY[...] comparisons`
+    );
+
+    // 3. Predicate whitespace regex consistency (pg_catalog.chr(9/10/13/12/11) + optional ::text after btrim)
+    if (target.expectWsChrRegexCount > 0) {
+      const chrBlocks = target.sql.match(
+        /pg_catalog\.chr\(9\)[\s\S]{0,120}pg_catalog\.chr\(10\)[\s\S]{0,120}pg_catalog\.chr\(13\)[\s\S]{0,120}pg_catalog\.chr\(12\)[\s\S]{0,120}pg_catalog\.chr\(11\)/g
+      ) || [];
+      assert.strictEqual(
+        chrBlocks.length,
+        target.expectWsChrRegexCount,
+        `${target.name} expected ${target.expectWsChrRegexCount} pg_catalog.chr(9/10/13/12/11) whitespace pattern(s), found ${chrBlocks.length}`
+      );
+      const btrimCastMatches = target.sql.match(/\\\)\(\?:::text\)\?\\s\*\(\?:<>\|!=\)/g) || [];
+      assert.strictEqual(
+        btrimCastMatches.length,
+        target.expectWsChrRegexCount,
+        `${target.name} expected ${target.expectWsChrRegexCount} (?:::text)? cast allowance(s) after btrim(...)`
+      );
+    }
+  }
+
+  assert.strictEqual(totalNormalizedCount, 11, "Expected all 11 normalized indkey comparisons across the 6 SQL files");
+
+  // Confirm original index creation DDL remains intact
+  assert.ok(/CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_credit_notes_number\s+ON public\.credit_notes \(credit_note_number\)\s+WHERE credit_note_number IS NOT NULL AND BTRIM\(credit_note_number, E' \\t\\n\\r\\f\\v'\) != '';/i.test(ACTIVE_B));
+  assert.ok(/CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_payment_id\s+ON public\.bookings \(payment_id\)\s+WHERE payment_id IS NOT NULL AND pg_catalog\.btrim\(payment_id, E' \\t\\n\\r\\f\\v'\) <> '';/i.test(ACTIVE_CONSULT));
+  assert.ok(/CREATE UNIQUE INDEX IF NOT EXISTS uq_user_resource_purchase\s+ON public\.resource_purchases \(user_id, resource_id\)\s+WHERE user_id IS NOT NULL AND status = 'active';/i.test(ACTIVE_RESOURCE));
+});
+
+runTest("6.2 Simulated catalog checks: int2vector 0-base normalization, single-col, 2-col ordering, reversed-order, INCLUDE, expression, non-unique & invalid/unready", () => {
+  // Raw PG int2vector has lowerBound=0, whereas ARRAY[attnum] has lowerBound=1 -> unnormalized fails array_eq
+  const rawInt2Vec = { lowerBound: 0, values: [2] };
+  assert.strictEqual(pgArrayEq(rawInt2Vec, { lowerBound: 1, values: [2] }), false, "Unnormalized 0-based int2vector must fail array_eq against 1-based ARRAY[2]");
+  assert.strictEqual(pgArrayEq(normalizeIndkeyWithOrdinality(rawInt2Vec), { lowerBound: 1, values: [2] }), true, "Normalized indkey must match 1-based ARRAY[2]");
+
+  const cnPredRegex = buildWhitespacePredRegex("credit_note_number");
+
+  // 1. Single-column index acceptance
+  assert.deepStrictEqual(
+    validateSimulatedIndex(
+      {
+        schema: "public",
+        tableSchema: "public",
+        table: "credit_notes",
+        attnums: [2],
+        includeAttnums: [],
+        indkeyLowerBound: 0,
+        isExpression: false,
+        indisunique: true,
+        indisvalid: true,
+        indisready: true,
+        partialExpr: "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r\f\v'::text) <> ''::text))"
+      },
+      { table: "credit_notes", expectUnique: true, expectedAttnums: [2], expectPartial: true, predRegex: cnPredRegex }
+    ),
+    { ok: true, reason: "OK" }
+  );
+
+  // 2. Wrong-column rejection
+  assert.deepStrictEqual(
+    validateSimulatedIndex(
+      {
+        schema: "public",
+        tableSchema: "public",
+        table: "credit_notes",
+        attnums: [5],
+        indisunique: true,
+        indisvalid: true,
+        indisready: true,
+        partialExpr: "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r\f\v'::text) <> ''::text))"
+      },
+      { table: "credit_notes", expectUnique: true, expectedAttnums: [2], expectPartial: true, predRegex: cnPredRegex }
+    ),
+    { ok: false, reason: "INDKEY_MISMATCH" }
+  );
+
+  // 3. Multi-column rejection for a single-column requirement
+  assert.deepStrictEqual(
+    validateSimulatedIndex(
+      {
+        schema: "public",
+        tableSchema: "public",
+        table: "credit_notes",
+        attnums: [2, 3],
+        indisunique: true,
+        indisvalid: true,
+        indisready: true,
+        partialExpr: "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r\f\v'::text) <> ''::text))"
+      },
+      { table: "credit_notes", expectUnique: true, expectedAttnums: [2], expectPartial: true, predRegex: cnPredRegex }
+    ),
+    { ok: false, reason: "INDKEY_MISMATCH" }
+  );
+
+  // 4. Correct two-column ordering (uq_user_resource_purchase: user_id=2, resource_id=3)
+  const activePurchaseRegex = /^\s*\(*\s*user_id\s+IS\s+NOT\s+NULL\s*\)*\s+AND\s+\(*\s*status(?:::text)?\s*=\s*'active'(?:::text)?\s*\)*\s*$/i;
+  assert.deepStrictEqual(
+    validateSimulatedIndex(
+      {
+        schema: "public",
+        tableSchema: "public",
+        table: "resource_purchases",
+        attnums: [2, 3],
+        indisunique: true,
+        indisvalid: true,
+        indisready: true,
+        partialExpr: "((user_id IS NOT NULL) AND (status = 'active'::text))"
+      },
+      { table: "resource_purchases", expectUnique: true, expectedAttnums: [2, 3], expectPartial: true, predRegex: activePurchaseRegex }
+    ),
+    { ok: true, reason: "OK" }
+  );
+
+  // 5. Reversed two-column ordering rejection ([3, 2] vs [2, 3])
+  assert.deepStrictEqual(
+    validateSimulatedIndex(
+      {
+        schema: "public",
+        tableSchema: "public",
+        table: "resource_purchases",
+        attnums: [3, 2],
+        indisunique: true,
+        indisvalid: true,
+        indisready: true,
+        partialExpr: "((user_id IS NOT NULL) AND (status = 'active'::text))"
+      },
+      { table: "resource_purchases", expectUnique: true, expectedAttnums: [2, 3], expectPartial: true, predRegex: activePurchaseRegex }
+    ),
+    { ok: false, reason: "INDKEY_MISMATCH" }
+  );
+
+  // 6. INCLUDE-column rejection (indnkeyatts=1, indnatts=2 -> indkey=[2, 1])
+  assert.deepStrictEqual(
+    validateSimulatedIndex(
+      {
+        schema: "public",
+        tableSchema: "public",
+        table: "credit_notes",
+        attnums: [2],
+        includeAttnums: [1],
+        indisunique: true,
+        indisvalid: true,
+        indisready: true,
+        partialExpr: "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r\f\v'::text) <> ''::text))"
+      },
+      { table: "credit_notes", expectUnique: true, expectedAttnums: [2], expectPartial: true, predRegex: cnPredRegex }
+    ),
+    { ok: false, reason: "INDKEY_MISMATCH" }
+  );
+
+  // 7. Expression-index rejection (indexprs NOT NULL and/or attnum 0)
+  assert.deepStrictEqual(
+    validateSimulatedIndex(
+      {
+        schema: "public",
+        tableSchema: "public",
+        table: "credit_notes",
+        attnums: [0],
+        indexprs: "{FUNCEXPR ...}",
+        isExpression: true,
+        indisunique: true,
+        indisvalid: true,
+        indisready: true,
+        partialExpr: "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r\f\v'::text) <> ''::text))"
+      },
+      { table: "credit_notes", expectUnique: true, expectedAttnums: [2], expectPartial: true, predRegex: cnPredRegex }
+    ),
+    { ok: false, reason: "EXPRESSION_INDEX" }
+  );
+
+  // 8. Non-unique index rejection
+  assert.deepStrictEqual(
+    validateSimulatedIndex(
+      {
+        schema: "public",
+        tableSchema: "public",
+        table: "credit_notes",
+        attnums: [2],
+        indisunique: false,
+        indisvalid: true,
+        indisready: true,
+        partialExpr: "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r\f\v'::text) <> ''::text))"
+      },
+      { table: "credit_notes", expectUnique: true, expectedAttnums: [2], expectPartial: true, predRegex: cnPredRegex }
+    ),
+    { ok: false, reason: "UNIQUENESS_MISMATCH" }
+  );
+
+  // 9. Invalid or unready index rejection
+  assert.deepStrictEqual(
+    validateSimulatedIndex(
+      {
+        schema: "public",
+        tableSchema: "public",
+        table: "credit_notes",
+        attnums: [2],
+        indisunique: true,
+        indisvalid: false,
+        indisready: true,
+        partialExpr: "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r\f\v'::text) <> ''::text))"
+      },
+      { table: "credit_notes", expectUnique: true, expectedAttnums: [2], expectPartial: true, predRegex: cnPredRegex }
+    ),
+    { ok: false, reason: "INVALID_OR_UNREADY" }
+  );
+  assert.deepStrictEqual(
+    validateSimulatedIndex(
+      {
+        schema: "public",
+        tableSchema: "public",
+        table: "credit_notes",
+        attnums: [2],
+        indisunique: true,
+        indisvalid: true,
+        indisready: false,
+        partialExpr: "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r\f\v'::text) <> ''::text))"
+      },
+      { table: "credit_notes", expectUnique: true, expectedAttnums: [2], expectPartial: true, predRegex: cnPredRegex }
+    ),
+    { ok: false, reason: "INVALID_OR_UNREADY" }
+  );
+});
+
+runTest("6.3 Simulated strict partial-predicate validation & form-feed (\\f) / vertical-tab (\\v) whitespace handling", () => {
+  const regex = buildWhitespacePredRegex("credit_note_number");
+
+  // Accepts PG17 control-byte output, ::text cast on btrim(), escaped E' \t\n\r\f\v', and hex/octal escapes
+  const acceptedPredicates = [
+    "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r\f\v'::text) <> ''::text))",
+    "((credit_note_number IS NOT NULL) AND (pg_catalog.btrim((credit_note_number)::text, ' \t\n\r\f\v'::text)::text <> ''::text))",
+    "(credit_note_number IS NOT NULL AND btrim(credit_note_number, E' \\t\\n\\r\\f\\v') != '')",
+    "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\x09\\x0a\\x0d\\x0c\\x0b'::text) <> ''::text))",
+    "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\011\\012\\015\\014\\013'::text) <> ''::text))"
+  ];
+  for (const expr of acceptedPredicates) {
+    assert.ok(regex.test(expr), `Strict predicate regex rejected valid expression: ${expr}`);
+  }
+
+  // Rejects IS NOT NULL only, wrong column, missing space, missing \f (chr(12)), missing \v (chr(11))
+  const rejectedPredicates = [
+    "(credit_note_number IS NOT NULL)",
+    "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number) <> ''::text))",
+    "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r\v'::text) <> ''::text))", // missing \f
+    "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r\f'::text) <> ''::text))", // missing \v
+    "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, ' \t\n\r'::text) <> ''::text))",   // missing \f and \v
+    "((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, '\t\n\r\f\v'::text) <> ''::text))", // missing space
+    "((refund_id IS NOT NULL) AND (btrim(refund_id, ' \t\n\r\f\v'::text) <> ''::text))" // wrong column
+  ];
+  for (const expr of rejectedPredicates) {
+    assert.strictEqual(regex.test(expr), false, `Strict predicate regex unexpectedly accepted weak/invalid expression: ${expr}`);
+  }
+
+  // Form-feed (\f) and vertical-tab (\v) trimming semantics
+  assert.strictEqual(pgNullIfEmptyBtrim("\f\v \t\n\r"), null);
+  assert.strictEqual(pgBtrimAll("\f\v CN/26-27/0001 \v\f"), "CN/26-27/0001");
 });
 
 console.log("\n==============================================================================");
