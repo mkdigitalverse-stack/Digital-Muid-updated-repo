@@ -19,6 +19,14 @@ CREATE TABLE IF NOT EXISTS public.resource_purchases (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Reconcile existing public.resource_purchases if already created by 20261020000001
+ALTER TABLE public.resource_purchases
+  ADD COLUMN IF NOT EXISTS customer_email TEXT,
+  ADD COLUMN IF NOT EXISTS customer_phone TEXT;
+
+ALTER TABLE public.resource_purchases
+  ALTER COLUMN user_id DROP NOT NULL;
+
 -- 2. Indexes for performance and idempotency
 CREATE INDEX IF NOT EXISTS idx_resource_purchases_user_id ON public.resource_purchases (user_id);
 CREATE INDEX IF NOT EXISTS idx_resource_purchases_resource_id ON public.resource_purchases (resource_id);

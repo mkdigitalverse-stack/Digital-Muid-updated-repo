@@ -313,6 +313,69 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_resource_purchases_razorpay_order_id
   ON public.resource_purchases (razorpay_order_id)
   WHERE razorpay_order_id IS NOT NULL AND pg_catalog.btrim(razorpay_order_id, E' \t\n\r\f\v') <> '';
 
+-- Inspect & create customer_email lookup index (forward compatibility if 20261022000001 was skipped/already recorded)
+DO $$
+DECLARE
+  v_email_attnum SMALLINT;
+  v_idx RECORD;
+BEGIN
+  SELECT a.attnum INTO v_email_attnum
+  FROM pg_catalog.pg_attribute a
+  JOIN pg_catalog.pg_class tbl ON tbl.oid = a.attrelid
+  JOIN pg_catalog.pg_namespace ns ON ns.oid = tbl.relnamespace
+  WHERE ns.nspname = 'public'
+    AND tbl.relname = 'resource_purchases'
+    AND a.attname = 'customer_email'
+    AND NOT a.attisdropped;
+
+  IF v_email_attnum IS NULL THEN
+    RAISE EXCEPTION 'Compatibility failure: public.resource_purchases.customer_email column not found.';
+  END IF;
+
+  SELECT
+    nt.nspname AS table_schema,
+    t.relname AS table_name,
+    i.indisunique,
+    i.indisvalid,
+    i.indisready,
+    i.indkey,
+    i.indexprs,
+    i.indpred,
+    pg_catalog.pg_get_expr(i.indpred, i.indrelid) AS pred_expr,
+    pg_catalog.pg_get_indexdef(c.oid) AS index_def
+  INTO v_idx
+  FROM pg_catalog.pg_index i
+  JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
+  JOIN pg_catalog.pg_class t ON t.oid = i.indrelid
+  JOIN pg_catalog.pg_namespace nc ON nc.oid = c.relnamespace
+  JOIN pg_catalog.pg_namespace nt ON nt.oid = t.relnamespace
+  WHERE nc.nspname = 'public'
+    AND c.relname = 'idx_resource_purchases_email';
+
+  IF FOUND THEN
+    IF v_idx.table_schema IS DISTINCT FROM 'public'
+       OR v_idx.table_name IS DISTINCT FROM 'resource_purchases'
+       OR v_idx.indisunique IS DISTINCT FROM FALSE
+       OR v_idx.indisvalid IS DISTINCT FROM TRUE
+       OR v_idx.indisready IS DISTINCT FROM TRUE
+       OR v_idx.indexprs IS NOT NULL
+       OR v_idx.indkey::SMALLINT[] IS DISTINCT FROM ARRAY[v_email_attnum]
+       OR v_idx.indpred IS NOT NULL THEN
+      RAISE EXCEPTION 'Migration halt: Existing index public.idx_resource_purchases_email conflicts with expected non-unique full-table index on public.resource_purchases(customer_email) (table=%.%, unique=%, valid=%, ready=%, predicate=%, def=%).',
+        v_idx.table_schema,
+        v_idx.table_name,
+        v_idx.indisunique,
+        v_idx.indisvalid,
+        v_idx.indisready,
+        COALESCE(v_idx.pred_expr, '<none>'),
+        v_idx.index_def;
+    END IF;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_resource_purchases_email
+  ON public.resource_purchases (customer_email);
+
 -- 3. Atomic SECURITY DEFINER RPC for paid digital resource fulfillment
 CREATE OR REPLACE FUNCTION public.fulfill_resource_purchase(
   p_user_id UUID,
