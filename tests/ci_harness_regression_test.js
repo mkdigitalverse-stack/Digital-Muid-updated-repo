@@ -225,4 +225,26 @@ test("Workflow keeps PGHOST=127.0.0.1 & contents:read, Node runner enforces loop
   assert.deepStrictEqual(manifestMigrations, actualMigrations, "ci_migration_manifest.txt must match supabase/migrations/*.sql");
 });
 
+test("package-lock.json stays synchronized with package.json (including devDependencies.pg) for npm ci", () => {
+  const pkg = JSON.parse(fs.readFileSync(path.resolve("package.json"), "utf8"));
+  const lock = JSON.parse(fs.readFileSync(path.resolve("package-lock.json"), "utf8"));
+
+  assert.ok(pkg.devDependencies && pkg.devDependencies.pg, "package.json must declare devDependencies.pg");
+  assert.ok(lock.packages && lock.packages[""], "package-lock.json must contain root package entry");
+  assert.deepStrictEqual(
+    lock.packages[""].dependencies,
+    pkg.dependencies,
+    "package-lock.json root dependencies must match package.json"
+  );
+  assert.deepStrictEqual(
+    lock.packages[""].devDependencies,
+    pkg.devDependencies,
+    "package-lock.json root devDependencies (including pg) must match package.json"
+  );
+  assert.ok(
+    lock.packages["node_modules/pg"] && lock.packages["node_modules/pg"].version,
+    "package-lock.json must contain resolved packages['node_modules/pg'] entry"
+  );
+});
+
 console.log(`=== SUMMARY: ${passed} PASSED, ${process.exitCode ? 1 : 0} FAILED ===`);
