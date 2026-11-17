@@ -29,6 +29,9 @@ export default defineConfig(() => {
         '@supabase/supabase-js',
         'lucide-react',
       ],
+      esbuildOptions: {
+        keepNames: true,
+      },
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

@@ -187,6 +187,28 @@ async function startServer() {
       server: { middlewareMode: true, hmr: false },
       appType: "custom",
     });
+
+    // Ensure browsers (especially Safari with DISABLE_HMR=true) never cache Vite pre-bundled deps as immutable in dev
+    app.use((req, res, next) => {
+      const url = req.url || "";
+      if (url.startsWith("/node_modules/.vite/") || url.startsWith("/src/")) {
+        if (url.startsWith("/node_modules/.vite/")) {
+          delete req.headers["if-none-match"];
+          delete req.headers["if-modified-since"];
+        }
+        const origSetHeader = res.setHeader.bind(res);
+        res.setHeader = ((name: string, value: number | string | readonly string[]) => {
+          if (String(name).toLowerCase() === "cache-control") {
+            return origSetHeader(name, "no-store, no-cache, must-revalidate");
+          }
+          return origSetHeader(name, value);
+        }) as typeof res.setHeader;
+        origSetHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        origSetHeader("Pragma", "no-cache");
+      }
+      next();
+    });
+
     app.use(vite.middlewares);
 
     // Guard: nonexistent XML files must return genuine HTTP 404 in development
@@ -214,7 +236,11 @@ async function startServer() {
         } else {
           finalHtml = envScript + finalHtml;
         }
-        res.status(200).set({ "Content-Type": "text/html; charset=utf-8" }).end(finalHtml);
+        res.status(200).set({
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+          "Pragma": "no-cache",
+        }).end(finalHtml);
       } catch (e) {
         next(e);
       }
