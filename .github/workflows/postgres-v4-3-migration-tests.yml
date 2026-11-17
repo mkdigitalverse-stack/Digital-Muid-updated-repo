@@ -82,14 +82,24 @@ jobs:
           createdb "$CI_DB"
 
           echo "=== Step 1: Applying minimal CI prerequisites bootstrap ==="
-          psql -v ON_ERROR_STOP=1 -d "$CI_DB" -f supabase/tests/ci_bootstrap_prerequisites.sql
+          bootstrap_rc=0
+          psql --echo-errors -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -d "$CI_DB" -f supabase/tests/ci_bootstrap_prerequisites.sql || bootstrap_rc=$?
+          if [ "$bootstrap_rc" -ne 0 ]; then
+            echo "::error file=supabase/tests/ci_bootstrap_prerequisites.sql::Bootstrap step failed for supabase/tests/ci_bootstrap_prerequisites.sql (psql exit status: ${bootstrap_rc})"
+            exit "$bootstrap_rc"
+          fi
 
           echo "=== Step 2: Replaying explicit chronological migration manifest (no global -1 wrapper) ==="
           while IFS= read -r migration_file; do
             [ -n "$migration_file" ] || continue
             echo "Applying migration: $migration_file"
             # Execute without --single-transaction so 20261107000002 CONCURRENTLY statements run cleanly
-            psql -v ON_ERROR_STOP=1 -d "$CI_DB" -f "$migration_file"
+            migration_rc=0
+            psql --echo-errors -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -d "$CI_DB" -f "$migration_file" < /dev/null || migration_rc=$?
+            if [ "$migration_rc" -ne 0 ]; then
+              echo "::error file=${migration_file}::Migration replay failed for ${migration_file} (psql exit status: ${migration_rc})"
+              exit "$migration_rc"
+            fi
           done < supabase/tests/ci_migration_manifest.txt
 
       - name: Run actual PostgreSQL RPC, privilege, precision & lifecycle integration tests
