@@ -586,20 +586,38 @@ interface MemoryTokenEntry {
 }
 
 const memoryGuestTokenStore = new Map<string, MemoryTokenEntry>();
-let memoryCleanupRegistered = false;
+const cleanupRegisteredWindows = new WeakSet<object>();
 
 export function clearMemoryGuestResourceTokens(): void {
   memoryGuestTokenStore.clear();
 }
 
+function getSafeSessionStorage(): Storage | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    const storage = window.sessionStorage;
+    if (!storage || typeof storage.getItem !== 'function' || typeof storage.setItem !== 'function') {
+      return null;
+    }
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
 function registerMemoryCleanup(): void {
-  if (memoryCleanupRegistered || typeof window === 'undefined') return;
-  memoryCleanupRegistered = true;
-  const wipe = () => {
-    memoryGuestTokenStore.clear();
-  };
-  window.addEventListener('pagehide', wipe);
-  window.addEventListener('beforeunload', wipe);
+  if (typeof window === 'undefined') return;
+  try {
+    if (cleanupRegisteredWindows.has(window)) return;
+    cleanupRegisteredWindows.add(window);
+    const wipe = () => {
+      memoryGuestTokenStore.clear();
+    };
+    window.addEventListener?.('pagehide', wipe);
+    window.addEventListener?.('beforeunload', wipe);
+  } catch {
+    // Fail safely in restricted environments
+  }
 }
 
 function pruneExpiredMemoryTokens(now = Date.now()): void {
@@ -632,14 +650,13 @@ export function saveStoredGuestResourceToken(params: {
   }
 
   let persisted = false;
-  if (typeof window !== 'undefined' && window.sessionStorage) {
+  const storage = getSafeSessionStorage();
+  if (storage) {
     try {
       for (const k of keys) {
-        window.sessionStorage.setItem(k, token);
+        storage.setItem(k, token);
       }
-      persisted = Boolean(
-        window.sessionStorage.getItem(`${GUEST_TX_TOKEN_STORAGE_PREFIX}${orderId}_${paymentId}`)
-      );
+      persisted = storage.getItem(`${GUEST_TX_TOKEN_STORAGE_PREFIX}${orderId}_${paymentId}`) === token;
     } catch {
       persisted = false;
     }
@@ -679,29 +696,34 @@ export function getStoredGuestResourceToken(
   candidateKeys.push(`${GUEST_TX_TOKEN_STORAGE_PREFIX}${cleanOrderId}_${cleanPaymentId}`);
 
   if (typeof window !== 'undefined') {
-    try {
-      if (window.sessionStorage) {
+    const storage = getSafeSessionStorage();
+    if (storage) {
+      try {
         for (const k of candidateKeys) {
-          const val = window.sessionStorage.getItem(k);
+          const val = storage.getItem(k);
           if (val) return val;
+        }
+      } catch {
+        // Fall back to bounded current-session memory store below
+      }
+    }
+
+    try {
+      const consumeBootstrap = (window as any).__dmConsumeBootstrapGuestToken;
+      if (typeof consumeBootstrap === 'function') {
+        const bootstrapToken = consumeBootstrap(cleanOrderId, cleanPaymentId);
+        if (bootstrapToken) {
+          registerMemoryCleanup();
+          pruneExpiredMemoryTokens();
+          const expiresAt = Date.now() + MEMORY_GUEST_TOKEN_TTL_MS;
+          for (const k of candidateKeys) {
+            memoryGuestTokenStore.set(k, { token: bootstrapToken, expiresAt });
+          }
+          return bootstrapToken;
         }
       }
     } catch {
-      // Fall back to bounded current-session memory store below
-    }
-
-    const consumeBootstrap = (window as any).__dmConsumeBootstrapGuestToken;
-    if (typeof consumeBootstrap === 'function') {
-      const bootstrapToken = consumeBootstrap(cleanOrderId, cleanPaymentId);
-      if (bootstrapToken) {
-        registerMemoryCleanup();
-        pruneExpiredMemoryTokens();
-        const expiresAt = Date.now() + MEMORY_GUEST_TOKEN_TTL_MS;
-        for (const k of candidateKeys) {
-          memoryGuestTokenStore.set(k, { token: bootstrapToken, expiresAt });
-        }
-        return bootstrapToken;
-      }
+      // Ignore restricted window access
     }
   }
 

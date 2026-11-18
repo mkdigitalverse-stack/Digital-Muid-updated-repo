@@ -1338,6 +1338,196 @@ async function main() {
       assert.strictEqual(dataLayer[countBeforeProxy].cta_name, "Book Consultation");
       assert.strictEqual("page_location" in dataLayer[countBeforeProxy], false);
     });
+
+    await runAsyncTest("19. Pre-GTM index.html handles alternate-case, separator-variant, URL-encoded keys, and fails closed", async () => {
+      // Case A: Alternate case + separator + URL-encoded token params scrubbed before GTM, token captured, safe params/hash preserved
+      const variants = [
+        { key: "ResourceAccessToken", token: "tok_case_variant_01" },
+        { key: "resource-access-token", token: "tok_dash_variant_02" },
+        { key: "resource%5Faccess%5Ftoken", token: "tok_enc_variant_03" },
+        { key: "resource%255Faccess%255Ftoken", token: "tok_dblenc_variant_04" },
+        { key: "Guest_Resource_Token", token: "tok_guest_variant_05" }
+      ];
+
+      for (const v of variants) {
+        const storage = createStorageMock(false);
+        const sim = runIndexHtmlHeadScript({
+          initialHref: `https://digitalmuid.in/resources/bundle/${BUNDLE_SLUG}?orderId=ord_v1&paymentId=pay_v1&resourceId=${BUNDLE_UUID}&invoiceId=inv_safe_1&utm_source=email&${v.key}=${v.token}#receipt`,
+          storageMock: storage.api
+        });
+
+        assert.strictEqual(
+          sim.getCurrentSearch(),
+          `?orderId=ord_v1&paymentId=pay_v1&resourceId=${BUNDLE_UUID}&invoiceId=inv_safe_1&utm_source=email`,
+          `Safe params must remain intact for variant ${v.key}`
+        );
+        assert.strictEqual(sim.getCurrentHref().includes(v.token), false, `Token must be scrubbed for ${v.key}`);
+        assert.strictEqual(sim.windowObj.location.hash, "#receipt");
+        assert.strictEqual(storage.store.get("dm_guest_res_tx_ord_v1_pay_v1"), v.token);
+        assert.strictEqual(storage.store.get(`dm_guest_res_tok_${BUNDLE_UUID}_ord_v1_pay_v1`), v.token);
+
+        assert.strictEqual(sim.appendedScripts.length, 1);
+        const dlDump = JSON.stringify(sim.windowObj.dataLayer);
+        assert.strictEqual(dlDump.includes(v.token), false, `dataLayer must never expose token for ${v.key}`);
+        assert.strictEqual(sim.windowObj.dataLayer[0].suppress_auto_pageview, true);
+        assert.strictEqual(sim.windowObj.dataLayer[0].allow_auto_pageview, false);
+        assert.ok(sim.windowObj.dataLayer.some((ev: any) => ev.event === "sanitized_page_view"));
+      }
+
+      // Case B: Unrelated params without guest resource token allow normal auto pageview
+      const cleanStorage = createStorageMock(false);
+      const cleanSim = runIndexHtmlHeadScript({
+        initialHref: "https://digitalmuid.in/resources?invoiceId=inv_99&utm_source=blog",
+        storageMock: cleanStorage.api
+      });
+      assert.strictEqual(cleanSim.getCurrentSearch(), "?invoiceId=inv_99&utm_source=blog");
+      assert.strictEqual(cleanSim.appendedScripts.length, 1);
+      assert.strictEqual(cleanSim.windowObj.dataLayer[0].suppress_auto_pageview, false);
+      assert.strictEqual(cleanSim.windowObj.dataLayer[0].allow_auto_pageview, true);
+
+      // Case C: Fail closed when replaceState throws on separator/encoded variant
+      for (const failParam of ["resource-access-token=tok_leak_1", "resource%5Faccess%5Ftoken=tok_leak_2"]) {
+        const failStorage = createStorageMock(false);
+        const failSim = runIndexHtmlHeadScript({
+          initialHref: `https://digitalmuid.in/resources/thank-you/paid?orderId=ord_f1&paymentId=pay_f1&${failParam}`,
+          storageMock: failStorage.api,
+          throwOnReplaceState: true
+        });
+        assert.strictEqual(failSim.appendedScripts.length, 0, `GTM must NOT load if scrub fails for ${failParam}`);
+        assert.strictEqual(failSim.windowObj.dataLayer, undefined);
+      }
+
+      // Case D: Fail closed on malformed %-encoded resource token parameter
+      const badEncSim = runIndexHtmlHeadScript({
+        initialHref: "https://digitalmuid.in/resources/thank-you/paid?orderId=ord_f2&paymentId=pay_f2&resource%E0%A4%A_token=tok_leak_3",
+        storageMock: createStorageMock(false).api
+      });
+      assert.strictEqual(badEncSim.appendedScripts.length, 0, "GTM must NOT load on malformed %-encoded resource parameter");
+      assert.strictEqual(badEncSim.windowObj.dataLayer, undefined);
+    });
+
+    await runAsyncTest("20. paymentService.ts throwing sessionStorage getter & writes fall back cleanly to bounded memory store with TTL and pagehide cleanup", async () => {
+      const tokRes = tryGenerateGuestResourceToken({
+        paymentId: "pay_reload_b1",
+        orderId: "order_reload_b1",
+        resourceId: BUNDLE_UUID,
+        email: "reload.bundle@example.com",
+        phone: "+919111122222"
+      });
+      assert.ok(tokRes.ok && tokRes.token);
+
+      const createEventWindow = (sessionStorageDescriptor: PropertyDescriptor) => {
+        const listeners: Record<string, Function[]> = {};
+        let localStorageAccessed = false;
+        const win: any = {
+          addEventListener(type: string, cb: Function) {
+            listeners[type] = listeners[type] || [];
+            listeners[type].push(cb);
+          },
+          dispatch(type: string) {
+            for (const cb of listeners[type] || []) cb();
+          }
+        };
+        Object.defineProperty(win, "sessionStorage", sessionStorageDescriptor);
+        Object.defineProperty(win, "localStorage", {
+          get() {
+            localStorageAccessed = true;
+            throw new Error("localStorage must never be accessed");
+          }
+        });
+        return { win, listeners, wasLocalStorageAccessed: () => localStorageAccessed };
+      };
+
+      // Case 1: window.sessionStorage getter itself throws (e.g. Safari strict/sandbox SecurityError)
+      clearMemoryGuestResourceTokens();
+      const getterThrowEnv = createEventWindow({
+        configurable: true,
+        get() {
+          throw new Error("SecurityError: sessionStorage getter denied");
+        }
+      });
+      (globalThis as any).window = getterThrowEnv.win;
+
+      const persistedOnGetterThrow = saveStoredGuestResourceToken({
+        resourceId: BUNDLE_UUID,
+        orderId: "order_reload_b1",
+        paymentId: "pay_reload_b1",
+        token: tokRes.token
+      });
+      assert.strictEqual(persistedOnGetterThrow, false);
+      assert.strictEqual(getterThrowEnv.wasLocalStorageAccessed(), false);
+
+      // Verify transaction, bundle canonical UUID, and slug alias bindings all resolve
+      assert.strictEqual(getStoredGuestResourceToken(BUNDLE_UUID, "order_reload_b1", "pay_reload_b1"), tokRes.token);
+      assert.strictEqual(getStoredGuestResourceToken(BUNDLE_SLUG, "order_reload_b1", "pay_reload_b1"), tokRes.token);
+      assert.strictEqual(getStoredGuestResourceToken(BUNDLE_UUID, "wrong_order", "pay_reload_b1"), null);
+      assert.strictEqual(getStoredGuestResourceToken(BUNDLE_UUID, "order_reload_b1", "wrong_pay"), null);
+
+      // Confirm recovered in-memory token actually authorizes protected bundle API
+      resetPaymentRateLimits();
+      const bundleOk = await originalFetch(
+        `${baseUrl}/api/payments/bundle-files?bundleId=${BUNDLE_UUID}&orderId=order_reload_b1&paymentId=pay_reload_b1`,
+        {
+          headers: {
+            "x-resource-access-token": getStoredGuestResourceToken(BUNDLE_UUID, "order_reload_b1", "pay_reload_b1")!
+          }
+        }
+      );
+      assert.strictEqual(bundleOk.status, 200);
+
+      // Cleanup on pagehide wipes in-memory token cleanly
+      assert.ok((getterThrowEnv.listeners["pagehide"] || []).length >= 1);
+      getterThrowEnv.win.dispatch("pagehide");
+      assert.strictEqual(getStoredGuestResourceToken(BUNDLE_UUID, "order_reload_b1", "pay_reload_b1"), null);
+
+      // Case 2: sessionStorage writes throw (QuotaExceededError) + beforeunload cleanup + 30-min TTL expiration
+      clearMemoryGuestResourceTokens();
+      const brokenStorage = createStorageMock(true);
+      const writeThrowEnv = createEventWindow({
+        configurable: true,
+        value: brokenStorage.api
+      });
+      (globalThis as any).window = writeThrowEnv.win;
+
+      const persistedOnWriteThrow = saveStoredGuestResourceToken({
+        resourceId: STANDALONE_UUID,
+        orderId: "order_ty_1",
+        paymentId: "pay_ty_1",
+        token: "tok_mem_ttl_test"
+      });
+      assert.strictEqual(persistedOnWriteThrow, false);
+      assert.strictEqual(getStoredGuestResourceToken(STANDALONE_UUID, "order_ty_1", "pay_ty_1"), "tok_mem_ttl_test");
+
+      // Verify beforeunload listener wipes memory token
+      assert.ok((writeThrowEnv.listeners["beforeunload"] || []).length >= 1);
+      writeThrowEnv.win.dispatch("beforeunload");
+      assert.strictEqual(getStoredGuestResourceToken(STANDALONE_UUID, "order_ty_1", "pay_ty_1"), null);
+
+      // Verify 30-minute TTL expiration prunes expired memory token
+      const originalDateNow = Date.now;
+      let fakeNow = originalDateNow();
+      Date.now = () => fakeNow;
+      try {
+        saveStoredGuestResourceToken({
+          resourceId: STANDALONE_UUID,
+          orderId: "order_ty_1",
+          paymentId: "pay_ty_1",
+          token: "tok_mem_ttl_expire"
+        });
+        assert.strictEqual(getStoredGuestResourceToken(STANDALONE_UUID, "order_ty_1", "pay_ty_1"), "tok_mem_ttl_expire");
+        fakeNow += 30 * 60 * 1000 + 1; // Advance past 30-min TTL
+        assert.strictEqual(getStoredGuestResourceToken(STANDALONE_UUID, "order_ty_1", "pay_ty_1"), null);
+      } finally {
+        Date.now = originalDateNow;
+      }
+
+      // Missing token fails closed (403)
+      resetPaymentRateLimits();
+      const failClosedRes = await originalFetch(
+        `${baseUrl}/api/payments/bundle-files?bundleId=${BUNDLE_UUID}&orderId=order_reload_b1&paymentId=pay_reload_b1`
+      );
+      assert.strictEqual(failClosedRes.status, 403);
+    });
   } finally {
     if (originalWindow === undefined) delete (globalThis as any).window;
     else (globalThis as any).window = originalWindow;

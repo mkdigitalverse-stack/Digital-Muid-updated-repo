@@ -38,34 +38,182 @@
         var BUNDLE_ID = '2d50e5e3-711d-4461-a70d-0ed54dd29f17';
         var BUNDLE_SLUG = 'meta-ads-campaign-planner-bundle';
         var hadSensitiveToken = false;
+        var scrubFailed = false;
+
+        var RECOGNIZED_GUEST_TOKEN_KEYS = {
+          resourceaccesstoken: true,
+          resourcetoken: true,
+          guestresourcetoken: true,
+          guestresourceaccesstoken: true,
+          guestaccesstoken: true,
+          guesttoken: true
+        };
+
+        function decodeParamRepeated(raw, maxPasses) {
+          var current = String(raw || '');
+          var passes = maxPasses || 3;
+          for (var i = 0; i < passes; i++) {
+            if (current.indexOf('%') === -1) break;
+            try {
+              var next = decodeURIComponent(current);
+              if (next === current) break;
+              current = next;
+            } catch (e) {
+              return { value: current, error: true };
+            }
+          }
+          return { value: current, error: false };
+        }
+
+        function safeDecodeVal(raw) {
+          var s = String(raw || '').replace(/\+/g, ' ');
+          try {
+            return decodeURIComponent(s);
+          } catch (e) {
+            return s;
+          }
+        }
+
+        function normalizeParamKey(rawKey) {
+          return String(rawKey || '').replace(/[\s_-]+/g, '').toLowerCase();
+        }
+
+        function inspectParamKey(rawKey) {
+          var directNorm = normalizeParamKey(rawKey);
+          if (RECOGNIZED_GUEST_TOKEN_KEYS[directNorm]) {
+            return { isSensitive: true, unsafe: false };
+          }
+          if (String(rawKey || '').indexOf('%') !== -1) {
+            var dec = decodeParamRepeated(rawKey, 3);
+            if (dec.error) {
+              if (/(?:resource|guest|token)/i.test(rawKey)) {
+                return { isSensitive: false, unsafe: true };
+              }
+              return { isSensitive: false, unsafe: false };
+            }
+            var decNorm = normalizeParamKey(dec.value);
+            if (RECOGNIZED_GUEST_TOKEN_KEYS[decNorm]) {
+              return { isSensitive: true, unsafe: false };
+            }
+          }
+          return { isSensitive: false, unsafe: false };
+        }
+
+        function sanitizeSegmentList(rawStr) {
+          if (!rawStr) return { kept: [], foundToken: '', foundSensitive: false, unsafe: false };
+          var parts = rawStr.split('&');
+          var kept = [];
+          var foundToken = '';
+          var foundSensitive = false;
+          for (var i = 0; i < parts.length; i++) {
+            var seg = parts[i];
+            if (!seg) continue;
+            var eqIdx = seg.indexOf('=');
+            var rawKey = eqIdx >= 0 ? seg.slice(0, eqIdx) : seg;
+            var check = inspectParamKey(rawKey);
+            if (check.unsafe) {
+              return { kept: [], foundToken: '', foundSensitive: true, unsafe: true };
+            }
+            if (check.isSensitive) {
+              foundSensitive = true;
+              if (!foundToken && eqIdx >= 0) {
+                var val = safeDecodeVal(seg.slice(eqIdx + 1)).trim();
+                if (val) foundToken = val;
+              }
+              continue;
+            }
+            kept.push(seg);
+          }
+          return { kept: kept, foundToken: foundToken, foundSensitive: foundSensitive, unsafe: false };
+        }
+
+        function sanitizeHashString(rawHash) {
+          if (!rawHash) return { hash: '', foundToken: '', foundSensitive: false, unsafe: false };
+          var body = rawHash.charAt(0) === '#' ? rawHash.slice(1) : rawHash;
+          var qIdx = body.indexOf('?');
+          if (qIdx >= 0) {
+            var prefix = body.slice(0, qIdx);
+            var qRes = sanitizeSegmentList(body.slice(qIdx + 1));
+            if (qRes.unsafe) return { hash: rawHash, foundToken: '', foundSensitive: true, unsafe: true };
+            var rebuilt = '';
+            if (prefix || qRes.kept.length) {
+              rebuilt = '#' + prefix + (qRes.kept.length ? '?' + qRes.kept.join('&') : '');
+            }
+            return { hash: rebuilt, foundToken: qRes.foundToken, foundSensitive: qRes.foundSensitive, unsafe: false };
+          }
+          if (body.indexOf('=') !== -1) {
+            var fragRes = sanitizeSegmentList(body);
+            if (fragRes.unsafe) return { hash: rawHash, foundToken: '', foundSensitive: true, unsafe: true };
+            if (fragRes.foundSensitive) {
+              return {
+                hash: fragRes.kept.length ? '#' + fragRes.kept.join('&') : '',
+                foundToken: fragRes.foundToken,
+                foundSensitive: true,
+                unsafe: false
+              };
+            }
+          }
+          return { hash: rawHash, foundToken: '', foundSensitive: false, unsafe: false };
+        }
+
+        function hasUnsafeOrSensitiveParam(searchStr, hashStr) {
+          if (searchStr && searchStr.charAt(0) === '?') searchStr = searchStr.slice(1);
+          if (searchStr) {
+            var sCheck = sanitizeSegmentList(searchStr);
+            if (sCheck.unsafe || sCheck.foundSensitive) return true;
+          }
+          if (hashStr) {
+            var hCheck = sanitizeHashString(hashStr);
+            if (hCheck.unsafe || hCheck.foundSensitive) return true;
+          }
+          return false;
+        }
 
         try {
-          var sp = new URLSearchParams(w.location.search || '');
-          var token = (sp.get('resourceAccessToken') || sp.get('resource_access_token') || '').trim();
-          var orderId = (sp.get('orderId') || sp.get('order_id') || '').trim();
-          var paymentId = (sp.get('paymentId') || sp.get('payment_id') || '').trim();
-          var rawResId = (sp.get('resourceId') || sp.get('id') || sp.get('slug') || '').trim();
+          var rawSearch = String(w.location.search || '');
+          var rawQuery = rawSearch.charAt(0) === '?' ? rawSearch.slice(1) : rawSearch;
+          var rawHash = String(w.location.hash || '');
+
+          var searchRes = sanitizeSegmentList(rawQuery);
+          var hashRes = sanitizeHashString(rawHash);
+
+          if (searchRes.unsafe || hashRes.unsafe) {
+            scrubFailed = true;
+            hadSensitiveToken = true;
+          }
+
+          var token = (searchRes.foundToken || hashRes.foundToken || '').trim();
+          var orderId = '';
+          var paymentId = '';
+          var rawResId = '';
+
+          try {
+            var sp = new URLSearchParams(rawSearch);
+            orderId = (sp.get('orderId') || sp.get('order_id') || '').trim();
+            paymentId = (sp.get('paymentId') || sp.get('payment_id') || '').trim();
+            rawResId = (sp.get('resourceId') || sp.get('id') || sp.get('slug') || '').trim();
+          } catch (spErr) {}
+
           var isBundlePath = (w.location.pathname || '').indexOf('/resources/bundle') === 0;
           var effectiveResId = rawResId || (isBundlePath ? BUNDLE_ID : '');
 
-          if (token) {
+          if (searchRes.foundSensitive || hashRes.foundSensitive || token) {
             hadSensitiveToken = true;
             var persistedToSession = false;
 
-            if (orderId && paymentId) {
+            if (token && orderId && paymentId) {
               try {
-                if (w.sessionStorage) {
+                var ss = w.sessionStorage;
+                if (ss) {
                   if (effectiveResId) {
-                    w.sessionStorage.setItem('dm_guest_res_tok_' + effectiveResId + '_' + orderId + '_' + paymentId, token);
+                    ss.setItem('dm_guest_res_tok_' + effectiveResId + '_' + orderId + '_' + paymentId, token);
                     if (effectiveResId === BUNDLE_ID || effectiveResId === BUNDLE_SLUG) {
-                      w.sessionStorage.setItem('dm_guest_res_tok_' + BUNDLE_ID + '_' + orderId + '_' + paymentId, token);
-                      w.sessionStorage.setItem('dm_guest_res_tok_' + BUNDLE_SLUG + '_' + orderId + '_' + paymentId, token);
+                      ss.setItem('dm_guest_res_tok_' + BUNDLE_ID + '_' + orderId + '_' + paymentId, token);
+                      ss.setItem('dm_guest_res_tok_' + BUNDLE_SLUG + '_' + orderId + '_' + paymentId, token);
                     }
                   }
-                  w.sessionStorage.setItem('dm_guest_res_tx_' + orderId + '_' + paymentId, token);
-                  persistedToSession = Boolean(
-                    w.sessionStorage.getItem('dm_guest_res_tx_' + orderId + '_' + paymentId)
-                  );
+                  ss.setItem('dm_guest_res_tx_' + orderId + '_' + paymentId, token);
+                  persistedToSession = ss.getItem('dm_guest_res_tx_' + orderId + '_' + paymentId) === token;
                 }
               } catch (storageErr) {
                 persistedToSession = false;
@@ -99,19 +247,24 @@
               }
             }
 
-            sp.delete('resourceAccessToken');
-            sp.delete('resource_access_token');
-            var nextQs = sp.toString();
-            var cleanRelUrl = (w.location.pathname || '/') + (nextQs ? '?' + nextQs : '') + (w.location.hash || '');
-            try {
-              w.history.replaceState(w.history.state, '', cleanRelUrl);
-            } catch (histErr) {}
+            if (!scrubFailed) {
+              var nextQs = searchRes.kept.join('&');
+              var cleanRelUrl = (w.location.pathname || '/') + (nextQs ? '?' + nextQs : '') + (hashRes.hash || '');
+              try {
+                w.history.replaceState(w.history.state, '', cleanRelUrl);
+              } catch (histErr) {
+                scrubFailed = true;
+              }
+            }
           }
-        } catch (err) {}
+        } catch (err) {
+          scrubFailed = true;
+        }
 
-        // Fail closed: prevent GTM initialization if URL scrubbing failed
-        var currentSearch = w.location.search || '';
-        if (/(?:^|[?&])(?:resourceAccessToken|resource_access_token)=/i.test(currentSearch)) {
+        // Fail closed: prevent GTM initialization if URL scrubbing failed or sensitive resource token remains
+        var currentSearch = String(w.location.search || '');
+        var currentHash = String(w.location.hash || '');
+        if (scrubFailed || hasUnsafeOrSensitiveParam(currentSearch, currentHash)) {
           return;
         }
 
