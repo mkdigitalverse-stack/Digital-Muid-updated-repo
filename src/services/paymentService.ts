@@ -578,32 +578,84 @@ const BUNDLE_CANONICAL_ID = '2d50e5e3-711d-4461-a70d-0ed54dd29f17';
 const BUNDLE_CANONICAL_SLUG = 'meta-ads-campaign-planner-bundle';
 const GUEST_TOKEN_STORAGE_PREFIX = 'dm_guest_res_tok_';
 const GUEST_TX_TOKEN_STORAGE_PREFIX = 'dm_guest_res_tx_';
+const MEMORY_GUEST_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 min max same-session fallback when sessionStorage fails
+
+interface MemoryTokenEntry {
+  token: string;
+  expiresAt: number;
+}
+
+const memoryGuestTokenStore = new Map<string, MemoryTokenEntry>();
+let memoryCleanupRegistered = false;
+
+export function clearMemoryGuestResourceTokens(): void {
+  memoryGuestTokenStore.clear();
+}
+
+function registerMemoryCleanup(): void {
+  if (memoryCleanupRegistered || typeof window === 'undefined') return;
+  memoryCleanupRegistered = true;
+  const wipe = () => {
+    memoryGuestTokenStore.clear();
+  };
+  window.addEventListener('pagehide', wipe);
+  window.addEventListener('beforeunload', wipe);
+}
+
+function pruneExpiredMemoryTokens(now = Date.now()): void {
+  for (const [key, entry] of memoryGuestTokenStore.entries()) {
+    if (!entry || entry.expiresAt <= now) {
+      memoryGuestTokenStore.delete(key);
+    }
+  }
+}
 
 export function saveStoredGuestResourceToken(params: {
   resourceId?: string | null;
   orderId?: string | null;
   paymentId?: string | null;
   token?: string | null;
-}): void {
-  if (typeof window === 'undefined' || !window.sessionStorage) return;
+}): boolean {
   const token = String(params.token || '').trim();
   const orderId = String(params.orderId || '').trim();
   const paymentId = String(params.paymentId || '').trim();
   const resourceId = String(params.resourceId || '').trim();
-  if (!token || !orderId || !paymentId) return;
+  if (!token || !orderId || !paymentId) return false;
 
-  try {
-    if (resourceId) {
-      window.sessionStorage.setItem(`${GUEST_TOKEN_STORAGE_PREFIX}${resourceId}_${orderId}_${paymentId}`, token);
-      if (resourceId === BUNDLE_CANONICAL_ID || resourceId === BUNDLE_CANONICAL_SLUG) {
-        window.sessionStorage.setItem(`${GUEST_TOKEN_STORAGE_PREFIX}${BUNDLE_CANONICAL_ID}_${orderId}_${paymentId}`, token);
-        window.sessionStorage.setItem(`${GUEST_TOKEN_STORAGE_PREFIX}${BUNDLE_CANONICAL_SLUG}_${orderId}_${paymentId}`, token);
-      }
+  const keys: string[] = [`${GUEST_TX_TOKEN_STORAGE_PREFIX}${orderId}_${paymentId}`];
+  if (resourceId) {
+    keys.push(`${GUEST_TOKEN_STORAGE_PREFIX}${resourceId}_${orderId}_${paymentId}`);
+    if (resourceId === BUNDLE_CANONICAL_ID || resourceId === BUNDLE_CANONICAL_SLUG) {
+      keys.push(`${GUEST_TOKEN_STORAGE_PREFIX}${BUNDLE_CANONICAL_ID}_${orderId}_${paymentId}`);
+      keys.push(`${GUEST_TOKEN_STORAGE_PREFIX}${BUNDLE_CANONICAL_SLUG}_${orderId}_${paymentId}`);
     }
-    window.sessionStorage.setItem(`${GUEST_TX_TOKEN_STORAGE_PREFIX}${orderId}_${paymentId}`, token);
-  } catch {
-    // Ignore storage quota/privacy mode failures cleanly
   }
+
+  let persisted = false;
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      for (const k of keys) {
+        window.sessionStorage.setItem(k, token);
+      }
+      persisted = Boolean(
+        window.sessionStorage.getItem(`${GUEST_TX_TOKEN_STORAGE_PREFIX}${orderId}_${paymentId}`)
+      );
+    } catch {
+      persisted = false;
+    }
+  }
+
+  // Retain in memory ONLY if sessionStorage failed (current page session only, never reload recovery)
+  if (!persisted) {
+    registerMemoryCleanup();
+    pruneExpiredMemoryTokens();
+    const expiresAt = Date.now() + MEMORY_GUEST_TOKEN_TTL_MS;
+    for (const k of keys) {
+      memoryGuestTokenStore.set(k, { token, expiresAt });
+    }
+  }
+
+  return persisted;
 }
 
 export function getStoredGuestResourceToken(
@@ -611,29 +663,56 @@ export function getStoredGuestResourceToken(
   orderId?: string | null,
   paymentId?: string | null
 ): string | null {
-  if (typeof window === 'undefined' || !window.sessionStorage) return null;
   const cleanOrderId = String(orderId || '').trim();
   const cleanPaymentId = String(paymentId || '').trim();
   const cleanResourceId = String(resourceId || '').trim();
   if (!cleanOrderId || !cleanPaymentId) return null;
 
-  try {
-    if (cleanResourceId) {
-      const exact = window.sessionStorage.getItem(
-        `${GUEST_TOKEN_STORAGE_PREFIX}${cleanResourceId}_${cleanOrderId}_${cleanPaymentId}`
-      );
-      if (exact) return exact;
-      if (cleanResourceId === BUNDLE_CANONICAL_ID || cleanResourceId === BUNDLE_CANONICAL_SLUG) {
-        const aliasKey = cleanResourceId === BUNDLE_CANONICAL_ID ? BUNDLE_CANONICAL_SLUG : BUNDLE_CANONICAL_ID;
-        const aliasVal = window.sessionStorage.getItem(
-          `${GUEST_TOKEN_STORAGE_PREFIX}${aliasKey}_${cleanOrderId}_${cleanPaymentId}`
-        );
-        if (aliasVal) return aliasVal;
+  const candidateKeys: string[] = [];
+  if (cleanResourceId) {
+    candidateKeys.push(`${GUEST_TOKEN_STORAGE_PREFIX}${cleanResourceId}_${cleanOrderId}_${cleanPaymentId}`);
+    if (cleanResourceId === BUNDLE_CANONICAL_ID || cleanResourceId === BUNDLE_CANONICAL_SLUG) {
+      const aliasKey = cleanResourceId === BUNDLE_CANONICAL_ID ? BUNDLE_CANONICAL_SLUG : BUNDLE_CANONICAL_ID;
+      candidateKeys.push(`${GUEST_TOKEN_STORAGE_PREFIX}${aliasKey}_${cleanOrderId}_${cleanPaymentId}`);
+    }
+  }
+  candidateKeys.push(`${GUEST_TX_TOKEN_STORAGE_PREFIX}${cleanOrderId}_${cleanPaymentId}`);
+
+  if (typeof window !== 'undefined') {
+    try {
+      if (window.sessionStorage) {
+        for (const k of candidateKeys) {
+          const val = window.sessionStorage.getItem(k);
+          if (val) return val;
+        }
+      }
+    } catch {
+      // Fall back to bounded current-session memory store below
+    }
+
+    const consumeBootstrap = (window as any).__dmConsumeBootstrapGuestToken;
+    if (typeof consumeBootstrap === 'function') {
+      const bootstrapToken = consumeBootstrap(cleanOrderId, cleanPaymentId);
+      if (bootstrapToken) {
+        registerMemoryCleanup();
+        pruneExpiredMemoryTokens();
+        const expiresAt = Date.now() + MEMORY_GUEST_TOKEN_TTL_MS;
+        for (const k of candidateKeys) {
+          memoryGuestTokenStore.set(k, { token: bootstrapToken, expiresAt });
+        }
+        return bootstrapToken;
       }
     }
-    return window.sessionStorage.getItem(`${GUEST_TX_TOKEN_STORAGE_PREFIX}${cleanOrderId}_${cleanPaymentId}`);
-  } catch {
-    return null;
   }
+
+  pruneExpiredMemoryTokens();
+  for (const k of candidateKeys) {
+    const entry = memoryGuestTokenStore.get(k);
+    if (entry && entry.expiresAt > Date.now()) {
+      return entry.token;
+    }
+  }
+
+  return null;
 }
 

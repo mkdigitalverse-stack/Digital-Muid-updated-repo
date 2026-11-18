@@ -957,12 +957,18 @@ export async function fulfillResourcePurchase({
             return;
           }
           const toEmail = normalizedCustomerEmail || targetPurchase?.customer_email || null;
+          const toPhone = cleanedCustomerPhone || targetPurchase?.customer_phone || "";
+          const effectiveUserId = resolvedUserId || targetPurchase?.user_id || targetPayment?.user_id || null;
           if (toEmail) {
             await sendResourceDeliveryEmail({
               to: toEmail,
               customerName: cleanedCustomerName || targetPurchase?.customer_name || "Valued Customer",
+              customerPhone: toPhone,
               resourceTitle: targetPayment?.item_title || effectiveResourceTitle,
               resourceId: canonicalResourceId,
+              resourceSlug: resourceRecord?.slug || null,
+              userId: effectiveUserId,
+              isGuest: !effectiveUserId,
               amount: authoritativeAmount,
               currency: "INR",
               orderId: cleanOrderId,

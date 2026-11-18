@@ -1,7 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { resourceService } from '../services/resourceService';
-import { paymentService } from '../services/paymentService';
+import {
+  paymentService,
+  saveStoredGuestResourceToken,
+  getStoredGuestResourceToken
+} from '../services/paymentService';
 import { loadRazorpayCheckoutScript, getClientRazorpayKeyId } from '../lib/razorpay';
 import { analytics } from '../utils/analytics';
 import {
@@ -55,46 +59,102 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   const conversionTrackedRef = useRef<boolean>(false);
+  const sessionTokenRef = useRef<string | null>(null);
+  const justVerifiedTxRef = useRef<string | null>(null);
 
-  // Parse query params (paymentId / orderId if redirected from checkout)
-  const [urlParams] = useState<{ orderId: string | null; paymentId: string | null; checkout: boolean }>(() => {
+  const BUNDLE_CANONICAL_ID = '2d50e5e3-711d-4461-a70d-0ed54dd29f17';
+
+  // Parse query params (paymentId / orderId if redirected from checkout or emailed link)
+  const [urlParams, setUrlParams] = useState<{ orderId: string | null; paymentId: string | null; checkout: boolean }>(() => {
     if (typeof window === 'undefined') return { orderId: null, paymentId: null, checkout: false };
     const sp = new URLSearchParams(window.location.search);
+    const orderId = sp.get('orderId') || sp.get('order_id');
+    const paymentId = sp.get('paymentId') || sp.get('payment_id');
+    const urlToken = sp.get('resourceAccessToken') || sp.get('resource_access_token');
+
+    if (urlToken && orderId && paymentId) {
+      sessionTokenRef.current = urlToken;
+      const persisted = saveStoredGuestResourceToken({
+        resourceId: BUNDLE_CANONICAL_ID,
+        orderId,
+        paymentId,
+        token: urlToken
+      });
+      if (persisted) {
+        sp.delete('resourceAccessToken');
+        sp.delete('resource_access_token');
+        const nextQs = sp.toString();
+        const cleanUrl = `${window.location.pathname}${nextQs ? `?${nextQs}` : ''}${window.location.hash || ''}`;
+        try {
+          window.history.replaceState(window.history.state, '', cleanUrl);
+        } catch {}
+      }
+    }
+
     return {
-      orderId: sp.get('orderId') || sp.get('order_id'),
-      paymentId: sp.get('paymentId') || sp.get('payment_id'),
+      orderId,
+      paymentId,
       checkout: sp.get('checkout') === 'true' || sp.get('buy') === 'true'
     };
   });
 
+  useEffect(() => {
+    return () => {
+      sessionTokenRef.current = null;
+    };
+  }, []);
+
   const bundleResource = resources.find(
-    (r) => r.id === '2d50e5e3-711d-4461-a70d-0ed54dd29f17' || r.slug === 'meta-ads-campaign-planner-bundle'
+    (r) => r.id === BUNDLE_CANONICAL_ID || r.slug === 'meta-ads-campaign-planner-bundle'
   );
 
-  const verifyAndLoadBundle = async () => {
+  const verifyAndLoadBundle = async (overrideParams?: {
+    orderId?: string | null;
+    paymentId?: string | null;
+    resourceAccessToken?: string | null;
+  }) => {
     setIsLoading(true);
     setErrorMessage(null);
 
+    const effectiveOrderId = overrideParams?.orderId ?? urlParams.orderId;
+    const effectivePaymentId = overrideParams?.paymentId ?? urlParams.paymentId;
+    const recoveredToken =
+      overrideParams?.resourceAccessToken ||
+      sessionTokenRef.current ||
+      getStoredGuestResourceToken(BUNDLE_CANONICAL_ID, effectiveOrderId, effectivePaymentId) ||
+      undefined;
+
     try {
-      const res = await resourceService.fetchBundleFiles('2d50e5e3-711d-4461-a70d-0ed54dd29f17', {
-        orderId: urlParams.orderId || undefined,
-        paymentId: urlParams.paymentId || undefined
+      const res = await resourceService.fetchBundleFiles(BUNDLE_CANONICAL_ID, {
+        orderId: effectiveOrderId || undefined,
+        paymentId: effectivePaymentId || undefined,
+        resourceAccessToken: recoveredToken
       });
 
       if (res.success && res.authorized && res.files) {
         setIsAuthorized(true);
         setBundleFiles(res.files);
 
-        // Track conversion if arriving from a verified checkout
-        if (urlParams.paymentId && !conversionTrackedRef.current) {
-          analytics.trackPaidResourcePurchase({
-            resourceId: '2d50e5e3-711d-4461-a70d-0ed54dd29f17',
-            resourceTitle: 'Meta Ads Campaign Planner Bundle',
-            orderId: urlParams.orderId || `order_${Date.now()}`,
-            paymentId: urlParams.paymentId,
-            amount: 299,
-            currency: 'INR'
-          });
+        // Track conversion once per verified purchase transaction
+        if (effectivePaymentId && !conversionTrackedRef.current) {
+          const dedupKey = `tracked_paid_conv_${effectiveOrderId || BUNDLE_CANONICAL_ID}_${effectivePaymentId}`;
+          const alreadyTracked =
+            typeof window !== 'undefined' &&
+            window.sessionStorage &&
+            window.sessionStorage.getItem(dedupKey);
+          if (!alreadyTracked) {
+            analytics.trackPaidResourcePurchase({
+              resourceId: BUNDLE_CANONICAL_ID,
+              resourceTitle: 'Meta Ads Campaign Planner Bundle',
+              orderId: effectiveOrderId || `order_${Date.now()}`,
+              paymentId: effectivePaymentId,
+              amount: 299,
+              currency: 'INR'
+            });
+            try {
+              window.sessionStorage?.setItem(dedupKey, 'true');
+            } catch {}
+          }
           conversionTrackedRef.current = true;
         }
       } else {
@@ -148,6 +208,11 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
   }, [showCheckoutModal]);
 
   useEffect(() => {
+    const txKey = `${urlParams.orderId || ''}_${urlParams.paymentId || ''}`;
+    if (justVerifiedTxRef.current && justVerifiedTxRef.current === txKey) {
+      justVerifiedTxRef.current = null;
+      return;
+    }
     verifyAndLoadBundle();
   }, [currentUser, urlParams.orderId, urlParams.paymentId]);
 
@@ -341,11 +406,46 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
             setShowCheckoutModal(false);
             notify('Payment verified! Complete bundle unlocked.', 'success');
 
-            // Reload bundle files with new payment token
-            const freshFiles = await resourceService.fetchBundleFiles('2d50e5e3-711d-4461-a70d-0ed54dd29f17', {
+            if (verifyResult.resourceAccessToken) {
+              sessionTokenRef.current = verifyResult.resourceAccessToken;
+            }
+
+            // Preserve orderId and paymentId in URL (without exposing token) for reload recovery
+            if (typeof window !== 'undefined') {
+              const nextParams = new URLSearchParams(window.location.search);
+              nextParams.set('orderId', response.razorpay_order_id);
+              nextParams.set('paymentId', response.razorpay_payment_id);
+              nextParams.delete('checkout');
+              nextParams.delete('buy');
+              nextParams.delete('resourceAccessToken');
+              nextParams.delete('resource_access_token');
+              const cleanQs = nextParams.toString();
+              const cleanUrl = `${window.location.pathname}${cleanQs ? `?${cleanQs}` : ''}${window.location.hash || ''}`;
+              try {
+                window.history.replaceState(window.history.state, '', cleanUrl);
+              } catch {}
+            }
+
+            justVerifiedTxRef.current = `${response.razorpay_order_id}_${response.razorpay_payment_id}`;
+            setUrlParams({
               orderId: response.razorpay_order_id,
               paymentId: response.razorpay_payment_id,
-              resourceAccessToken: verifyResult.resourceAccessToken
+              checkout: false
+            });
+
+            // Reload bundle files with new payment token
+            const recoveredGuestToken =
+              verifyResult.resourceAccessToken ||
+              getStoredGuestResourceToken(
+                BUNDLE_CANONICAL_ID,
+                response.razorpay_order_id,
+                response.razorpay_payment_id
+              ) ||
+              undefined;
+            const freshFiles = await resourceService.fetchBundleFiles(BUNDLE_CANONICAL_ID, {
+              orderId: response.razorpay_order_id,
+              paymentId: response.razorpay_payment_id,
+              resourceAccessToken: recoveredGuestToken
             });
 
             if (freshFiles.success && freshFiles.files) {

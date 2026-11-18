@@ -1,0 +1,897 @@
+/**
+ * DIGITALMUID V4.3 — AUD-01 RESOURCE EMAIL DELIVERY & TOKEN SECURITY REGRESSION SUITE
+ *
+ * Strictly offline & isolated (zero real DB, Razorpay, Resend, or network calls).
+ * Verifies:
+ *  1. Standalone guest email link routing (/resources/thank-you/paid + resourceId + orderId + paymentId + resourceAccessToken).
+ *  2. Bundle guest email link routing (/resources/bundle/meta-ads-campaign-planner-bundle + orderId + paymentId + resourceAccessToken).
+ *  3. Canonical UUID token binding (bundle slug/UUID normalized to 2d50e5e3-711d-4461-a70d-0ed54dd29f17) & 30-day expiry.
+ *  4. Authenticated buyer receives NO guest token in email or API.
+ *  5. Pre-GTM index.html script stores token & scrubs URL synchronously before GTM initializes.
+ *  6. Fail-closed GTM suppression when history.replaceState fails to scrub URL.
+ *  7. analytics.ts sanitization of page_location, page_path, and conversion params.
+ *  8. Bundle reload & sessionStorage recovery + bounded current-session fallback when sessionStorage fails.
+ *  9. Direct in-page bundle purchase reload recovery (URL retains orderId/paymentId without token).
+ * 10. PaidResourceThankYouPage standalone token recovery after scrub & reload.
+ * 11. Missing, invalid, expired, and mismatched tokens fail closed (403).
+ * 12. Email delivery failure logs status="failed" in email_logs, omits tokens from logs/metadata, and does not deduplicate failed sends.
+ * 13. Existing invoice URL preservation & /api/payments/download-paid-asset protection.
+ */
+
+import assert from "node:assert";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import vm from "node:vm";
+import express from "express";
+
+// Configure isolated test environment BEFORE importing safety-gated modules
+process.env.NODE_ENV = "test";
+process.env.APP_ENV = "test";
+process.env.FORCE_DEV_SAFETY = "true";
+process.env.SUPABASE_URL = "https://isolated-test-sandbox.supabase.co";
+process.env.VITE_SUPABASE_URL = "https://isolated-test-sandbox.supabase.co";
+process.env.ALLOW_STAGING_TEST_WRITES = "true";
+process.env.RAZORPAY_KEY_ID = "rzp_test_aud01_12345";
+process.env.RAZORPAY_KEY_SECRET = "rzp_test_aud01_secret_at_least_32_bytes_ok!";
+process.env.RAZORPAY_WEBHOOK_SECRET = "whsec_test_aud01_secret_at_least_32_bytes_ok!";
+process.env.INVOICE_TOKEN_HMAC_SECRET = "inv_hmac_aud01_secret_entropy_32_bytes_ok!";
+process.env.RESOURCE_TOKEN_HMAC_SECRET = "res_hmac_aud01_secret_entropy_32_bytes_ok!";
+process.env.ASSET_TOKEN_HMAC_SECRET = "asset_hmac_aud01_secret_entropy_32_bytes_ok!";
+delete process.env.RESEND_API_KEY;
+
+const BUNDLE_UUID = "2d50e5e3-711d-4461-a70d-0ed54dd29f17";
+const BUNDLE_SLUG = "meta-ads-campaign-planner-bundle";
+const STANDALONE_UUID = "aaaaaaaa-1111-4111-8111-111111111111";
+const STANDALONE_SLUG = "ad-budget-break-even-calculator";
+const CHILD_BUNDLE_ITEM_UUID = "5b9f3c7d-9a4b-4e8c-9d2b-1e2f3a4b5c02";
+const CHILD_BUNDLE_ITEM_SLUG = "the-ad-budget-breat-even-calculate";
+
+const {
+  buildResourceDeliveryEmailHtml,
+  sendResourceDeliveryEmail,
+  hasAlreadySent
+} = await import("../server/mailerService.js");
+const { fulfillResourcePurchase } = await import("../server/paymentFulfillment.js");
+const {
+  verifyGuestResourceToken,
+  tryGenerateGuestResourceToken
+} = await import("../server/resourceToken.js");
+const {
+  default: paymentRoutes,
+  resetPaymentRateLimits,
+  generateAssetAccessToken,
+  verifyAssetAccessToken
+} = await import("../server/paymentRoutes.js");
+const { tryGenerateSignedInvoiceToken } = await import("../server/invoiceToken.js");
+const { setMockSupabaseServerClient } = await import("../server/supabaseServer.js");
+const { setMockRazorpayClient } = await import("../server/razorpay.js");
+const { trackEvent, analytics } = await import("../src/utils/analytics.ts");
+const {
+  saveStoredGuestResourceToken,
+  getStoredGuestResourceToken,
+  clearMemoryGuestResourceTokens
+} = await import("../src/services/paymentService.ts");
+
+function createMockDb() {
+  const state = {
+    payments: [] as any[],
+    bookings: [] as any[],
+    credit_notes: [] as any[],
+    resource_purchases: [] as any[],
+    email_logs: [] as any[],
+    resources: [
+      {
+        id: BUNDLE_UUID,
+        slug: BUNDLE_SLUG,
+        title: "Meta Ads Campaign Planner Bundle",
+        status: "published",
+        access_type: "paid",
+        price: 299,
+        currency: "INR"
+      },
+      {
+        id: STANDALONE_UUID,
+        slug: STANDALONE_SLUG,
+        title: "Standalone Growth Kit",
+        status: "published",
+        access_type: "paid",
+        price: 499,
+        currency: "INR"
+      },
+      {
+        id: CHILD_BUNDLE_ITEM_UUID,
+        slug: CHILD_BUNDLE_ITEM_SLUG,
+        title: "Ad Budget & Break-Even Calculator",
+        status: "published",
+        access_type: "paid",
+        price: 499,
+        currency: "INR"
+      }
+    ],
+    profiles: [
+      {
+        id: "10000000-0000-4000-8000-000000000001",
+        full_name: "Auth Buyer",
+        phone: "+919876543210",
+        student_id: "DM-STU-000101",
+        state: "Delhi"
+      }
+    ]
+  };
+
+  const authUsers: Record<string, any> = {
+    "auth-jwt-1": {
+      id: "10000000-0000-4000-8000-000000000001",
+      email: "authbuyer@example.com",
+      email_confirmed_at: "2026-01-01T00:00:00Z",
+      user_metadata: { full_name: "Auth Buyer" },
+      app_metadata: {}
+    }
+  };
+
+  function makeQuery(table: string) {
+    const filters: Array<{ type: string; col?: string; val?: any; clause?: string }> = [];
+    let op = "select";
+    let payload: any = null;
+
+    const matchRow = (row: any) => {
+      for (const f of filters) {
+        if (f.type === "eq" && row[f.col!] !== f.val) return false;
+        if (f.type === "in" && (!Array.isArray(f.val) || !f.val.includes(row[f.col!]))) return false;
+        if (f.type === "or" && f.clause) {
+          const parts = f.clause.split(",").map((s) => s.trim());
+          const ok = parts.some((p) => {
+            const m = p.match(/^([^.]+)\.eq\.(.+)$/);
+            return m ? String(row[m[1]] ?? "") === m[2] : false;
+          });
+          if (!ok) return false;
+        }
+      }
+      return true;
+    };
+
+    const exec = async () => {
+      const rows = (state as any)[table] || [];
+      if (op === "upsert") {
+        const items = Array.isArray(payload) ? payload : [payload];
+        for (const item of items) {
+          const idx = rows.findIndex(
+            (r: any) =>
+              r.payment_id === item.payment_id && r.template_type === item.template_type
+          );
+          if (idx >= 0) rows[idx] = { ...rows[idx], ...item };
+          else rows.push({ id: `row_${rows.length + 1}`, ...item });
+        }
+        return { data: items, error: null };
+      }
+      const matched = rows.filter(matchRow);
+      return { data: matched, error: null };
+    };
+
+    const builder: any = {
+      select() { return builder; },
+      eq(col: string, val: any) { filters.push({ type: "eq", col, val }); return builder; },
+      in(col: string, val: any) { filters.push({ type: "in", col, val }); return builder; },
+      or(clause: string) { filters.push({ type: "or", clause }); return builder; },
+      order() { return builder; },
+      limit() { return builder; },
+      upsert(p: any) { op = "upsert"; payload = p; return exec(); },
+      async maybeSingle() {
+        const res = await exec();
+        return { data: res.data[0] || null, error: null };
+      },
+      async single() {
+        const res = await exec();
+        return { data: res.data[0] || null, error: null };
+      },
+      then(resolve: any, reject: any) {
+        return exec().then(resolve, reject);
+      }
+    };
+    return builder;
+  }
+
+  return {
+    state,
+    client: {
+      auth: {
+        async getUser(jwt: string) {
+          const u = authUsers[jwt];
+          return u ? { data: { user: u }, error: null } : { data: { user: null }, error: { message: "Invalid JWT" } };
+        }
+      },
+      from(table: string) {
+        return makeQuery(table);
+      },
+      storage: {
+        from() {
+          return {
+            async createSignedUrl(storagePath: string) {
+              return { data: { signedUrl: `https://signed.example.test/${storagePath}?sig=mock` }, error: null };
+            }
+          };
+        }
+      },
+      async rpc(fnName: string, args: any) {
+        if (fnName === "fulfill_resource_purchase") {
+          const purchase = {
+            id: `rp_${state.resource_purchases.length + 1}`,
+            user_id: args.p_user_id || null,
+            resource_id: args.p_resource_id,
+            amount: args.p_amount,
+            currency: args.p_currency,
+            razorpay_order_id: args.p_order_id,
+            razorpay_payment_id: args.p_payment_id,
+            customer_name: args.p_customer_name,
+            customer_email: args.p_customer_email,
+            customer_phone: args.p_customer_phone,
+            status: "active"
+          };
+          const payment = {
+            id: `payrow_${state.payments.length + 1}`,
+            user_id: args.p_user_id || null,
+            item_type: "resource",
+            item_id: args.p_resource_id,
+            item_title: args.p_resource_title,
+            amount: args.p_amount,
+            currency: args.p_currency,
+            razorpay_order_id: args.p_order_id,
+            razorpay_payment_id: args.p_payment_id,
+            status: "captured"
+          };
+          state.resource_purchases.push(purchase);
+          state.payments.push(payment);
+          return { data: { success: true, purchase, payment }, error: null };
+        }
+        return { data: null, error: { message: `Unknown RPC ${fnName}` } };
+      }
+    }
+  };
+}
+
+function createStorageMock(shouldThrow = false) {
+  const store = new Map<string, string>();
+  return {
+    store,
+    api: {
+      getItem(k: string) {
+        if (shouldThrow) throw new Error("SecurityError: sessionStorage disabled");
+        return store.has(k) ? store.get(k)! : null;
+      },
+      setItem(k: string, v: string) {
+        if (shouldThrow) throw new Error("QuotaExceededError");
+        store.set(k, String(v));
+      },
+      removeItem(k: string) {
+        if (shouldThrow) throw new Error("SecurityError");
+        store.delete(k);
+      },
+      clear() {
+        store.clear();
+      }
+    }
+  };
+}
+
+function extractPreGtmScriptFromIndexHtml(): string {
+  const html = fs.readFileSync(path.resolve(process.cwd(), "index.html"), "utf8");
+  const match = html.match(
+    /<!-- Pre-GTM Guest Token Sanitizer, SPA Redirect Decoder & Google Tag Manager -->\s*<script>([\s\S]*?)<\/script>/
+  );
+  assert.ok(match && match[1], "Pre-GTM bootstrap script must exist in index.html");
+  return match[1];
+}
+
+function runIndexHtmlHeadScript({
+  initialHref,
+  storageMock,
+  throwOnReplaceState = false,
+  existingScriptSrc = "https://digitalmuid.in/existing.js"
+}: {
+  initialHref: string;
+  storageMock: any;
+  throwOnReplaceState?: boolean;
+  existingScriptSrc?: string;
+}) {
+  const scriptSrc = extractPreGtmScriptFromIndexHtml();
+  const urlObj = new URL(initialHref);
+  const appendedScripts: Array<{ src: string; async?: boolean }> = [];
+  const existingScript: any = {
+    src: existingScriptSrc,
+    parentNode: {
+      insertBefore(node: any) {
+        appendedScripts.push({ src: node.src, async: node.async });
+      }
+    }
+  };
+
+  const listeners: Record<string, Function[]> = {};
+  const locationObj: any = {
+    get href() { return urlObj.href; },
+    get origin() { return urlObj.origin; },
+    get pathname() { return urlObj.pathname; },
+    get search() { return urlObj.search; },
+    get hash() { return urlObj.hash; }
+  };
+
+  const windowObj: any = {
+    location: locationObj,
+    sessionStorage: storageMock,
+    history: {
+      state: { idx: 0 },
+      replaceState(_state: any, _title: string, nextUrl: string) {
+        if (throwOnReplaceState) throw new Error("History API blocked");
+        const resolved = new URL(nextUrl, urlObj.origin);
+        urlObj.pathname = resolved.pathname;
+        urlObj.search = resolved.search;
+        urlObj.hash = resolved.hash;
+      }
+    },
+    addEventListener(type: string, cb: Function) {
+      listeners[type] = listeners[type] || [];
+      listeners[type].push(cb);
+    },
+    setTimeout(fn: Function, ms: number) {
+      return { fn, ms };
+    },
+    clearTimeout() {}
+  };
+
+  const documentObj: any = {
+    getElementsByTagName(tag: string) {
+      if (tag === "script") return [existingScript];
+      return [];
+    },
+    createElement(tag: string) {
+      return { tagName: tag.toUpperCase(), src: "", async: false };
+    }
+  };
+
+  const context = vm.createContext({
+    window: windowObj,
+    document: documentObj,
+    URLSearchParams
+  });
+  vm.runInContext(scriptSrc, context);
+
+  return {
+    windowObj,
+    appendedScripts,
+    listeners,
+    getCurrentHref: () => urlObj.href,
+    getCurrentSearch: () => urlObj.search
+  };
+}
+
+let passed = 0;
+let failed = 0;
+
+async function runAsyncTest(name: string, fn: () => Promise<void> | void) {
+  try {
+    await fn();
+    console.log(`  [PASS] ${name}`);
+    passed++;
+  } catch (err: any) {
+    console.error(`  [FAIL] ${name}: ${err?.stack || err?.message || err}`);
+    failed++;
+  }
+}
+
+async function main() {
+  console.log("==============================================================================");
+  console.log("DIGITALMUID V4.3 — AUD-01 RESOURCE EMAIL DELIVERY & TOKEN SECURITY TEST SUITE");
+  console.log("==============================================================================\n");
+
+  const db = createMockDb();
+  setMockSupabaseServerClient(db.client);
+  setMockRazorpayClient(null);
+
+  const app = express();
+  app.use(express.json());
+  app.use("/api/payments", paymentRoutes);
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${(server.address() as any).port}`;
+
+  const originalWindow = (globalThis as any).window;
+  const originalFetch = globalThis.fetch;
+
+  try {
+    await runAsyncTest("1. Standalone guest email link uses /resources/thank-you/paid + guest token + invoice URL", async () => {
+      const tokRes = tryGenerateGuestResourceToken({
+        paymentId: "pay_stand_01",
+        orderId: "order_stand_01",
+        resourceId: STANDALONE_UUID,
+        email: "guest.solo@example.com",
+        phone: "+919800001111"
+      });
+      assert.strictEqual(tokRes.ok, true);
+      const html: string = (buildResourceDeliveryEmailHtml as any)({
+        customerName: "Solo Guest",
+        resourceTitle: "Standalone Growth Kit",
+        resourceId: STANDALONE_UUID,
+        resourceSlug: STANDALONE_SLUG,
+        amount: 499,
+        orderId: "order_stand_01",
+        paymentId: "pay_stand_01",
+        resourceAccessToken: tokRes.token
+      });
+      const hrefMatch = html.match(/href="(https:\/\/digitalmuid\.in\/resources\/thank-you\/paid\?[^"]+)"/);
+      assert.ok(hrefMatch, "Email HTML must link standalone buyer to /resources/thank-you/paid");
+      const parsed = new URL(hrefMatch[1].replace(/&amp;/g, "&"));
+      assert.strictEqual(parsed.searchParams.get("resourceId"), STANDALONE_UUID);
+      assert.strictEqual(parsed.searchParams.get("orderId"), "order_stand_01");
+      assert.strictEqual(parsed.searchParams.get("paymentId"), "pay_stand_01");
+      assert.strictEqual(parsed.searchParams.get("resourceAccessToken"), tokRes.token);
+      assert.strictEqual(html.includes("/resources/thank-you?"), false);
+      assert.ok(html.includes("https://digitalmuid.in/api/payments/invoice/pay_stand_01?token="));
+    });
+
+    await runAsyncTest("2. Individually bought child item (not bundle) routes to /resources/thank-you/paid", async () => {
+      const html: string = (buildResourceDeliveryEmailHtml as any)({
+        customerName: "Calc Guest",
+        resourceTitle: "Ad Budget & Break-Even Calculator",
+        resourceId: CHILD_BUNDLE_ITEM_UUID,
+        resourceSlug: CHILD_BUNDLE_ITEM_SLUG,
+        amount: 499,
+        orderId: "order_child_01",
+        paymentId: "pay_child_01",
+        resourceAccessToken: "tok_child_demo"
+      });
+      assert.ok(html.includes("https://digitalmuid.in/resources/thank-you/paid?"));
+      assert.strictEqual(html.includes("/resources/bundle/"), false);
+    });
+
+    await runAsyncTest("3. Bundle guest email link routes to canonical bundle path & binds UUID token + 30-day TTL", async () => {
+      const capturedEmails: any[] = [];
+      process.env.RESEND_API_KEY = "re_test_mock_isolated_aud01_key";
+      globalThis.fetch = (async (url: any, init: any) => {
+        if (String(url).includes("api.resend.com")) {
+          capturedEmails.push(JSON.parse(init.body));
+          return new Response(JSON.stringify({ id: "msg_mock_bundle_01" }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          });
+        }
+        return originalFetch(url, init);
+      }) as any;
+
+      try {
+        const res = await sendResourceDeliveryEmail({
+          to: "bundle.guest@example.com",
+          customerName: "Bundle Buyer",
+          customerPhone: "+919911223344",
+          resourceTitle: "Meta Ads Campaign Planner Bundle",
+          resourceId: BUNDLE_SLUG, // Pass slug intentionally to verify canonical UUID normalization
+          resourceSlug: BUNDLE_SLUG,
+          userId: null,
+          isGuest: true,
+          amount: 299,
+          orderId: "order_bundle_01",
+          paymentId: "pay_bundle_01"
+        });
+        assert.strictEqual(res.success, true);
+        assert.strictEqual(capturedEmails.length, 1);
+        const sentHtml = capturedEmails[0].html;
+        const match = sentHtml.match(/href="(https:\/\/digitalmuid\.in\/resources\/bundle\/meta-ads-campaign-planner-bundle\?[^"]+)"/);
+        assert.ok(match, "Bundle email must link to /resources/bundle/meta-ads-campaign-planner-bundle");
+        const parsed = new URL(match[1].replace(/&amp;/g, "&"));
+        assert.strictEqual(parsed.searchParams.get("orderId"), "order_bundle_01");
+        assert.strictEqual(parsed.searchParams.get("paymentId"), "pay_bundle_01");
+        const token = parsed.searchParams.get("resourceAccessToken");
+        assert.ok(token);
+
+        const verified = verifyGuestResourceToken(token, {
+          orderId: "order_bundle_01",
+          paymentId: "pay_bundle_01",
+          allowedResourceIds: [BUNDLE_UUID]
+        });
+        assert.strictEqual(verified.valid, true, "Token must bind canonical Bundle UUID for /bundle-files");
+        assert.strictEqual(verified.payload.rid, BUNDLE_UUID);
+        assert.strictEqual(verified.payload.gid, "email:bundle.guest@example.com");
+        assert.strictEqual(verified.payload.exp - verified.payload.iat, 30 * 24 * 60 * 60 * 1000);
+      } finally {
+        globalThis.fetch = originalFetch;
+        delete process.env.RESEND_API_KEY;
+      }
+    });
+
+    await runAsyncTest("4. Authenticated buyer NEVER receives guest token via sendResourceDeliveryEmail or fulfillment", async () => {
+      const capturedEmails: any[] = [];
+      process.env.RESEND_API_KEY = "re_test_mock_isolated_aud01_key";
+      globalThis.fetch = (async (url: any, init: any) => {
+        if (String(url).includes("api.resend.com")) {
+          capturedEmails.push(JSON.parse(init.body));
+          return new Response(JSON.stringify({ id: "msg_mock_auth_01" }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          });
+        }
+        return originalFetch(url, init);
+      }) as any;
+
+      try {
+        const fulfillRes = await fulfillResourcePurchase({
+          userId: "10000000-0000-4000-8000-000000000001",
+          resourceId: BUNDLE_UUID,
+          amount: 299,
+          currency: "INR",
+          orderId: "order_auth_01",
+          paymentId: "pay_auth_01",
+          customerName: "Auth Buyer",
+          customerEmail: "authbuyer@example.com",
+          customerPhone: "+919876543210"
+        });
+        assert.strictEqual(fulfillRes.fulfilled, true);
+        // Wait briefly for fire-and-forget dispatchResourceDeliveryEmail IIFE
+        await new Promise((r) => setTimeout(r, 60));
+        assert.strictEqual(capturedEmails.length, 1);
+        const sentHtml = capturedEmails[0].html;
+        assert.ok(sentHtml.includes("https://digitalmuid.in/resources/bundle/meta-ads-campaign-planner-bundle?"));
+        assert.strictEqual(sentHtml.includes("resourceAccessToken"), false, "Authenticated emails must not include guest tokens");
+
+        // Also check route rejects unauthenticated access to user-owned bundle order
+        resetPaymentRateLimits();
+        const unauthRes = await originalFetch(`${baseUrl}/api/payments/bundle-files?bundleId=${BUNDLE_UUID}&orderId=order_auth_01&paymentId=pay_auth_01`);
+        assert.strictEqual(unauthRes.status, 403);
+        const authRes = await originalFetch(`${baseUrl}/api/payments/bundle-files?bundleId=${BUNDLE_UUID}&orderId=order_auth_01&paymentId=pay_auth_01`, {
+          headers: { Authorization: "Bearer auth-jwt-1" }
+        });
+        assert.strictEqual(authRes.status, 200);
+      } finally {
+        globalThis.fetch = originalFetch;
+        delete process.env.RESEND_API_KEY;
+      }
+    });
+
+    await runAsyncTest("5. Initial page load stores token to sessionStorage & scrubs URL synchronously BEFORE GTM initializes", async () => {
+      const storage = createStorageMock(false);
+      const token = "header_payload.secret_sig_sample_12345";
+      const sim = runIndexHtmlHeadScript({
+        initialHref: `https://digitalmuid.in/resources/bundle/meta-ads-campaign-planner-bundle?orderId=order_gtm_1&paymentId=pay_gtm_1&resourceAccessToken=${token}`,
+        storageMock: storage.api
+      });
+
+      assert.strictEqual(sim.getCurrentSearch(), "?orderId=order_gtm_1&paymentId=pay_gtm_1");
+      assert.strictEqual(sim.getCurrentHref().includes(token), false);
+      assert.strictEqual(storage.store.get(`dm_guest_res_tok_${BUNDLE_UUID}_order_gtm_1_pay_gtm_1`), token);
+      assert.strictEqual(storage.store.get(`dm_guest_res_tok_${BUNDLE_SLUG}_order_gtm_1_pay_gtm_1`), token);
+      assert.strictEqual(storage.store.get("dm_guest_res_tx_order_gtm_1_pay_gtm_1"), token);
+
+      assert.strictEqual(sim.appendedScripts.length, 1);
+      assert.ok(sim.appendedScripts[0].src.includes("googletagmanager.com/gtm.js?id=GTM-M6GRBJX"));
+      const serializedDl = JSON.stringify(sim.windowObj.dataLayer);
+      assert.strictEqual(serializedDl.includes(token), false, "dataLayer must never contain guest token");
+      assert.strictEqual(sim.windowObj.dataLayer[0].suppress_auto_pageview, true);
+      assert.strictEqual(sim.windowObj.dataLayer[0].allow_auto_pageview, false);
+      assert.ok(sim.windowObj.dataLayer.some((ev: any) => ev.event === "sanitized_page_view"));
+    });
+
+    await runAsyncTest("6. GTM initialization fails closed if URL scrub fails (history.replaceState throws)", async () => {
+      const storage = createStorageMock(false);
+      const sim = runIndexHtmlHeadScript({
+        initialHref: "https://digitalmuid.in/resources/thank-you/paid?resourceId=res_1&orderId=ord_fail&paymentId=pay_fail&resourceAccessToken=tok_must_not_leak",
+        storageMock: storage.api,
+        throwOnReplaceState: true
+      });
+      assert.strictEqual(sim.appendedScripts.length, 0, "GTM script must NOT be injected when URL scrub fails");
+      assert.strictEqual(sim.windowObj.dataLayer, undefined);
+    });
+
+    await runAsyncTest("7. analytics.ts strips tokens from page_location, page_path, and conversion params while keeping conversion metrics", async () => {
+      const dataLayer: any[] = [];
+      (globalThis as any).window = {
+        location: {
+          href: "https://digitalmuid.in/resources/thank-you/paid?resourceId=res_1&orderId=ord_c1&paymentId=pay_c1&resourceAccessToken=SECRET_LEAK&resource_access_token=SECRET_2"
+        },
+        dataLayer
+      };
+
+      analytics.trackPaidResourcePurchase({
+        resourceId: STANDALONE_UUID,
+        resourceTitle: "Standalone Growth Kit",
+        orderId: "ord_c1",
+        paymentId: "pay_c1",
+        amount: 499,
+        currency: "INR"
+      });
+      trackEvent("custom_nav", {
+        resourceAccessToken: "SECRET_PARAM",
+        destination: "https://digitalmuid.in/resources/bundle/meta-ads-campaign-planner-bundle?orderId=ord_c1&resourceAccessToken=SECRET_PARAM",
+        nested: { resource_access_token: "SECRET_NESTED", ok: true }
+      });
+
+      const dump = JSON.stringify(dataLayer);
+      assert.strictEqual(dump.includes("SECRET_"), false);
+      assert.strictEqual(dataLayer[0].event, "paid_resource_purchase_conversion");
+      assert.strictEqual(dataLayer[0].order_id, "ord_c1");
+      assert.strictEqual(dataLayer[0].payment_id, "pay_c1");
+      assert.strictEqual(dataLayer[0].amount, 499);
+      assert.strictEqual(dataLayer[0].page_location, "https://digitalmuid.in/resources/thank-you/paid?resourceId=res_1&orderId=ord_c1&paymentId=pay_c1");
+      assert.strictEqual(dataLayer[1].nested.ok, true);
+      assert.strictEqual(dataLayer[1].nested.resource_access_token, undefined);
+    });
+
+    await runAsyncTest("8. Bundle reload recovery via sessionStorage unlocks /api/payments/bundle-files; sessionStorage failure is bounded to active session", async () => {
+      const fulfillB1 = await fulfillResourcePurchase({
+        userId: null,
+        resourceId: BUNDLE_UUID,
+        amount: 299,
+        currency: "INR",
+        orderId: "order_reload_b1",
+        paymentId: "pay_reload_b1",
+        customerName: "Reload Guest",
+        customerEmail: "reload.bundle@example.com",
+        customerPhone: "+919111122222"
+      });
+      assert.strictEqual(fulfillB1.fulfilled, true);
+      const tokRes = tryGenerateGuestResourceToken({
+        paymentId: "pay_reload_b1",
+        orderId: "order_reload_b1",
+        resourceId: BUNDLE_UUID,
+        email: "reload.bundle@example.com",
+        phone: "+919111122222"
+      });
+      assert.strictEqual(tokRes.ok, true);
+
+      // Step 1-3: Initial entry with emailed token URL
+      const storage = createStorageMock(false);
+      const entrySim = runIndexHtmlHeadScript({
+        initialHref: `https://digitalmuid.in/resources/bundle/${BUNDLE_SLUG}?orderId=order_reload_b1&paymentId=pay_reload_b1&resourceAccessToken=${tokRes.token}`,
+        storageMock: storage.api
+      });
+      assert.strictEqual(entrySim.getCurrentSearch(), "?orderId=order_reload_b1&paymentId=pay_reload_b1");
+
+      // Step 4-7: Simulated browser reload -> new window keeping sessionStorage + sanitized URL
+      clearMemoryGuestResourceTokens();
+      (globalThis as any).window = {
+        location: { href: entrySim.getCurrentHref() },
+        sessionStorage: storage.api,
+        addEventListener() {}
+      };
+      const recovered = getStoredGuestResourceToken(BUNDLE_UUID, "order_reload_b1", "pay_reload_b1");
+      assert.strictEqual(recovered, tokRes.token);
+
+      resetPaymentRateLimits();
+      const bundleResp = await originalFetch(
+        `${baseUrl}/api/payments/bundle-files?bundleId=${BUNDLE_UUID}&orderId=order_reload_b1&paymentId=pay_reload_b1`,
+        { headers: { "x-resource-access-token": recovered! } }
+      );
+      assert.strictEqual(bundleResp.status, 200);
+      const bundleBody = await bundleResp.json();
+      assert.strictEqual(bundleBody.authorized, true);
+      assert.strictEqual(bundleBody.files.length, 4);
+
+      // When sessionStorage fails, current page session works via bounded memory fallback, then clears cleanly
+      clearMemoryGuestResourceTokens();
+      const brokenStorage = createStorageMock(true);
+      const memSim = runIndexHtmlHeadScript({
+        initialHref: `https://digitalmuid.in/resources/bundle/${BUNDLE_SLUG}?orderId=order_reload_b1&paymentId=pay_reload_b1&resourceAccessToken=${tokRes.token}`,
+        storageMock: brokenStorage.api
+      });
+      (globalThis as any).window = memSim.windowObj;
+      assert.strictEqual(saveStoredGuestResourceToken({ resourceId: BUNDLE_UUID, orderId: "order_x", paymentId: "pay_x", token: "mem_only" }), false);
+      assert.strictEqual(getStoredGuestResourceToken(BUNDLE_UUID, "order_reload_b1", "pay_reload_b1"), tokRes.token);
+      assert.strictEqual(getStoredGuestResourceToken(BUNDLE_UUID, "order_x", "pay_x"), "mem_only");
+      // Cleanup simulates reload/unload wiping in-memory store
+      clearMemoryGuestResourceTokens();
+      assert.strictEqual(getStoredGuestResourceToken(BUNDLE_UUID, "order_x", "pay_x"), null);
+    });
+
+    await runAsyncTest("9. Direct in-page bundle purchase persistence + reload recovery works cleanly", async () => {
+      const storage = createStorageMock(false);
+      clearMemoryGuestResourceTokens();
+      (globalThis as any).window = { sessionStorage: storage.api, addEventListener() {} };
+
+      const tokRes = tryGenerateGuestResourceToken({
+        paymentId: "pay_reload_b1",
+        orderId: "order_reload_b1",
+        resourceId: BUNDLE_UUID,
+        email: "reload.bundle@example.com",
+        phone: "+919111122222"
+      });
+      const persisted = saveStoredGuestResourceToken({
+        resourceId: BUNDLE_UUID,
+        orderId: "order_reload_b1",
+        paymentId: "pay_reload_b1",
+        token: tokRes.token
+      });
+      assert.strictEqual(persisted, true);
+
+      // Simulate reload using only orderId + paymentId from URL (no token in URL)
+      clearMemoryGuestResourceTokens();
+      const afterReload = getStoredGuestResourceToken(BUNDLE_UUID, "order_reload_b1", "pay_reload_b1");
+      assert.strictEqual(afterReload, tokRes.token);
+    });
+
+    await runAsyncTest("10. PaidResourceThankYouPage standalone token recovery after pre-GTM scrub & reload", async () => {
+      const fulfillTy = await fulfillResourcePurchase({
+        userId: null,
+        resourceId: STANDALONE_UUID,
+        amount: 499,
+        currency: "INR",
+        orderId: "order_ty_1",
+        paymentId: "pay_ty_1",
+        customerName: "TY Guest",
+        customerEmail: "ty.guest@example.com",
+        customerPhone: "+919222233333"
+      });
+      assert.strictEqual(fulfillTy.fulfilled, true);
+      const tokRes = tryGenerateGuestResourceToken({
+        paymentId: "pay_ty_1",
+        orderId: "order_ty_1",
+        resourceId: STANDALONE_UUID,
+        email: "ty.guest@example.com",
+        phone: "+919222233333"
+      });
+      assert.strictEqual(tokRes.ok, true);
+
+      const storage = createStorageMock(false);
+      const sim = runIndexHtmlHeadScript({
+        initialHref: `https://digitalmuid.in/resources/thank-you/paid?resourceId=${STANDALONE_UUID}&orderId=order_ty_1&paymentId=pay_ty_1&resourceAccessToken=${tokRes.token}`,
+        storageMock: storage.api
+      });
+      assert.strictEqual(sim.getCurrentSearch(), `?resourceId=${STANDALONE_UUID}&orderId=order_ty_1&paymentId=pay_ty_1`);
+
+      clearMemoryGuestResourceTokens();
+      (globalThis as any).window = { sessionStorage: storage.api, addEventListener() {} };
+      const recovered = getStoredGuestResourceToken(STANDALONE_UUID, "order_ty_1", "pay_ty_1");
+      assert.strictEqual(recovered, tokRes.token);
+
+      resetPaymentRateLimits();
+      const verifyResp = await originalFetch(
+        `${baseUrl}/api/payments/verify-purchase-status?resourceId=${STANDALONE_UUID}&orderId=order_ty_1&paymentId=pay_ty_1`,
+        { headers: { "x-resource-access-token": recovered! } }
+      );
+      assert.strictEqual(verifyResp.status, 200);
+      const verifyBody = await verifyResp.json();
+      assert.strictEqual(verifyBody.verified, true);
+
+      const dlResp = await originalFetch(`${baseUrl}/api/payments/get-resource-download-url`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-resource-access-token": recovered!
+        },
+        body: JSON.stringify({
+          resourceId: STANDALONE_UUID,
+          orderId: "order_ty_1",
+          paymentId: "pay_ty_1"
+        })
+      });
+      assert.strictEqual(dlResp.status, 200);
+      const dlBody = await dlResp.json();
+      assert.strictEqual(dlBody.success, true);
+    });
+
+    await runAsyncTest("11. Missing, tampered, expired, and mismatched tokens fail closed (403)", async () => {
+      const valid = tryGenerateGuestResourceToken({
+        paymentId: "pay_reload_b1",
+        orderId: "order_reload_b1",
+        resourceId: BUNDLE_UUID,
+        email: "reload.bundle@example.com",
+        phone: "+919111122222"
+      });
+      const expired = tryGenerateGuestResourceToken({
+        paymentId: "pay_reload_b1",
+        orderId: "order_reload_b1",
+        resourceId: BUNDLE_UUID,
+        email: "reload.bundle@example.com",
+        phone: "+919111122222",
+        nowMs: Date.now() - 31 * 24 * 60 * 60 * 1000
+      });
+      const wrongResource = tryGenerateGuestResourceToken({
+        paymentId: "pay_reload_b1",
+        orderId: "order_reload_b1",
+        resourceId: STANDALONE_UUID,
+        email: "reload.bundle@example.com",
+        phone: "+919111122222"
+      });
+      const wrongEmail = tryGenerateGuestResourceToken({
+        paymentId: "pay_reload_b1",
+        orderId: "order_reload_b1",
+        resourceId: BUNDLE_UUID,
+        email: "attacker@example.com",
+        phone: "+919111122222"
+      });
+
+      resetPaymentRateLimits();
+      const missingRes = await originalFetch(`${baseUrl}/api/payments/bundle-files?bundleId=${BUNDLE_UUID}&orderId=order_reload_b1&paymentId=pay_reload_b1`);
+      const tamperedRes = await originalFetch(`${baseUrl}/api/payments/bundle-files?bundleId=${BUNDLE_UUID}&orderId=order_reload_b1&paymentId=pay_reload_b1`, {
+        headers: { "x-resource-access-token": `${valid.token}tamper` }
+      });
+      const expiredRes = await originalFetch(`${baseUrl}/api/payments/bundle-files?bundleId=${BUNDLE_UUID}&orderId=order_reload_b1&paymentId=pay_reload_b1`, {
+        headers: { "x-resource-access-token": expired.token! }
+      });
+      const wrongRes = await originalFetch(`${baseUrl}/api/payments/bundle-files?bundleId=${BUNDLE_UUID}&orderId=order_reload_b1&paymentId=pay_reload_b1`, {
+        headers: { "x-resource-access-token": wrongResource.token! }
+      });
+      const wrongEmailRes = await originalFetch(`${baseUrl}/api/payments/bundle-files?bundleId=${BUNDLE_UUID}&orderId=order_reload_b1&paymentId=pay_reload_b1`, {
+        headers: { "x-resource-access-token": wrongEmail.token! }
+      });
+
+      assert.strictEqual(missingRes.status, 403);
+      assert.strictEqual(tamperedRes.status, 403);
+      assert.strictEqual(expiredRes.status, 403);
+      assert.strictEqual(wrongRes.status, 403);
+      assert.strictEqual(wrongEmailRes.status, 403);
+    });
+
+    await runAsyncTest("12. Email delivery failure logs status='failed', omits tokens from metadata, and does not deduplicate", async () => {
+      process.env.RESEND_API_KEY = "re_test_mock_isolated_fail_key";
+      globalThis.fetch = (async (url: any) => {
+        if (String(url).includes("api.resend.com")) {
+          return new Response(JSON.stringify({ name: "validation_error", message: "Simulated Resend 500" }), {
+            status: 500,
+            headers: { "content-type": "application/json" }
+          });
+        }
+        return originalFetch(url);
+      }) as any;
+
+      try {
+        const failRes = await sendResourceDeliveryEmail({
+          to: "fail.guest@example.com",
+          customerName: "Fail Guest",
+          resourceTitle: "Meta Ads Campaign Planner Bundle",
+          resourceId: BUNDLE_UUID,
+          resourceSlug: BUNDLE_SLUG,
+          userId: null,
+          isGuest: true,
+          amount: 299,
+          orderId: "order_fail_mail_1",
+          paymentId: "pay_fail_mail_1"
+        });
+        assert.strictEqual(failRes.success, false);
+        const logRow = db.state.email_logs.find((r) => r.payment_id === "pay_fail_mail_1");
+        assert.ok(logRow);
+        assert.strictEqual(logRow.status, "failed");
+        assert.strictEqual(JSON.stringify(logRow).includes("resourceAccessToken"), false);
+        assert.strictEqual(await hasAlreadySent("pay_fail_mail_1", "resource_delivery"), false);
+      } finally {
+        globalThis.fetch = originalFetch;
+        delete process.env.RESEND_API_KEY;
+      }
+    });
+
+    await runAsyncTest("13. Existing signed invoice URLs & protected asset downloads remain intact", async () => {
+      const invTok = tryGenerateSignedInvoiceToken("pay_ty_1", 7 * 24 * 60 * 60 * 1000);
+      assert.ok(typeof invTok === "string" && invTok.length > 0);
+      resetPaymentRateLimits();
+
+      const badInv = await originalFetch(`${baseUrl}/api/payments/invoice/pay_ty_1?format=json&token=${invTok}tamper`);
+      assert.ok([401, 403].includes(badInv.status));
+      const goodInv = await originalFetch(`${baseUrl}/api/payments/invoice/pay_ty_1?format=json&token=${invTok}`);
+      assert.strictEqual(goodInv.status, 200);
+
+      const assetTok = generateAssetAccessToken("27ef2c04-4d4a-4dbe-a702-d4013b2542b9", "pay_ty_1");
+      assert.ok(assetTok);
+      const verifiedAsset = verifyAssetAccessToken(assetTok);
+      assert.strictEqual(verifiedAsset?.resourceId, "27ef2c04-4d4a-4dbe-a702-d4013b2542b9");
+
+      const badDl = await originalFetch(`${baseUrl}/api/payments/download-paid-asset?token=${assetTok}tamper`);
+      assert.strictEqual(badDl.status, 403);
+      assert.strictEqual(verifyAssetAccessToken(`${assetTok}tamper`), null);
+    });
+  } finally {
+    if (originalWindow === undefined) delete (globalThis as any).window;
+    else (globalThis as any).window = originalWindow;
+    globalThis.fetch = originalFetch;
+    setMockSupabaseServerClient(null);
+    setMockRazorpayClient(null);
+    server.close();
+  }
+
+  console.log("\n==============================================================================");
+  console.log(`AUD-01 REGRESSION TEST SUMMARY: ${passed} PASSED, ${failed} FAILED`);
+  console.log("==============================================================================");
+
+  if (failed > 0) {
+    process.exit(1);
+  }
+}
+
+main().catch((err) => {
+  console.error("Fatal AUD-01 test error:", err);
+  process.exit(1);
+});

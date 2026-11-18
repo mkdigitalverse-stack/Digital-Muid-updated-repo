@@ -21,6 +21,55 @@ export interface AnalyticsEventPayload {
   [key: string]: any;
 }
 
+function getSanitizedLocation(): { page_location?: string; page_path?: string } {
+  if (typeof window === 'undefined') return {};
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('resourceAccessToken');
+    url.searchParams.delete('resource_access_token');
+    url.searchParams.delete('token');
+    const cleanSearch = url.search || '';
+    return {
+      page_location: `${url.origin}${url.pathname}${cleanSearch}`,
+      page_path: `${url.pathname}${cleanSearch}`
+    };
+  } catch {
+    return {};
+  }
+}
+
+function sanitizeEventParams(input: Record<string, any>): Record<string, any> {
+  const blockedKeys = new Set(['resourceAccessToken', 'resource_access_token', 'token']);
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(input || {})) {
+    if (blockedKeys.has(key)) continue;
+    if (typeof value === 'string') {
+      if (/(?:resourceAccessToken|resource_access_token)=/i.test(value)) {
+        try {
+          const parsed = new URL(value, 'https://digitalmuid.in');
+          parsed.searchParams.delete('resourceAccessToken');
+          parsed.searchParams.delete('resource_access_token');
+          out[key] = /^https?:\/\//i.test(value)
+            ? `${parsed.origin}${parsed.pathname}${parsed.search}${parsed.hash}`
+            : `${parsed.pathname}${parsed.search}${parsed.hash}`;
+        } catch {
+          out[key] = value
+            .replace(/([?&])(resourceAccessToken|resource_access_token)=[^&#]*/gi, '$1')
+            .replace(/\?&/, '?')
+            .replace(/[?&]$/, '');
+        }
+      } else {
+        out[key] = value;
+      }
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      out[key] = sanitizeEventParams(value);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 export function trackEvent(eventName: string, params: Record<string, any> = {}): void {
   try {
     if (typeof window !== 'undefined') {
@@ -28,7 +77,8 @@ export function trackEvent(eventName: string, params: Record<string, any> = {}):
       window.dataLayer.push({
         event: eventName,
         timestamp: new Date().toISOString(),
-        ...params
+        ...getSanitizedLocation(),
+        ...sanitizeEventParams(params)
       });
     }
   } catch (err) {

@@ -60,6 +60,13 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [downloadSuccess, setDownloadSuccess] = useState<boolean>(false);
   const conversionTrackedRef = useRef<boolean>(false);
+  const sessionTokenRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      sessionTokenRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
@@ -70,12 +77,22 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
     const resToken = searchParams.get('resourceAccessToken') || searchParams.get('resource_access_token');
 
     if (resToken && ordId && payId) {
-      saveStoredGuestResourceToken({
+      sessionTokenRef.current = resToken;
+      const persisted = saveStoredGuestResourceToken({
         resourceId: resId,
         orderId: ordId,
         paymentId: payId,
         token: resToken
       });
+      if (persisted) {
+        searchParams.delete('resourceAccessToken');
+        searchParams.delete('resource_access_token');
+        const nextQs = searchParams.toString();
+        const cleanUrl = `${window.location.pathname}${nextQs ? `?${nextQs}` : ''}${window.location.hash || ''}`;
+        try {
+          window.history.replaceState(window.history.state, '', cleanUrl);
+        } catch {}
+      }
     }
 
     setQueryParams({
@@ -83,7 +100,7 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
       orderId: ordId,
       paymentId: payId,
       amount: amt,
-      resourceAccessToken: resToken
+      resourceAccessToken: null
     });
 
     if (!resId) {
@@ -149,6 +166,7 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
           ? `Bearer ${authSessionData.session.access_token}`
           : undefined;
         const guestToken =
+          sessionTokenRef.current ||
           queryParams.resourceAccessToken ||
           getStoredGuestResourceToken(matchedResource.id, queryParams.orderId, queryParams.paymentId);
 
@@ -248,6 +266,7 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
       const resolvedOrderId = verifiedDetails?.orderId || queryParams.orderId || undefined;
       const resolvedPaymentId = verifiedDetails?.paymentId || queryParams.paymentId || undefined;
       const guestToken =
+        sessionTokenRef.current ||
         queryParams.resourceAccessToken ||
         getStoredGuestResourceToken(matchedResource.id, resolvedOrderId, resolvedPaymentId) ||
         undefined;

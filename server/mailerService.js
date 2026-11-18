@@ -16,6 +16,10 @@ import { generateAuthoritativeInvoicePdf } from "./invoiceService.js";
 import { generateConsultationIcsBuffer } from "./calendarService.js";
 import { assertSideEffectAllowed } from "./developmentSafetyGate.js";
 import { tryGenerateSignedInvoiceToken, buildSignedInvoiceUrl } from "./invoiceToken.js";
+import { tryGenerateGuestResourceToken } from "./resourceToken.js";
+
+const RESOURCE_BUNDLE_ID = "2d50e5e3-711d-4461-a70d-0ed54dd29f17";
+const RESOURCE_BUNDLE_SLUG = "meta-ads-campaign-planner-bundle";
 
 // In-memory deduplication set to block concurrent duplicate requests (e.g. concurrent webhook + client verify)
 const inMemorySentCache = new Map();
@@ -746,13 +750,44 @@ export function buildResourceDeliveryEmailHtml({
   customerName = "Valued Customer",
   resourceTitle,
   resourceId,
+  resourceSlug = null,
   amount,
   currency = "INR",
   orderId,
   paymentId,
-  invoiceToken = null
+  invoiceToken = null,
+  resourceAccessToken = null
 }) {
-  const accessUrl = `https://digitalmuid.in/resources/thank-you?resourceId=${encodeURIComponent(resourceId)}&orderId=${encodeURIComponent(orderId)}&paymentId=${encodeURIComponent(paymentId)}`;
+  const cleanResourceId = String(resourceId || "").trim();
+  const cleanResourceSlug = String(resourceSlug || "").trim();
+  const isBundle =
+    cleanResourceId === RESOURCE_BUNDLE_ID ||
+    cleanResourceId === RESOURCE_BUNDLE_SLUG ||
+    cleanResourceSlug === RESOURCE_BUNDLE_SLUG;
+  const cleanOrderId = String(orderId || "").trim();
+  const cleanPaymentId = String(paymentId || "").trim();
+  const cleanGuestToken =
+    typeof resourceAccessToken === "string" && resourceAccessToken.trim()
+      ? resourceAccessToken.trim()
+      : null;
+
+  const accessParams = new URLSearchParams();
+  if (!isBundle && cleanResourceId) {
+    accessParams.set("resourceId", cleanResourceId);
+  }
+  if (cleanOrderId) {
+    accessParams.set("orderId", cleanOrderId);
+  }
+  if (cleanPaymentId) {
+    accessParams.set("paymentId", cleanPaymentId);
+  }
+  if (cleanGuestToken) {
+    accessParams.set("resourceAccessToken", cleanGuestToken);
+  }
+
+  const accessUrl = isBundle
+    ? `https://digitalmuid.in/resources/bundle/${RESOURCE_BUNDLE_SLUG}?${accessParams.toString()}`
+    : `https://digitalmuid.in/resources/thank-you/paid?${accessParams.toString()}`;
   const dashboardUrl = "https://digitalmuid.in/dashboard";
   const effectiveToken = invoiceToken || tryGenerateSignedInvoiceToken(paymentId, 7 * 24 * 60 * 60 * 1000);
   const signedInvoiceUrl = effectiveToken
@@ -859,8 +894,12 @@ export function buildResourceDeliveryEmailHtml({
 export async function sendResourceDeliveryEmail({
   to,
   customerName = "Valued Customer",
+  customerPhone = "",
   resourceTitle,
   resourceId,
+  resourceSlug = null,
+  userId = null,
+  isGuest = undefined,
   amount,
   currency = "INR",
   orderId,
@@ -906,15 +945,50 @@ export async function sendResourceDeliveryEmail({
     console.error("[Mailer Service] Failed to generate resource invoice PDF:", pdfErr);
   }
 
+  const normalizedUserId =
+    typeof userId === "string" &&
+    userId.trim() &&
+    userId.trim() !== "null" &&
+    userId.trim() !== "undefined"
+      ? userId.trim()
+      : null;
+  const shouldMintGuestToken = Boolean(!normalizedUserId && isGuest !== false);
+
+  const cleanResId = String(resourceId || "").trim();
+  const cleanResSlug = String(resourceSlug || "").trim();
+  const isBundleTarget =
+    cleanResId === RESOURCE_BUNDLE_ID ||
+    cleanResId === RESOURCE_BUNDLE_SLUG ||
+    cleanResSlug === RESOURCE_BUNDLE_SLUG;
+  const canonicalTokenResourceId = isBundleTarget ? RESOURCE_BUNDLE_ID : cleanResId;
+
+  let generatedGuestToken = null;
+  if (shouldMintGuestToken && canonicalTokenResourceId && orderId && paymentId) {
+    const tokenResult = tryGenerateGuestResourceToken({
+      paymentId,
+      orderId,
+      resourceId: canonicalTokenResourceId,
+      email: recipient,
+      phone: customerPhone || ""
+    });
+    if (tokenResult.ok && tokenResult.token) {
+      generatedGuestToken = tokenResult.token;
+    } else if (tokenResult.error) {
+      console.warn("[Mailer Service] Guest resource token generation skipped:", tokenResult.error);
+    }
+  }
+
   const emailHtml = buildResourceDeliveryEmailHtml({
     customerName,
     resourceTitle,
     resourceId,
+    resourceSlug,
     amount,
     currency,
     orderId,
     paymentId,
-    invoiceToken
+    invoiceToken,
+    resourceAccessToken: generatedGuestToken
   });
 
   const attachments = [];

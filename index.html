@@ -22,14 +22,132 @@
         }, true);
       })();
     </script>
-    <!-- Google Tag Manager -->
-    <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
-    new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
-    j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
-    'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
-    })(window,document,'script','dataLayer','GTM-M6GRBJX');</script>
-    <!-- End Google Tag Manager -->
+    <!-- Pre-GTM Guest Token Sanitizer, SPA Redirect Decoder & Google Tag Manager -->
+    <script>
+      (function(w, d) {
+        var l = w.location;
+        if (l.search && l.search[1] === '/') {
+          var decoded = l.search.slice(1).split('&').map(function(s) {
+            return s.replace(/~and~/g, '&');
+          }).join('?');
+          try {
+            w.history.replaceState(w.history.state, '', l.pathname.slice(0, -1) + decoded + l.hash);
+          } catch (e) {}
+        }
+
+        var BUNDLE_ID = '2d50e5e3-711d-4461-a70d-0ed54dd29f17';
+        var BUNDLE_SLUG = 'meta-ads-campaign-planner-bundle';
+        var hadSensitiveToken = false;
+
+        try {
+          var sp = new URLSearchParams(w.location.search || '');
+          var token = (sp.get('resourceAccessToken') || sp.get('resource_access_token') || '').trim();
+          var orderId = (sp.get('orderId') || sp.get('order_id') || '').trim();
+          var paymentId = (sp.get('paymentId') || sp.get('payment_id') || '').trim();
+          var rawResId = (sp.get('resourceId') || sp.get('id') || sp.get('slug') || '').trim();
+          var isBundlePath = (w.location.pathname || '').indexOf('/resources/bundle') === 0;
+          var effectiveResId = rawResId || (isBundlePath ? BUNDLE_ID : '');
+
+          if (token) {
+            hadSensitiveToken = true;
+            var persistedToSession = false;
+
+            if (orderId && paymentId) {
+              try {
+                if (w.sessionStorage) {
+                  if (effectiveResId) {
+                    w.sessionStorage.setItem('dm_guest_res_tok_' + effectiveResId + '_' + orderId + '_' + paymentId, token);
+                    if (effectiveResId === BUNDLE_ID || effectiveResId === BUNDLE_SLUG) {
+                      w.sessionStorage.setItem('dm_guest_res_tok_' + BUNDLE_ID + '_' + orderId + '_' + paymentId, token);
+                      w.sessionStorage.setItem('dm_guest_res_tok_' + BUNDLE_SLUG + '_' + orderId + '_' + paymentId, token);
+                    }
+                  }
+                  w.sessionStorage.setItem('dm_guest_res_tx_' + orderId + '_' + paymentId, token);
+                  persistedToSession = Boolean(
+                    w.sessionStorage.getItem('dm_guest_res_tx_' + orderId + '_' + paymentId)
+                  );
+                }
+              } catch (storageErr) {
+                persistedToSession = false;
+              }
+
+              // Retain in memory ONLY for current page session when sessionStorage fails, with bounded cleanup
+              if (!persistedToSession) {
+                try {
+                  var memToken = token;
+                  var memTimer = w.setTimeout(function() {
+                    memToken = null;
+                    try { delete w.__dmConsumeBootstrapGuestToken; } catch (e) {}
+                  }, 5 * 60 * 1000);
+                  var cleanupMem = function() {
+                    memToken = null;
+                    if (memTimer) w.clearTimeout(memTimer);
+                    try { delete w.__dmConsumeBootstrapGuestToken; } catch (e) {}
+                  };
+                  w.addEventListener('pagehide', cleanupMem, { once: true });
+                  Object.defineProperty(w, '__dmConsumeBootstrapGuestToken', {
+                    configurable: true,
+                    enumerable: false,
+                    value: function(reqOrderId, reqPaymentId) {
+                      if (!memToken || reqOrderId !== orderId || reqPaymentId !== paymentId) return null;
+                      var val = memToken;
+                      cleanupMem();
+                      return val;
+                    }
+                  });
+                } catch (defErr) {}
+              }
+            }
+
+            sp.delete('resourceAccessToken');
+            sp.delete('resource_access_token');
+            var nextQs = sp.toString();
+            var cleanRelUrl = (w.location.pathname || '/') + (nextQs ? '?' + nextQs : '') + (w.location.hash || '');
+            try {
+              w.history.replaceState(w.history.state, '', cleanRelUrl);
+            } catch (histErr) {}
+          }
+        } catch (err) {}
+
+        // Fail closed: prevent GTM initialization if URL scrubbing failed
+        var currentSearch = w.location.search || '';
+        if (/(?:^|[?&])(?:resourceAccessToken|resource_access_token)=/i.test(currentSearch)) {
+          return;
+        }
+
+        var cleanPathAndQuery = (w.location.pathname || '/') + currentSearch;
+        var cleanHref = (w.location.origin || '') + cleanPathAndQuery;
+
+        w.dataLayer = w.dataLayer || [];
+        w.dataLayer.push({
+          allow_auto_pageview: !hadSensitiveToken,
+          suppress_auto_pageview: hadSensitiveToken,
+          page_location: cleanHref,
+          page_path: cleanPathAndQuery
+        });
+
+        (function(dlName, id) {
+          w[dlName].push({ 'gtm.start': new Date().getTime(), event: 'gtm.js' });
+          var f = d.getElementsByTagName('script')[0];
+          var j = d.createElement('script');
+          var dl = dlName !== 'dataLayer' ? '&l=' + dlName : '';
+          j.async = true;
+          j.src = 'https://www.googletagmanager.com/gtm.js?id=' + id + dl;
+          f.parentNode.insertBefore(j, f);
+        })('dataLayer', 'GTM-M6GRBJX');
+
+        if (hadSensitiveToken) {
+          w.dataLayer.push({
+            event: 'sanitized_page_view',
+            page_location: cleanHref,
+            page_path: cleanPathAndQuery
+          });
+        }
+      })(window, document);
+    </script>
+    <!-- End Pre-GTM Token Sanitizer & Google Tag Manager -->
     <meta charset="UTF-8" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Digital Muid | Performance Growth Strategist & Systems Architect</title>
     <meta name="description" content="We engineer predictable customer acquisition engines, bespoke React/Node.js web architecture, and automated client intake systems for ambitious businesses." />
@@ -43,19 +161,6 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Sora:wght@100..800&display=swap" rel="stylesheet">
     <!-- Razorpay Checkout SDK Preload -->
     <script src="https://checkout.razorpay.com/v1/checkout.js" async></script>
-    <!-- Single Page Application redirect decoder for static hosting -->
-    <script>
-      (function(l) {
-        if (l.search[1] === '/') {
-          var decoded = l.search.slice(1).split('&').map(function(s) { 
-            return s.replace(/~and~/g, '&')
-          }).join('?');
-          window.history.replaceState(null, null,
-              l.pathname.slice(0, -1) + decoded + l.hash
-          );
-        }
-      }(window.location))
-    </script>
   </head>
   <body class="bg-[#07111F] text-slate-100 font-sans antialiased selection:bg-[#FF6B00] selection:text-white">
     <!-- Google Tag Manager (noscript) -->
