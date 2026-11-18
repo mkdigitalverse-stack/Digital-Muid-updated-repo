@@ -46,7 +46,13 @@ const {
   tryGenerateGuestResourceToken,
   verifyGuestResourceToken
 } = await import("../server/resourceToken.js");
-const { default: paymentRoutes, resetPaymentRateLimits } = await import("../server/paymentRoutes.js");
+const {
+  default: paymentRoutes,
+  resetPaymentRateLimits,
+  generateAssetAccessToken,
+  verifyAssetAccessToken,
+  isAssetTokenSecretConfigured
+} = await import("../server/paymentRoutes.js");
 const { setMockSupabaseServerClient } = await import("../server/supabaseServer.js");
 const { setMockRazorpayClient } = await import("../server/razorpay.js");
 
@@ -263,6 +269,104 @@ runTest("2.1 RESOURCE_TOKEN_HMAC_SECRET enforces 32-byte minimum, placeholder re
       resourceId: "2d50e5e3-711d-4461-a70d-0ed54dd29f17"
     });
     assert.strictEqual(verified.valid, true);
+  } finally {
+    restoreSecretEnv(snap);
+  }
+});
+
+runTest("2.1b Validation matrix: empty, <32-byte, exact 32-byte, 64-char hex, and Unicode UTF-8 byte-length boundaries", () => {
+  const snap = snapshotSecretEnv();
+  try {
+    // 1. Reject empty, whitespace-only, "undefined", "null", and 31-byte ASCII for BOTH resource & invoice
+    for (const invalidVal of ["", "   \t\n  ", "undefined", "null", "a".repeat(31), `  ${"b".repeat(31)}  `]) {
+      process.env.RESOURCE_TOKEN_HMAC_SECRET = invalidVal;
+      process.env.INVOICE_TOKEN_HMAC_SECRET = invalidVal;
+      assert.strictEqual(getResourceTokenHmacSecret(), null, `Resource secret should reject ${JSON.stringify(invalidVal)}`);
+      assert.strictEqual(isResourceTokenSecretConfigured(), false);
+      assert.strictEqual(getInvoiceTokenHmacSecret(), null, `Invoice secret should reject ${JSON.stringify(invalidVal)}`);
+      assert.strictEqual(isInvoiceTokenSecretConfigured(), false);
+    }
+
+    // 2. Unicode UTF-8 byte length: 10x 3-byte char = 30 UTF-8 bytes (< 32 => reject), 11x 3-byte char = 33 UTF-8 bytes (>= 32 => accept)
+    const shortUnicode = "✓".repeat(10); // .length=10, UTF-8 bytes=30
+    const validUnicode = "✓".repeat(11); // .length=11 (< 32 chars), UTF-8 bytes=33 (>= 32 bytes)
+    assert.strictEqual(Buffer.byteLength(shortUnicode, "utf8"), 30);
+    assert.strictEqual(Buffer.byteLength(validUnicode, "utf8"), 33);
+
+    process.env.RESOURCE_TOKEN_HMAC_SECRET = shortUnicode;
+    process.env.INVOICE_TOKEN_HMAC_SECRET = shortUnicode;
+    assert.strictEqual(isResourceTokenSecretConfigured(), false);
+    assert.strictEqual(isInvoiceTokenSecretConfigured(), false);
+
+    process.env.RESOURCE_TOKEN_HMAC_SECRET = validUnicode;
+    process.env.INVOICE_TOKEN_HMAC_SECRET = validUnicode;
+    assert.strictEqual(isResourceTokenSecretConfigured(), true);
+    assert.strictEqual(isInvoiceTokenSecretConfigured(), true);
+    const uResTok = generateGuestResourceToken({ paymentId: "pay_uni", orderId: "ord_uni", resourceId: "res_uni" });
+    assert.strictEqual(verifyGuestResourceToken(uResTok, { paymentId: "pay_uni", orderId: "ord_uni", resourceId: "res_uni" }).valid, true);
+    const uInvTok = generateSignedInvoiceToken("pay_uni", 60_000);
+    assert.strictEqual(verifySignedInvoiceToken("pay_uni", uInvTok), true);
+
+    // 3. Exact 32-byte ASCII values (with surrounding whitespace trimmed cleanly)
+    const exact32 = "x".repeat(32);
+    process.env.RESOURCE_TOKEN_HMAC_SECRET = `  ${exact32}\n`;
+    process.env.INVOICE_TOKEN_HMAC_SECRET = `\t${exact32}  `;
+    assert.strictEqual(getResourceTokenHmacSecret(), exact32);
+    assert.strictEqual(getInvoiceTokenHmacSecret(), exact32);
+
+    // 4. Valid 64-character hexadecimal values (from 32 random bytes)
+    const hex64Res = crypto.randomBytes(32).toString("hex");
+    const hex64Inv = crypto.randomBytes(32).toString("hex");
+    assert.strictEqual(hex64Res.length, 64);
+    assert.strictEqual(hex64Inv.length, 64);
+    process.env.RESOURCE_TOKEN_HMAC_SECRET = hex64Res;
+    process.env.INVOICE_TOKEN_HMAC_SECRET = hex64Inv;
+    assert.strictEqual(isResourceTokenSecretConfigured(), true);
+    assert.strictEqual(isInvoiceTokenSecretConfigured(), true);
+    const hResTok = generateGuestResourceToken({ paymentId: "pay_hex", orderId: "ord_hex", resourceId: "res_hex" });
+    assert.strictEqual(verifyGuestResourceToken(hResTok, { paymentId: "pay_hex", orderId: "ord_hex", resourceId: "res_hex" }).valid, true);
+    const hInvTok = generateSignedInvoiceToken("pay_hex", 60_000);
+    assert.strictEqual(verifySignedInvoiceToken("pay_hex", hInvTok), true);
+  } finally {
+    restoreSecretEnv(snap);
+  }
+});
+
+runTest("2.1c Legacy asset-token verification compatibility and runtime process.env responsiveness", () => {
+  const snap = snapshotSecretEnv();
+  try {
+    const assetSecret = crypto.randomBytes(32).toString("hex");
+    const rzpLegacySecret = crypto.randomBytes(32).toString("hex");
+    process.env.ASSET_TOKEN_HMAC_SECRET = assetSecret;
+    process.env.RAZORPAY_KEY_SECRET = rzpLegacySecret;
+    assert.strictEqual(isAssetTokenSecretConfigured(), true);
+
+    const assetTok = generateAssetAccessToken("res_asset_01", "user_asset_01");
+    assert.ok(assetTok);
+    const decoded = verifyAssetAccessToken(assetTok);
+    assert.strictEqual(decoded?.resourceId, "res_asset_01");
+    assert.strictEqual(decoded?.authId, "user_asset_01");
+
+    // Legacy 1-hour transitional token signed with RAZORPAY_KEY_SECRET remains verifiable
+    const legacyPayload = Buffer.from(JSON.stringify({
+      resourceId: "res_legacy_asset",
+      authId: "guest",
+      expiresAt: Date.now() + 60_000
+    })).toString("base64url");
+    const legacySig = crypto.createHmac("sha256", rzpLegacySecret).update(legacyPayload).digest("base64url");
+    const legacyAssetTok = `${legacyPayload}.${legacySig}`;
+    assert.strictEqual(verifyAssetAccessToken(legacyAssetTok)?.resourceId, "res_legacy_asset");
+
+    // Runtime process.env changes take effect dynamically without import-time caching
+    delete process.env.RESOURCE_TOKEN_HMAC_SECRET;
+    delete process.env.INVOICE_TOKEN_HMAC_SECRET;
+    assert.strictEqual(isResourceTokenSecretConfigured(), false);
+    assert.strictEqual(isInvoiceTokenSecretConfigured(), false);
+
+    process.env.RESOURCE_TOKEN_HMAC_SECRET = crypto.randomBytes(32).toString("hex");
+    process.env.INVOICE_TOKEN_HMAC_SECRET = crypto.randomBytes(32).toString("hex");
+    assert.strictEqual(isResourceTokenSecretConfigured(), true);
+    assert.strictEqual(isInvoiceTokenSecretConfigured(), true);
   } finally {
     restoreSecretEnv(snap);
   }
@@ -512,12 +616,15 @@ await runAsyncTest("3.2 /healthz degrades (503) when required HMAC secrets are m
     }
   );
 
-  // Case B: All 3 required HMAC secrets configured => HTTP 200 status === "ok"
+  // Case B: All 3 required HMAC secrets configured (64-char hex) => HTTP 200 status === "ok"
+  const hexAsset = crypto.randomBytes(32).toString("hex");
+  const hexResource = crypto.randomBytes(32).toString("hex");
+  const hexInvoice = crypto.randomBytes(32).toString("hex");
   await withCompiledServer(
     {
-      ASSET_TOKEN_HMAC_SECRET: sentinelAsset,
-      RESOURCE_TOKEN_HMAC_SECRET: sentinelResource,
-      INVOICE_TOKEN_HMAC_SECRET: sentinelInvoice
+      ASSET_TOKEN_HMAC_SECRET: hexAsset,
+      RESOURCE_TOKEN_HMAC_SECRET: hexResource,
+      INVOICE_TOKEN_HMAC_SECRET: hexInvoice
     },
     4194,
     async ({ getLogs }) => {
@@ -530,9 +637,9 @@ await runAsyncTest("3.2 /healthz degrades (503) when required HMAC secrets are m
       assert.strictEqual(data.gateway.invoiceTokenSecretConfigured, true);
 
       const serialized = res.body + "\n" + getLogs();
-      assert.strictEqual(serialized.includes(sentinelAsset), false);
-      assert.strictEqual(serialized.includes(sentinelResource), false);
-      assert.strictEqual(serialized.includes(sentinelInvoice), false);
+      assert.strictEqual(serialized.includes(hexAsset), false);
+      assert.strictEqual(serialized.includes(hexResource), false);
+      assert.strictEqual(serialized.includes(hexInvoice), false);
       assert.strictEqual(/length/i.test(res.body), false);
     }
   );
