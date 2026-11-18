@@ -94,7 +94,28 @@ async function runSynchronized(clients, workerFn) {
   return settledPromise;
 }
 
+function assertParamBindingMatch(sql, params) {
+  if (params === undefined) return;
+  assert.ok(Array.isArray(params), `SQL params must be an array, got ${typeof params}`);
+  const withoutStrings = sql.replace(/'(?:''|[^'])*'/g, "''");
+  const placeholderNums = [...withoutStrings.matchAll(/\$(\d+)\b/g)].map((m) => Number(m[1]));
+  const uniqueSorted = [...new Set(placeholderNums)].sort((a, b) => a - b);
+  const expectedCount = uniqueSorted.length > 0 ? uniqueSorted[uniqueSorted.length - 1] : 0;
+
+  assert.strictEqual(
+    uniqueSorted.length,
+    expectedCount,
+    `Non-contiguous SQL placeholders in query (${uniqueSorted.join(", ")}): ${sql}`
+  );
+  assert.strictEqual(
+    params.length,
+    expectedCount,
+    `SQL parameter count mismatch: query expects ${expectedCount} ($1..$${expectedCount}), supplied ${params.length}`
+  );
+}
+
 async function execAsServiceRole(client, sql, params) {
+  assertParamBindingMatch(sql, params);
   await client.query("BEGIN");
   try {
     await client.query("SET LOCAL ROLE service_role");
@@ -278,7 +299,7 @@ async function run() {
     const results = await runSynchronized(clients, async (c) => {
       const { rows } = await execAsServiceRole(
         c,
-        `SELECT public.fulfill_resource_purchase($1::uuid, $2::uuid, $3::numeric, 'INR', $4, $5, $6, $7, $8, $9) AS res`,
+        `SELECT public.fulfill_resource_purchase($1::uuid, $2::uuid, $3::numeric, $4, $5, $6, $7, $8, $9, $10) AS res`,
         [
           "dddddddd-0000-4000-8000-000000000001",
           "ffffffff-0000-4000-8000-000000000001",
@@ -309,7 +330,7 @@ async function run() {
       try {
         const { rows } = await execAsServiceRole(
           c,
-          `SELECT public.fulfill_resource_purchase($1::uuid, $2::uuid, $3::numeric, 'INR', $4, $5, $6, $7, $8, $9) AS res`,
+          `SELECT public.fulfill_resource_purchase($1::uuid, $2::uuid, $3::numeric, $4, $5, $6, $7, $8, $9, $10) AS res`,
           [
             "dddddddd-0000-4000-8000-000000000002",
             "ffffffff-0000-4000-8000-000000000001",

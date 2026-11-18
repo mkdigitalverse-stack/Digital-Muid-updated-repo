@@ -247,4 +247,136 @@ test("package-lock.json stays synchronized with package.json (including devDepen
   );
 });
 
+function findSqlParamCountMismatches(jsSource) {
+  const mismatches = [];
+
+  function skipQuoted(src, start, quote) {
+    let i = start + 1;
+    while (i < src.length) {
+      const ch = src[i];
+      if (ch === "\\") {
+        i += 2;
+        continue;
+      }
+      if (quote === "`" && ch === "$" && src[i + 1] === "{") {
+        i += 2;
+        let braceDepth = 1;
+        while (i < src.length && braceDepth > 0) {
+          if (src[i] === "'" || src[i] === '"' || src[i] === "`") {
+            i = skipQuoted(src, i, src[i]);
+            continue;
+          }
+          if (src[i] === "{") braceDepth += 1;
+          else if (src[i] === "}") braceDepth -= 1;
+          i += 1;
+        }
+        continue;
+      }
+      if (ch === quote) return i + 1;
+      i += 1;
+    }
+    return src.length;
+  }
+
+  function splitTopLevelArgs(argsSrc) {
+    const args = [];
+    let start = 0;
+    let depth = 0;
+    let i = 0;
+    while (i < argsSrc.length) {
+      const ch = argsSrc[i];
+      if (ch === "'" || ch === '"' || ch === "`") {
+        i = skipQuoted(argsSrc, i, ch);
+        continue;
+      }
+      if (ch === "(" || ch === "[" || ch === "{") depth += 1;
+      else if (ch === ")" || ch === "]" || ch === "}") depth -= 1;
+      else if (ch === "," && depth === 0) {
+        args.push(argsSrc.slice(start, i).trim());
+        start = i + 1;
+      }
+      i += 1;
+    }
+    const last = argsSrc.slice(start).trim();
+    if (last) args.push(last);
+    return args;
+  }
+
+  const headRegex = /(?:execAsServiceRole|\.query)\s*\(/g;
+  let m;
+  while ((m = headRegex.exec(jsSource)) !== null) {
+    const isExecHelper = m[0].startsWith("execAsServiceRole");
+    let i = m.index + m[0].length;
+    let depth = 1;
+    const argsStart = i;
+    while (i < jsSource.length && depth > 0) {
+      const ch = jsSource[i];
+      if (ch === "'" || ch === '"' || ch === "`") {
+        i = skipQuoted(jsSource, i, ch);
+        continue;
+      }
+      if (ch === "(") depth += 1;
+      else if (ch === ")") depth -= 1;
+      i += 1;
+    }
+    if (depth !== 0) continue;
+    const args = splitTopLevelArgs(jsSource.slice(argsStart, i - 1));
+    const sqlArg = isExecHelper ? args[1] : args[0];
+    const paramsArg = isExecHelper ? args[2] : args[1];
+    if (!sqlArg || !paramsArg || !paramsArg.startsWith("[") || !paramsArg.endsWith("]")) continue;
+
+    const sql =
+      (sqlArg.startsWith("`") && sqlArg.endsWith("`")) ||
+      (sqlArg.startsWith('"') && sqlArg.endsWith('"')) ||
+      (sqlArg.startsWith("'") && sqlArg.endsWith("'"))
+        ? sqlArg.slice(1, -1)
+        : sqlArg;
+    const paramsInner = paramsArg.slice(1, -1).trim();
+    const suppliedCount = paramsInner ? splitTopLevelArgs(paramsInner).length : 0;
+    const withoutStrings = sql.replace(/'(?:''|[^'])*'/g, "''");
+    const placeholderNums = [...withoutStrings.matchAll(/\$(\d+)\b/g)].map((x) => Number(x[1]));
+    const uniqueSorted = [...new Set(placeholderNums)].sort((a, b) => a - b);
+    const expectedCount = uniqueSorted.length > 0 ? uniqueSorted[uniqueSorted.length - 1] : 0;
+
+    if (uniqueSorted.length !== expectedCount || suppliedCount !== expectedCount) {
+      mismatches.push({ sql: sql.trim(), expectedCount, suppliedCount, placeholders: uniqueSorted });
+    }
+  }
+  return mismatches;
+}
+
+test("Concurrency parameter-count detector catches legacy 9-placeholder / 10-param fulfill_resource_purchase mismatch", () => {
+  const legacyBuggySnippet = `
+    await execAsServiceRole(
+      c,
+      \`SELECT public.fulfill_resource_purchase($1::uuid, $2::uuid, $3::numeric, 'INR', $4, $5, $6, $7, $8, $9) AS res\`,
+      ["u1", "r1", 588.82, "INR", "ord1", "pay1", "Name", "e@x.test", "9111111111", "Title"]
+    );
+  `;
+  const hits = findSqlParamCountMismatches(legacyBuggySnippet);
+  assert.strictEqual(hits.length, 1);
+  assert.strictEqual(hits[0].expectedCount, 9);
+  assert.strictEqual(hits[0].suppliedCount, 10);
+});
+
+test("Every parameterized SQL call in v4_3_postgres_concurrency_test.mjs matches $1..$N count and enforces runtime guard", () => {
+  const mismatches = findSqlParamCountMismatches(CONCURRENCY_JS);
+  assert.deepStrictEqual(
+    mismatches,
+    [],
+    `SQL placeholder vs parameter array mismatch found: ${JSON.stringify(mismatches)}`
+  );
+  const resourceCalls = CONCURRENCY_JS.match(/public\.fulfill_resource_purchase\([^)]+\)/g) || [];
+  assert.strictEqual(resourceCalls.length, 2, "Expected both C4 fulfill_resource_purchase calls");
+  for (const call of resourceCalls) {
+    assert.match(call, /\$10\)/, `Expected $1..$10 binding on fulfill_resource_purchase, got: ${call}`);
+  }
+  assert.match(CONCURRENCY_JS, /function assertParamBindingMatch\(/);
+});
+
+test("CI workflow uses Node.js 22 LTS compatible with @supabase/supabase-js >=22.0.0", () => {
+  assert.match(WORKFLOW_YML, /node-version:\s*'22'/);
+});
+
 console.log(`=== SUMMARY: ${passed} PASSED, ${process.exitCode ? 1 : 0} FAILED ===`);
+
