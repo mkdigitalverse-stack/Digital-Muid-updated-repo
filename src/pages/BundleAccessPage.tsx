@@ -41,6 +41,49 @@ interface BundleAccessPageProps {
   slug?: string;
 }
 
+export function captureAndScrubBundleAccessUrl(
+  sessionTokenRef?: { current: string | null }
+): { orderId: string | null; paymentId: string | null; checkout: boolean; capturedToken: string | null } {
+  if (typeof window === 'undefined') {
+    return { orderId: null, paymentId: null, checkout: false, capturedToken: null };
+  }
+  const sp = new URLSearchParams(window.location.search);
+  const orderId = sp.get('orderId') || sp.get('order_id');
+  const paymentId = sp.get('paymentId') || sp.get('payment_id');
+  const urlToken = sp.get('resourceAccessToken') || sp.get('resource_access_token');
+  let capturedToken: string | null = null;
+
+  if (urlToken && orderId && paymentId) {
+    capturedToken = urlToken;
+    if (sessionTokenRef) {
+      sessionTokenRef.current = urlToken;
+    }
+    saveStoredGuestResourceToken({
+      resourceId: '2d50e5e3-711d-4461-a70d-0ed54dd29f17',
+      orderId,
+      paymentId,
+      token: urlToken
+    });
+  }
+
+  if (sp.has('resourceAccessToken') || sp.has('resource_access_token')) {
+    sp.delete('resourceAccessToken');
+    sp.delete('resource_access_token');
+    const nextQs = sp.toString();
+    const cleanUrl = `${window.location.pathname}${nextQs ? `?${nextQs}` : ''}${window.location.hash || ''}`;
+    try {
+      window.history.replaceState(window.history.state, '', cleanUrl);
+    } catch {}
+  }
+
+  return {
+    orderId,
+    paymentId,
+    checkout: sp.get('checkout') === 'true' || sp.get('buy') === 'true',
+    capturedToken
+  };
+}
+
 export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) => {
   const { resources, hasPurchasedResource, purchaseResource, notify, currentUser, userProfile } = useApp();
 
@@ -66,36 +109,8 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
 
   // Parse query params (paymentId / orderId if redirected from checkout or emailed link)
   const [urlParams, setUrlParams] = useState<{ orderId: string | null; paymentId: string | null; checkout: boolean }>(() => {
-    if (typeof window === 'undefined') return { orderId: null, paymentId: null, checkout: false };
-    const sp = new URLSearchParams(window.location.search);
-    const orderId = sp.get('orderId') || sp.get('order_id');
-    const paymentId = sp.get('paymentId') || sp.get('payment_id');
-    const urlToken = sp.get('resourceAccessToken') || sp.get('resource_access_token');
-
-    if (urlToken && orderId && paymentId) {
-      sessionTokenRef.current = urlToken;
-      const persisted = saveStoredGuestResourceToken({
-        resourceId: BUNDLE_CANONICAL_ID,
-        orderId,
-        paymentId,
-        token: urlToken
-      });
-      if (persisted) {
-        sp.delete('resourceAccessToken');
-        sp.delete('resource_access_token');
-        const nextQs = sp.toString();
-        const cleanUrl = `${window.location.pathname}${nextQs ? `?${nextQs}` : ''}${window.location.hash || ''}`;
-        try {
-          window.history.replaceState(window.history.state, '', cleanUrl);
-        } catch {}
-      }
-    }
-
-    return {
-      orderId,
-      paymentId,
-      checkout: sp.get('checkout') === 'true' || sp.get('buy') === 'true'
-    };
+    const { orderId, paymentId, checkout } = captureAndScrubBundleAccessUrl(sessionTokenRef);
+    return { orderId, paymentId, checkout };
   });
 
   useEffect(() => {

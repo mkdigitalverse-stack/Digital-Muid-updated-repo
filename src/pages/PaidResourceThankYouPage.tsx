@@ -23,6 +23,58 @@ interface PaidResourceThankYouPageProps {
   navigate: (path: string) => void;
 }
 
+export function captureAndScrubThankYouUrl(
+  sessionTokenRef?: { current: string | null }
+): {
+  resourceId: string | null;
+  orderId: string | null;
+  paymentId: string | null;
+  amount: string | null;
+  capturedToken: string | null;
+} {
+  if (typeof window === 'undefined') {
+    return { resourceId: null, orderId: null, paymentId: null, amount: null, capturedToken: null };
+  }
+  const searchParams = new URLSearchParams(window.location.search);
+  const resId = searchParams.get('resourceId') || searchParams.get('id') || searchParams.get('slug');
+  const ordId = searchParams.get('orderId') || searchParams.get('order_id');
+  const payId = searchParams.get('paymentId') || searchParams.get('payment_id');
+  const amt = searchParams.get('amount');
+  const resToken = searchParams.get('resourceAccessToken') || searchParams.get('resource_access_token');
+  let capturedToken: string | null = null;
+
+  if (resToken && ordId && payId) {
+    capturedToken = resToken;
+    if (sessionTokenRef) {
+      sessionTokenRef.current = resToken;
+    }
+    saveStoredGuestResourceToken({
+      resourceId: resId,
+      orderId: ordId,
+      paymentId: payId,
+      token: resToken
+    });
+  }
+
+  if (searchParams.has('resourceAccessToken') || searchParams.has('resource_access_token')) {
+    searchParams.delete('resourceAccessToken');
+    searchParams.delete('resource_access_token');
+    const nextQs = searchParams.toString();
+    const cleanUrl = `${window.location.pathname}${nextQs ? `?${nextQs}` : ''}${window.location.hash || ''}`;
+    try {
+      window.history.replaceState(window.history.state, '', cleanUrl);
+    } catch {}
+  }
+
+  return {
+    resourceId: resId,
+    orderId: ordId,
+    paymentId: payId,
+    amount: amt,
+    capturedToken
+  };
+}
+
 export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> = ({ navigate }) => {
   const { resources, hasPurchasedResource, notify, currentUser } = useApp();
 
@@ -69,31 +121,12 @@ export const PaidResourceThankYouPage: React.FC<PaidResourceThankYouPageProps> =
   }, []);
 
   useEffect(() => {
-    const searchParams = new URLSearchParams(window.location.search);
-    const resId = searchParams.get('resourceId') || searchParams.get('id') || searchParams.get('slug');
-    const ordId = searchParams.get('orderId') || searchParams.get('order_id');
-    const payId = searchParams.get('paymentId') || searchParams.get('payment_id');
-    const amt = searchParams.get('amount');
-    const resToken = searchParams.get('resourceAccessToken') || searchParams.get('resource_access_token');
-
-    if (resToken && ordId && payId) {
-      sessionTokenRef.current = resToken;
-      const persisted = saveStoredGuestResourceToken({
-        resourceId: resId,
-        orderId: ordId,
-        paymentId: payId,
-        token: resToken
-      });
-      if (persisted) {
-        searchParams.delete('resourceAccessToken');
-        searchParams.delete('resource_access_token');
-        const nextQs = searchParams.toString();
-        const cleanUrl = `${window.location.pathname}${nextQs ? `?${nextQs}` : ''}${window.location.hash || ''}`;
-        try {
-          window.history.replaceState(window.history.state, '', cleanUrl);
-        } catch {}
-      }
-    }
+    const {
+      resourceId: resId,
+      orderId: ordId,
+      paymentId: payId,
+      amount: amt
+    } = captureAndScrubThankYouUrl(sessionTokenRef);
 
     setQueryParams({
       resourceId: resId,

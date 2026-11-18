@@ -72,6 +72,8 @@ const {
   getStoredGuestResourceToken,
   clearMemoryGuestResourceTokens
 } = await import("../src/services/paymentService.ts");
+const { captureAndScrubBundleAccessUrl } = await import("../src/pages/BundleAccessPage.tsx");
+const { captureAndScrubThankYouUrl } = await import("../src/pages/PaidResourceThankYouPage.tsx");
 
 function createMockDb() {
   const state = {
@@ -872,6 +874,274 @@ async function main() {
       const badDl = await originalFetch(`${baseUrl}/api/payments/download-paid-asset?token=${assetTok}tamper`);
       assert.strictEqual(badDl.status, 403);
       assert.strictEqual(verifyAssetAccessToken(`${assetTok}tamper`), null);
+    });
+
+    await runAsyncTest("14. C-1 BundleAccessPage SPA scrub & recovery (sessionStorage success vs failure, reload, missing token)", async () => {
+      const makeSpaWindow = (href: string, storageApi: any) => {
+        const urlObj = new URL(href);
+        const replaceCalls: string[] = [];
+        return {
+          replaceCalls,
+          getHref: () => urlObj.href,
+          getSearch: () => urlObj.search,
+          win: {
+            location: {
+              get href() { return urlObj.href; },
+              get origin() { return urlObj.origin; },
+              get pathname() { return urlObj.pathname; },
+              get search() { return urlObj.search; },
+              get hash() { return urlObj.hash; }
+            },
+            sessionStorage: storageApi,
+            history: {
+              state: { page: "bundle" },
+              replaceState(_s: any, _t: string, nextUrl: string) {
+                replaceCalls.push(nextUrl);
+                const resolved = new URL(nextUrl, urlObj.origin);
+                urlObj.pathname = resolved.pathname;
+                urlObj.search = resolved.search;
+                urlObj.hash = resolved.hash;
+              }
+            },
+            addEventListener() {}
+          }
+        };
+      };
+
+      const tokRes = tryGenerateGuestResourceToken({
+        paymentId: "pay_reload_b1",
+        orderId: "order_reload_b1",
+        resourceId: BUNDLE_UUID,
+        email: "reload.bundle@example.com",
+        phone: "+919111122222"
+      });
+      assert.ok(tokRes.ok && tokRes.token);
+
+      // Case 1: sessionStorage succeeds
+      clearMemoryGuestResourceTokens();
+      const goodStorage = createStorageMock(false);
+      const spaGood = makeSpaWindow(
+        `https://digitalmuid.in/resources/bundle/${BUNDLE_SLUG}?orderId=order_reload_b1&paymentId=pay_reload_b1&utm_source=email&resourceAccessToken=${tokRes.token}#files`,
+        goodStorage.api
+      );
+      (globalThis as any).window = spaGood.win;
+      const refGood = { current: null as string | null };
+      const parsedGood = captureAndScrubBundleAccessUrl(refGood);
+
+      assert.strictEqual(parsedGood.orderId, "order_reload_b1");
+      assert.strictEqual(parsedGood.paymentId, "pay_reload_b1");
+      assert.strictEqual(parsedGood.capturedToken, tokRes.token);
+      assert.strictEqual(refGood.current, tokRes.token);
+      assert.strictEqual(spaGood.replaceCalls.length, 1);
+      assert.strictEqual(spaGood.getHref().includes(tokRes.token), false);
+      assert.strictEqual(spaGood.getSearch(), "?orderId=order_reload_b1&paymentId=pay_reload_b1&utm_source=email");
+      assert.strictEqual(spaGood.win.location.hash, "#files");
+
+      // Refresh with sessionStorage available recovers token and unlocks API
+      clearMemoryGuestResourceTokens();
+      const spaReloadGood = makeSpaWindow(spaGood.getHref(), goodStorage.api);
+      (globalThis as any).window = spaReloadGood.win;
+      const refReloadGood = { current: null as string | null };
+      captureAndScrubBundleAccessUrl(refReloadGood);
+      const recoveredGood = refReloadGood.current || getStoredGuestResourceToken(BUNDLE_UUID, "order_reload_b1", "pay_reload_b1");
+      assert.strictEqual(recoveredGood, tokRes.token);
+      resetPaymentRateLimits();
+      const goodApi = await originalFetch(
+        `${baseUrl}/api/payments/bundle-files?bundleId=${BUNDLE_UUID}&orderId=order_reload_b1&paymentId=pay_reload_b1`,
+        { headers: { "x-resource-access-token": recoveredGood! } }
+      );
+      assert.strictEqual(goodApi.status, 200);
+
+      // Case 2: sessionStorage fails -> token captured in memory, URL STILL scrubbed, current session works
+      clearMemoryGuestResourceTokens();
+      const brokenStorage = createStorageMock(true);
+      const spaBroken = makeSpaWindow(
+        `https://digitalmuid.in/resources/bundle/${BUNDLE_SLUG}?orderId=order_reload_b1&paymentId=pay_reload_b1&utm_source=spa&resource_access_token=${tokRes.token}#top`,
+        brokenStorage.api
+      );
+      (globalThis as any).window = spaBroken.win;
+      const refBroken = { current: null as string | null };
+      const parsedBroken = captureAndScrubBundleAccessUrl(refBroken);
+
+      assert.strictEqual(parsedBroken.orderId, "order_reload_b1");
+      assert.strictEqual(parsedBroken.paymentId, "pay_reload_b1");
+      assert.strictEqual(parsedBroken.capturedToken, tokRes.token);
+      assert.strictEqual(refBroken.current, tokRes.token);
+      assert.strictEqual(spaBroken.replaceCalls.length, 1, "URL must still be scrubbed when sessionStorage fails");
+      assert.strictEqual(spaBroken.getHref().includes("resource_access_token"), false);
+      assert.strictEqual(spaBroken.getHref().includes(tokRes.token), false);
+      assert.strictEqual(spaBroken.getSearch(), "?orderId=order_reload_b1&paymentId=pay_reload_b1&utm_source=spa");
+      assert.strictEqual(spaBroken.win.location.hash, "#top");
+
+      const currentSessionToken = refBroken.current || getStoredGuestResourceToken(BUNDLE_UUID, "order_reload_b1", "pay_reload_b1");
+      assert.strictEqual(currentSessionToken, tokRes.token);
+      // Repeated reads in the same session remain intact for verification + downloads
+      assert.strictEqual(getStoredGuestResourceToken(BUNDLE_UUID, "order_reload_b1", "pay_reload_b1"), tokRes.token);
+      resetPaymentRateLimits();
+      const brokenSessionApi = await originalFetch(
+        `${baseUrl}/api/payments/bundle-files?bundleId=${BUNDLE_UUID}&orderId=order_reload_b1&paymentId=pay_reload_b1`,
+        { headers: { "x-resource-access-token": currentSessionToken! } }
+      );
+      assert.strictEqual(brokenSessionApi.status, 200);
+
+      // Refresh when storage is unavailable must NOT falsely recover token and must fail closed
+      clearMemoryGuestResourceTokens();
+      const spaBrokenReload = makeSpaWindow(spaBroken.getHref(), brokenStorage.api);
+      (globalThis as any).window = spaBrokenReload.win;
+      const refBrokenReload = { current: null as string | null };
+      captureAndScrubBundleAccessUrl(refBrokenReload);
+      assert.strictEqual(refBrokenReload.current, null);
+      assert.strictEqual(getStoredGuestResourceToken(BUNDLE_UUID, "order_reload_b1", "pay_reload_b1"), null);
+      const missingRes = await originalFetch(
+        `${baseUrl}/api/payments/bundle-files?bundleId=${BUNDLE_UUID}&orderId=order_reload_b1&paymentId=pay_reload_b1`
+      );
+      assert.strictEqual(missingRes.status, 403);
+    });
+
+    await runAsyncTest("15. C-1 PaidResourceThankYouPage SPA scrub & recovery (sessionStorage success vs failure, reload, missing token)", async () => {
+      const makeSpaWindow = (href: string, storageApi: any) => {
+        const urlObj = new URL(href);
+        const replaceCalls: string[] = [];
+        return {
+          replaceCalls,
+          getHref: () => urlObj.href,
+          getSearch: () => urlObj.search,
+          win: {
+            location: {
+              get href() { return urlObj.href; },
+              get origin() { return urlObj.origin; },
+              get pathname() { return urlObj.pathname; },
+              get search() { return urlObj.search; },
+              get hash() { return urlObj.hash; }
+            },
+            sessionStorage: storageApi,
+            history: {
+              state: { page: "thank-you" },
+              replaceState(_s: any, _t: string, nextUrl: string) {
+                replaceCalls.push(nextUrl);
+                const resolved = new URL(nextUrl, urlObj.origin);
+                urlObj.pathname = resolved.pathname;
+                urlObj.search = resolved.search;
+                urlObj.hash = resolved.hash;
+              }
+            },
+            addEventListener() {}
+          }
+        };
+      };
+
+      const tokRes = tryGenerateGuestResourceToken({
+        paymentId: "pay_ty_1",
+        orderId: "order_ty_1",
+        resourceId: STANDALONE_UUID,
+        email: "ty.guest@example.com",
+        phone: "+919222233333"
+      });
+      assert.ok(tokRes.ok && tokRes.token);
+
+      // Case 1: sessionStorage succeeds
+      clearMemoryGuestResourceTokens();
+      const goodStorage = createStorageMock(false);
+      const spaGood = makeSpaWindow(
+        `https://digitalmuid.in/resources/thank-you/paid?resourceId=${STANDALONE_UUID}&orderId=order_ty_1&paymentId=pay_ty_1&utm_campaign=receipt&resourceAccessToken=${tokRes.token}#receipt`,
+        goodStorage.api
+      );
+      (globalThis as any).window = spaGood.win;
+      const refGood = { current: null as string | null };
+      const parsedGood = captureAndScrubThankYouUrl(refGood);
+
+      assert.strictEqual(parsedGood.resourceId, STANDALONE_UUID);
+      assert.strictEqual(parsedGood.orderId, "order_ty_1");
+      assert.strictEqual(parsedGood.paymentId, "pay_ty_1");
+      assert.strictEqual(parsedGood.capturedToken, tokRes.token);
+      assert.strictEqual(refGood.current, tokRes.token);
+      assert.strictEqual(spaGood.replaceCalls.length, 1);
+      assert.strictEqual(spaGood.getHref().includes(tokRes.token), false);
+      assert.strictEqual(
+        spaGood.getSearch(),
+        `?resourceId=${STANDALONE_UUID}&orderId=order_ty_1&paymentId=pay_ty_1&utm_campaign=receipt`
+      );
+      assert.strictEqual(spaGood.win.location.hash, "#receipt");
+
+      // Refresh with sessionStorage available recovers token and passes status + download URL checks
+      clearMemoryGuestResourceTokens();
+      const spaReloadGood = makeSpaWindow(spaGood.getHref(), goodStorage.api);
+      (globalThis as any).window = spaReloadGood.win;
+      const refReloadGood = { current: null as string | null };
+      captureAndScrubThankYouUrl(refReloadGood);
+      const recoveredGood = refReloadGood.current || getStoredGuestResourceToken(STANDALONE_UUID, "order_ty_1", "pay_ty_1");
+      assert.strictEqual(recoveredGood, tokRes.token);
+      resetPaymentRateLimits();
+      const verifyOk = await originalFetch(
+        `${baseUrl}/api/payments/verify-purchase-status?resourceId=${STANDALONE_UUID}&orderId=order_ty_1&paymentId=pay_ty_1`,
+        { headers: { "x-resource-access-token": recoveredGood! } }
+      );
+      assert.strictEqual(verifyOk.status, 200);
+
+      // Case 2: sessionStorage fails -> token captured in memory, URL STILL scrubbed, verification + download work in same session
+      clearMemoryGuestResourceTokens();
+      const brokenStorage = createStorageMock(true);
+      const spaBroken = makeSpaWindow(
+        `https://digitalmuid.in/resources/thank-you/paid?resourceId=${STANDALONE_UUID}&orderId=order_ty_1&paymentId=pay_ty_1&safeParam=keep&resource_access_token=${tokRes.token}`,
+        brokenStorage.api
+      );
+      (globalThis as any).window = spaBroken.win;
+      const refBroken = { current: null as string | null };
+      const parsedBroken = captureAndScrubThankYouUrl(refBroken);
+
+      assert.strictEqual(parsedBroken.resourceId, STANDALONE_UUID);
+      assert.strictEqual(parsedBroken.orderId, "order_ty_1");
+      assert.strictEqual(parsedBroken.paymentId, "pay_ty_1");
+      assert.strictEqual(parsedBroken.capturedToken, tokRes.token);
+      assert.strictEqual(refBroken.current, tokRes.token);
+      assert.strictEqual(spaBroken.replaceCalls.length, 1, "URL must still be scrubbed when sessionStorage fails");
+      assert.strictEqual(spaBroken.getHref().includes("resource_access_token"), false);
+      assert.strictEqual(spaBroken.getHref().includes(tokRes.token), false);
+      assert.strictEqual(
+        spaBroken.getSearch(),
+        `?resourceId=${STANDALONE_UUID}&orderId=order_ty_1&paymentId=pay_ty_1&safeParam=keep`
+      );
+
+      // Verification call followed by download call both retain access in current session
+      const sessionTokenForVerify =
+        refBroken.current || getStoredGuestResourceToken(STANDALONE_UUID, "order_ty_1", "pay_ty_1");
+      assert.strictEqual(sessionTokenForVerify, tokRes.token);
+      resetPaymentRateLimits();
+      const verifyBrokenSession = await originalFetch(
+        `${baseUrl}/api/payments/verify-purchase-status?resourceId=${STANDALONE_UUID}&orderId=order_ty_1&paymentId=pay_ty_1`,
+        { headers: { "x-resource-access-token": sessionTokenForVerify! } }
+      );
+      assert.strictEqual(verifyBrokenSession.status, 200);
+
+      const sessionTokenForDownload =
+        refBroken.current || getStoredGuestResourceToken(STANDALONE_UUID, "order_ty_1", "pay_ty_1");
+      assert.strictEqual(sessionTokenForDownload, tokRes.token);
+      const dlBrokenSession = await originalFetch(`${baseUrl}/api/payments/get-resource-download-url`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-resource-access-token": sessionTokenForDownload!
+        },
+        body: JSON.stringify({
+          resourceId: STANDALONE_UUID,
+          orderId: "order_ty_1",
+          paymentId: "pay_ty_1"
+        })
+      });
+      assert.strictEqual(dlBrokenSession.status, 200);
+
+      // Refresh when storage is unavailable must NOT falsely recover token and must fail closed
+      clearMemoryGuestResourceTokens();
+      const spaBrokenReload = makeSpaWindow(spaBroken.getHref(), brokenStorage.api);
+      (globalThis as any).window = spaBrokenReload.win;
+      const refBrokenReload = { current: null as string | null };
+      captureAndScrubThankYouUrl(refBrokenReload);
+      assert.strictEqual(refBrokenReload.current, null);
+      assert.strictEqual(getStoredGuestResourceToken(STANDALONE_UUID, "order_ty_1", "pay_ty_1"), null);
+      const missingVerify = await originalFetch(
+        `${baseUrl}/api/payments/verify-purchase-status?resourceId=${STANDALONE_UUID}&orderId=order_ty_1&paymentId=pay_ty_1`
+      );
+      assert.strictEqual(missingVerify.status, 403);
     });
   } finally {
     if (originalWindow === undefined) delete (globalThis as any).window;
