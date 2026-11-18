@@ -3,10 +3,37 @@ import crypto from "crypto";
 // ==============================================================================
 // GUEST INVOICE TOKEN CRYPTOGRAPHIC HARDENING (SEC-03 Compliance)
 // High-entropy HMAC-SHA256 tokens protect guest invoices from sequential enumeration.
-// Supports dedicated INVOICE_TOKEN_HMAC_SECRET or falls back to server payment/asset secrets.
-// Fails closed if HMAC secret is missing or has < 32 bytes of entropy.
+// New tokens are minted EXCLUSIVELY with dedicated INVOICE_TOKEN_HMAC_SECRET (>= 32 bytes).
+// Verification tries INVOICE_TOKEN_HMAC_SECRET first, then legacy fallback candidates
+// (PAYMENT_VERIFICATION_SECRET, ASSET_TOKEN_HMAC_SECRET, RAZORPAY_KEY_SECRET) in original
+// priority order (each required to meet >= 32 UTF-8 bytes) so existing customer links remain valid.
 // ==============================================================================
+function normalizeValidHmacSecret(candidate) {
+  if (!candidate || typeof candidate !== "string") {
+    return null;
+  }
+  const clean = candidate.trim();
+  if (
+    !clean ||
+    clean === "undefined" ||
+    clean === "null" ||
+    clean.startsWith("generate_at_least_32_bytes") ||
+    Buffer.byteLength(clean, "utf8") < 32
+  ) {
+    return null;
+  }
+  return clean;
+}
+
 export function getInvoiceTokenHmacSecret() {
+  return normalizeValidHmacSecret(process.env.INVOICE_TOKEN_HMAC_SECRET);
+}
+
+export function isInvoiceTokenSecretConfigured() {
+  return Boolean(getInvoiceTokenHmacSecret());
+}
+
+export function getInvoiceTokenVerificationSecrets() {
   const candidates = [
     process.env.INVOICE_TOKEN_HMAC_SECRET,
     process.env.PAYMENT_VERIFICATION_SECRET,
@@ -14,16 +41,16 @@ export function getInvoiceTokenHmacSecret() {
     process.env.RAZORPAY_KEY_SECRET
   ];
 
+  const validSecrets = [];
+  const seen = new Set();
   for (const candidate of candidates) {
-    if (candidate && typeof candidate === "string") {
-      const clean = candidate.trim();
-      if (clean !== "undefined" && clean !== "null" && Buffer.byteLength(clean, "utf8") >= 32) {
-        return clean;
-      }
+    const valid = normalizeValidHmacSecret(candidate);
+    if (valid && !seen.has(valid)) {
+      seen.add(valid);
+      validSecrets.push(valid);
     }
   }
-
-  return null;
+  return validSecrets;
 }
 
 export function generateSignedInvoiceToken(paymentId, expiresInMs = 24 * 60 * 60 * 1000) {
@@ -63,23 +90,32 @@ export function buildSignedInvoiceUrl(paymentId, token, baseUrl = "") {
 
 export function verifySignedInvoiceToken(paymentId, token) {
   if (!paymentId || !token || typeof token !== "string" || !token.includes(".")) return false;
-  const [expStr, sig] = token.split(".");
+  const parts = token.split(".");
+  if (parts.length !== 2) return false;
+  const [expStr, sig] = parts;
+  if (!expStr || !sig || !/^[0-9]+$/.test(expStr) || !/^[0-9a-f]+$/i.test(sig)) return false;
+
   const exp = Number(expStr);
-  if (!exp || isNaN(exp) || Date.now() > exp) return false;
+  if (!exp || !Number.isFinite(exp) || Date.now() > exp) return false;
 
-  const secret = getInvoiceTokenHmacSecret();
-  if (!secret) return false;
+  const secrets = getInvoiceTokenVerificationSecrets();
+  if (secrets.length === 0) return false;
 
-  try {
-    const expected = crypto
-      .createHmac("sha256", secret)
-      .update(`${paymentId}:${exp}`)
-      .digest("hex");
-    const a = Buffer.from(sig, "hex");
-    const b = Buffer.from(expected, "hex");
-    if (a.length !== b.length) return false;
-    return crypto.timingSafeEqual(a, b);
-  } catch {
-    return false;
+  const providedSig = Buffer.from(sig, "hex");
+  for (const secret of secrets) {
+    try {
+      const expected = crypto
+        .createHmac("sha256", secret)
+        .update(`${paymentId}:${exp}`)
+        .digest("hex");
+      const expectedSig = Buffer.from(expected, "hex");
+      if (providedSig.length === expectedSig.length && crypto.timingSafeEqual(providedSig, expectedSig)) {
+        return true;
+      }
+    } catch {
+      // Continue to next candidate on error
+    }
   }
+
+  return false;
 }

@@ -8,7 +8,11 @@ import { isRazorpayConfigured, isWebhookConfigured } from "./server/razorpay.js"
 import { isSupabaseServerConfigured } from "./server/supabaseServer.js";
 import { isMailerConfigured } from "./server/mailerService.js";
 import { handleRazorpayWebhook } from "./server/paymentWebhook.js";
-import paymentRoutes, { isAssetTokenSecretConfigured } from "./server/paymentRoutes.js";
+import paymentRoutes, {
+  isAssetTokenSecretConfigured,
+  isResourceTokenSecretConfigured,
+  isInvoiceTokenSecretConfigured
+} from "./server/paymentRoutes.js";
 import webEnquiryRoutes from "./server/webEnquiryRoutes.js";
 import growthAuditRoutes from "./server/growthAuditRoutes.js";
 import authRoutes from "./server/authRoutes.js";
@@ -109,15 +113,25 @@ async function startServer() {
 
   // 4. Health & Gateway Diagnostics API endpoints (read-only infrastructure checks)
   app.get(["/healthz", "/health", "/api/health"], (_req, res) => {
-    res.json({
-      status: "ok",
+    const assetTokenSecretConfigured = isAssetTokenSecretConfigured();
+    const resourceTokenSecretConfigured = isResourceTokenSecretConfigured();
+    const invoiceTokenSecretConfigured = isInvoiceTokenSecretConfigured();
+    const allRequiredTokenSecretsConfigured =
+      assetTokenSecretConfigured &&
+      resourceTokenSecretConfigured &&
+      invoiceTokenSecretConfigured;
+
+    res.status(allRequiredTokenSecretsConfigured ? 200 : 503).json({
+      status: allRequiredTokenSecretsConfigured ? "ok" : "degraded",
       timestamp: new Date().toISOString(),
       gateway: {
         razorpayConfigured: isRazorpayConfigured(),
         webhookConfigured: isWebhookConfigured(),
         supabaseServerConfigured: isSupabaseServerConfigured(),
         emailConfigured: isMailerConfigured(),
-        assetTokenSecretConfigured: isAssetTokenSecretConfigured(),
+        assetTokenSecretConfigured,
+        resourceTokenSecretConfigured,
+        invoiceTokenSecretConfigured,
       },
     });
   });

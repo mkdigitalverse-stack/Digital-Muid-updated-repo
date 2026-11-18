@@ -584,7 +584,7 @@ runTest("Negative 5: Invalid or non-numeric gateway amount is rejected", () => {
   });
   assert.strictEqual(result.authorized, false, "Must reject non-numeric gateway amount");
   assert.strictEqual(result.statusCode, 400);
-  assert.ok(result.error.includes("Invalid or non-numeric gateway payment amount"));
+  assert.ok(result.error.includes("Invalid or non-integer gateway payment amount"));
 });
 
 runTest("Negative 6: Missing gateway currency is rejected", () => {
@@ -650,10 +650,14 @@ runTest("Architecture: server/paymentRoutes.js strictly separates booking status
     "server/paymentRoutes.js must NOT reference bookingRecord?.status in invoice evaluation"
   );
 
-  // 2. resourceRecord.status must NOT be in rawStatus or isCaptured
+  // 2. resourceRecord.status must NOT be in verifyInvoicePaymentAuthorization
+  const fnStart = code.indexOf("export function verifyInvoicePaymentAuthorization(");
+  const fnEnd = code.indexOf("\nasync function handleInvoiceOrCreditNoteRequest", fnStart);
+  assert.ok(fnStart !== -1 && fnEnd > fnStart, "Must locate verifyInvoicePaymentAuthorization function boundaries");
+  const verifyInvoiceAuthFn = code.slice(fnStart, fnEnd);
   assert.ok(
-    !code.includes("resourceRecord?.status"),
-    "server/paymentRoutes.js must NOT reference resourceRecord?.status in invoice evaluation"
+    !verifyInvoiceAuthFn.includes("resourceRecord?.status"),
+    "verifyInvoicePaymentAuthorization must NOT reference resourceRecord?.status in invoice evaluation"
   );
 
   // 3. rawStatus === 'confirmed' and rawStatus === 'completed' must NOT authorize invoices

@@ -34,6 +34,10 @@ export function getResourceTokenHmacSecret() {
   return clean;
 }
 
+export function isResourceTokenSecretConfigured() {
+  return Boolean(getResourceTokenHmacSecret());
+}
+
 export function normalizeGuestEmail(email) {
   if (!email || typeof email !== "string") return "";
   return email.trim().toLowerCase();

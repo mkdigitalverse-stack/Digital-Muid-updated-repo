@@ -41,6 +41,8 @@ import {
 
 import {
   getInvoiceTokenHmacSecret,
+  isInvoiceTokenSecretConfigured,
+  getInvoiceTokenVerificationSecrets,
   generateSignedInvoiceToken,
   verifySignedInvoiceToken,
   tryGenerateSignedInvoiceToken,
@@ -49,6 +51,7 @@ import {
 
 import {
   getResourceTokenHmacSecret,
+  isResourceTokenSecretConfigured,
   generateGuestResourceToken,
   tryGenerateGuestResourceToken,
   verifyGuestResourceToken,
@@ -60,9 +63,12 @@ export {
   AUTHORITATIVE_PAID_RESOURCES,
   getAuthoritativeResourcePricing,
   getInvoiceTokenHmacSecret,
+  isInvoiceTokenSecretConfigured,
+  getInvoiceTokenVerificationSecrets,
   generateSignedInvoiceToken,
   verifySignedInvoiceToken,
   getResourceTokenHmacSecret,
+  isResourceTokenSecretConfigured,
   generateGuestResourceToken,
   verifyGuestResourceToken
 };
@@ -1808,6 +1814,19 @@ router.post("/verify-resource-payment", async (req, res) => {
       rzpPayment.contact ||
       ""
     ).trim();
+
+    // Fail closed BEFORE any irreversible DB fulfillment when a guest transaction
+    // requires minting a guest resource access token and RESOURCE_TOKEN_HMAC_SECRET is missing/invalid.
+    if (!attributedUserId && !isResourceTokenSecretConfigured()) {
+      return res.status(503).json({
+        success: false,
+        verified: true,
+        fulfilled: false,
+        retryable: true,
+        code: "RESOURCE_TOKEN_SECRET_MISSING",
+        error: "Guest resource access signing secret is not configured cleanly."
+      });
+    }
 
     // 3. Atomic fulfillment into public.resource_purchases and public.payments
     const fulfillment = await fulfillResourcePurchase({

@@ -531,31 +531,36 @@ runTest("2.5", "Case E: Server-verified administrator is authorized", () => {
 
 // F-05: Cryptographically signed token allows guest download
 runTest("2.6", "F-05: Cryptographically signed HMAC token authorizes guest invoice download", () => {
-  const origSecret = process.env.PAYMENT_VERIFICATION_SECRET;
-  process.env.PAYMENT_VERIFICATION_SECRET = "test_hmac_secret_32_bytes_entropy_key_ok!";
-  const payId = "pay_guest_hmac_100";
-  const token = generateSignedInvoiceToken(payId, 60000); // 1 minute TTL
+  const origSecret = process.env.INVOICE_TOKEN_HMAC_SECRET;
+  process.env.INVOICE_TOKEN_HMAC_SECRET = "test_hmac_secret_32_bytes_entropy_key_ok!";
+  try {
+    const payId = "pay_guest_hmac_100";
+    const token = generateSignedInvoiceToken(payId, 60000); // 1 minute TTL
 
-  const isValid = verifySignedInvoiceToken(payId, token);
-  assert.strictEqual(isValid, true, "Valid HMAC token must pass verification");
+    const isValid = verifySignedInvoiceToken(payId, token);
+    assert.strictEqual(isValid, true, "Valid HMAC token must pass verification");
 
-  const accessRes = evaluateInvoiceAccessHierarchy({
-    recordUserId: null,
-    recordEmail: "guest@example.com",
-    authUser: null,
-    isAdmin: false,
-    isSignedTokenValid: isValid
-  });
-  assert.strictEqual(accessRes.authorized, true);
-  assert.strictEqual(accessRes.case, "TOKEN");
+    const accessRes = evaluateInvoiceAccessHierarchy({
+      recordUserId: null,
+      recordEmail: "guest@example.com",
+      authUser: null,
+      isAdmin: false,
+      isSignedTokenValid: isValid
+    });
+    assert.strictEqual(accessRes.authorized, true);
+    assert.strictEqual(accessRes.case, "TOKEN");
 
-  // Forged or tampered token must fail
-  const tamperedToken = token.slice(0, -4) + "ffff";
-  assert.strictEqual(verifySignedInvoiceToken(payId, tamperedToken), false);
+    // Forged or tampered token must fail
+    const tamperedToken = token.slice(0, -4) + "ffff";
+    assert.strictEqual(verifySignedInvoiceToken(payId, tamperedToken), false);
 
-  // Expired token must fail
-  const expiredToken = generateSignedInvoiceToken(payId, -1000);
-  assert.strictEqual(verifySignedInvoiceToken(payId, expiredToken), false);
+    // Expired token must fail
+    const expiredToken = generateSignedInvoiceToken(payId, -1000);
+    assert.strictEqual(verifySignedInvoiceToken(payId, expiredToken), false);
+  } finally {
+    if (origSecret !== undefined) process.env.INVOICE_TOKEN_HMAC_SECRET = origSecret;
+    else delete process.env.INVOICE_TOKEN_HMAC_SECRET;
+  }
 });
 
 // =============================================================================

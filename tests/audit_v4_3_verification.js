@@ -10,6 +10,7 @@ import {
   generateSignedInvoiceToken,
   verifySignedInvoiceToken,
   getInvoiceTokenHmacSecret,
+  getInvoiceTokenVerificationSecrets,
   paymentRateLimiter,
   resetPaymentRateLimits,
   getClientIp
@@ -129,7 +130,7 @@ runTest("SEC-03.1: Hardcoded fallback salt completely removed", () => {
   assert.ok(!code.includes("dm_invoice_secure_salt_8731"), "Hardcoded salt 'dm_invoice_secure_salt_8731' must not exist anywhere in code");
 });
 
-runTest("SEC-03.2: getInvoiceTokenHmacSecret enforces >= 32 bytes of entropy and supports INVOICE_TOKEN_HMAC_SECRET", () => {
+runTest("SEC-03.2: getInvoiceTokenHmacSecret enforces >= 32 bytes exclusively on INVOICE_TOKEN_HMAC_SECRET and preserves ordered verification fallbacks", () => {
   const originalInvSecret = process.env.INVOICE_TOKEN_HMAC_SECRET;
   const originalSecret = process.env.PAYMENT_VERIFICATION_SECRET;
   const originalAssetSecret = process.env.ASSET_TOKEN_HMAC_SECRET;
@@ -143,26 +144,40 @@ runTest("SEC-03.2: getInvoiceTokenHmacSecret enforces >= 32 bytes of entropy and
 
     // Missing secrets => returns null
     assert.strictEqual(getInvoiceTokenHmacSecret(), null, "Must return null when all secrets are missing");
+    assert.deepStrictEqual(getInvoiceTokenVerificationSecrets(), [], "Verification secret list must be empty when all secrets missing");
 
-    // Short secret (< 32 bytes) => returns null
-    process.env.PAYMENT_VERIFICATION_SECRET = "short_secret_only_24_bytes_";
+    // Short secret (< 32 bytes) => rejected
+    process.env.INVOICE_TOKEN_HMAC_SECRET = "short_secret_only_24_bytes_";
     assert.strictEqual(getInvoiceTokenHmacSecret(), null, "Must return null for secret with < 32 bytes");
-
-    // Dedicated INVOICE_TOKEN_HMAC_SECRET takes precedence
-    const dedicatedSecret = "dedicated_invoice_token_secret_32_bytes_ok!";
-    process.env.INVOICE_TOKEN_HMAC_SECRET = dedicatedSecret;
-    process.env.PAYMENT_VERIFICATION_SECRET = "fallback_secret_32_bytes_longer_than_needed!";
-    assert.strictEqual(getInvoiceTokenHmacSecret(), dedicatedSecret, "Must prioritize dedicated INVOICE_TOKEN_HMAC_SECRET");
     delete process.env.INVOICE_TOKEN_HMAC_SECRET;
 
-    // Valid secret (>= 32 bytes) => returns secret
+    // Fallback secret alone must NOT enable new token generation
+    process.env.PAYMENT_VERIFICATION_SECRET = "fallback_secret_32_bytes_longer_than_needed!";
+    assert.strictEqual(getInvoiceTokenHmacSecret(), null, "Fallback secret alone must not be returned by getInvoiceTokenHmacSecret()");
+    assert.deepStrictEqual(
+      getInvoiceTokenVerificationSecrets(),
+      ["fallback_secret_32_bytes_longer_than_needed!"],
+      "Legacy verification candidate must remain active"
+    );
+
+    // Dedicated INVOICE_TOKEN_HMAC_SECRET is used for generation and prioritized first for verification
+    const dedicatedSecret = "dedicated_invoice_token_secret_32_bytes_ok!";
+    process.env.INVOICE_TOKEN_HMAC_SECRET = dedicatedSecret;
+    assert.strictEqual(getInvoiceTokenHmacSecret(), dedicatedSecret, "Must prioritize dedicated INVOICE_TOKEN_HMAC_SECRET");
+    assert.deepStrictEqual(
+      getInvoiceTokenVerificationSecrets(),
+      [dedicatedSecret, "fallback_secret_32_bytes_longer_than_needed!"],
+      "Verification order must try dedicated secret first, then legacy fallbacks"
+    );
+
+    // Valid 32-byte dedicated secret => returns secret
     const valid32Byte = "a".repeat(32);
-    process.env.PAYMENT_VERIFICATION_SECRET = valid32Byte;
+    process.env.INVOICE_TOKEN_HMAC_SECRET = valid32Byte;
     assert.strictEqual(getInvoiceTokenHmacSecret(), valid32Byte, "Must return valid 32-byte secret");
 
-    // Valid 64-byte secret => returns secret
+    // Valid 64-byte hex dedicated secret => returns secret
     const valid64Byte = crypto.randomBytes(32).toString("hex");
-    process.env.PAYMENT_VERIFICATION_SECRET = valid64Byte;
+    process.env.INVOICE_TOKEN_HMAC_SECRET = valid64Byte;
     assert.strictEqual(getInvoiceTokenHmacSecret(), valid64Byte, "Must return valid 64-byte hex secret");
   } finally {
     if (originalInvSecret !== undefined) process.env.INVOICE_TOKEN_HMAC_SECRET = originalInvSecret;
@@ -212,9 +227,10 @@ runTest("SEC-03.3: generateSignedInvoiceToken fails closed when secret is missin
 });
 
 runTest("SEC-03.4: Signed invoice token generation and cryptographic verification", () => {
+  const originalInvSecret = process.env.INVOICE_TOKEN_HMAC_SECRET;
   const originalSecret = process.env.PAYMENT_VERIFICATION_SECRET;
   try {
-    process.env.PAYMENT_VERIFICATION_SECRET = "super_secure_32_byte_secret_key_prod_test_entropy!";
+    process.env.INVOICE_TOKEN_HMAC_SECRET = "super_secure_32_byte_secret_key_prod_test_entropy!";
     const paymentId = "pay_live_test_99999";
 
     const token = generateSignedInvoiceToken(paymentId);
@@ -235,7 +251,10 @@ runTest("SEC-03.4: Signed invoice token generation and cryptographic verificatio
     const expiredToken = generateSignedInvoiceToken(paymentId, -5000);
     assert.strictEqual(verifySignedInvoiceToken(paymentId, expiredToken), false, "Expired token must be rejected");
   } finally {
-    process.env.PAYMENT_VERIFICATION_SECRET = originalSecret;
+    if (originalInvSecret !== undefined) process.env.INVOICE_TOKEN_HMAC_SECRET = originalInvSecret;
+    else delete process.env.INVOICE_TOKEN_HMAC_SECRET;
+    if (originalSecret !== undefined) process.env.PAYMENT_VERIFICATION_SECRET = originalSecret;
+    else delete process.env.PAYMENT_VERIFICATION_SECRET;
   }
 });
 
