@@ -1143,6 +1143,201 @@ async function main() {
       );
       assert.strictEqual(missingVerify.status, 403);
     });
+
+    await runAsyncTest("16. Analytics sanitization: case-variant keys, nested objects/arrays, URLs, hash queries, and encoded param names in dataLayer", async () => {
+      const dataLayer: any[] = [];
+      (globalThis as any).window = {
+        location: {
+          href: "https://digitalmuid.in/resources/bundle/meta-ads-campaign-planner-bundle?orderId=ord_loc_1&TOKEN=SECRET_LOC_1&resource%5Faccess%5Ftoken=SECRET_LOC_2&utm_content=100%#/receipt?ResourceAccessToken=SECRET_LOC_3&tab=2"
+        },
+        dataLayer
+      };
+
+      trackEvent("hardened_analytics_test", {
+        TOKEN: "SECRET_KEY_1",
+        ResourceAccessToken: "SECRET_KEY_2",
+        RESOURCE_ACCESS_TOKEN: "SECRET_KEY_3",
+        accessToken: "SECRET_KEY_4",
+        guest_token: "SECRET_KEY_5",
+        resource_title: "Ad Budget & Break-Even Calculator",
+        cta_name: "Master the mechanics / Explore the academy",
+        order_id: "ord_loc_1",
+        amount: 299,
+        nested: {
+          Access_Token: "SECRET_NESTED_1",
+          invoiceToken: "SECRET_NESTED_2",
+          safeNested: "keep_me",
+          deepUrl: "/resources/thank-you/paid?resourceId=res_1&orderId=ord_1&TOKEN=SECRET_REL_1&resource_access_token=SECRET_REL_2#files"
+        },
+        items: [
+          {
+            id: "item_1",
+            Token: "SECRET_ARR_OBJ_1",
+            assetToken: "SECRET_ARR_OBJ_2",
+            href: "https://digitalmuid.in/resources/thank-you/paid?orderId=ord_2&%74%6f%6b%65%6e=SECRET_ENC_1&resource%255Faccess%255Ftoken=SECRET_ENC_2&ok=true#/view?token=SECRET_HASH_1&panel=1"
+          },
+          "/go?next=%2Fpaid%3ForderId%3Do3%26token%3DSECRET_INNER_ENC&keep=yes",
+          ["array_str_ok", { resourceAccessToken: "SECRET_2D_ARR", safeFlag: true }]
+        ],
+        meta: {
+          links: [
+            "https://digitalmuid.in/x#?resourceAccessToken=SECRET_HASH_ONLY",
+            "#token=SECRET_FRAG_1&step=3",
+            "https://digitalmuid.in/y?safe=1"
+          ],
+          tags: ["bundle", "planner"]
+        }
+      });
+
+      assert.strictEqual(dataLayer.length, 1);
+      const ev = dataLayer[0];
+      const serialized = JSON.stringify(ev);
+      assert.strictEqual(serialized.includes("SECRET_"), false, "No secret token value may ever reach dataLayer");
+
+      // Location sanitization (case-insensitive + encoded + hash query + preserves non-sensitive 100%)
+      assert.strictEqual(
+        ev.page_location,
+        "https://digitalmuid.in/resources/bundle/meta-ads-campaign-planner-bundle?orderId=ord_loc_1&utm_content=100%#/receipt?tab=2"
+      );
+      assert.strictEqual(
+        ev.page_path,
+        "/resources/bundle/meta-ads-campaign-planner-bundle?orderId=ord_loc_1&utm_content=100%#/receipt?tab=2"
+      );
+
+      // Safe analytics fields preserved verbatim
+      assert.strictEqual(ev.event, "hardened_analytics_test");
+      assert.strictEqual(ev.resource_title, "Ad Budget & Break-Even Calculator");
+      assert.strictEqual(ev.cta_name, "Master the mechanics / Explore the academy");
+      assert.strictEqual(ev.order_id, "ord_loc_1");
+      assert.strictEqual(ev.amount, 299);
+
+      // Nested object & relative URL scrubbed
+      assert.strictEqual(ev.nested.Access_Token, undefined);
+      assert.strictEqual(ev.nested.invoiceToken, undefined);
+      assert.strictEqual(ev.nested.safeNested, "keep_me");
+      assert.strictEqual(ev.nested.deepUrl, "/resources/thank-you/paid?resourceId=res_1&orderId=ord_1#files");
+
+      // Array of objects & nested URLs/hashes/encoded params scrubbed
+      assert.strictEqual(ev.items[0].id, "item_1");
+      assert.strictEqual(ev.items[0].Token, undefined);
+      assert.strictEqual(ev.items[0].assetToken, undefined);
+      assert.strictEqual(
+        ev.items[0].href,
+        "https://digitalmuid.in/resources/thank-you/paid?orderId=ord_2&ok=true#/view?panel=1"
+      );
+      assert.strictEqual(ev.items[1], "/go?next=%2Fpaid%3ForderId%3Do3&keep=yes");
+      assert.strictEqual(ev.items[2][0], "array_str_ok");
+      assert.strictEqual(ev.items[2][1].resourceAccessToken, undefined);
+      assert.strictEqual(ev.items[2][1].safeFlag, true);
+
+      // Arrays inside objects scrubbed
+      assert.strictEqual(ev.meta.links[0], "https://digitalmuid.in/x");
+      assert.strictEqual(ev.meta.links[1], "#step=3");
+      assert.strictEqual(ev.meta.links[2], "https://digitalmuid.in/y?safe=1");
+      assert.deepStrictEqual(ev.meta.tags, ["bundle", "planner"]);
+    });
+
+    await runAsyncTest("17. Analytics sanitization: handles circular references and deep nesting safely without crashing dataLayer", async () => {
+      const dataLayer: any[] = [];
+      (globalThis as any).window = {
+        location: { href: "https://digitalmuid.in/resources/thank-you/paid?orderId=ord_circ" },
+        dataLayer
+      };
+
+      const circularObj: any = {
+        keep: "yes",
+        token: "SECRET_CIRC_OBJ"
+      };
+      circularObj.self = circularObj;
+
+      const circularArr: any[] = ["safe_item", { TOKEN: "SECRET_CIRC_ARR", ok: 1 }];
+      circularArr.push(circularArr);
+
+      // Deep chain beyond MAX_SANITIZATION_DEPTH (12)
+      let deepObj: any = { token: "SECRET_TOO_DEEP", leaf: "deep_leaf" };
+      for (let i = 0; i < 16; i++) {
+        deepObj = { layer: deepObj };
+      }
+
+      trackEvent("circular_safe_event", {
+        circularObj,
+        circularArr,
+        deepObj,
+        safeMetric: 42
+      });
+
+      assert.strictEqual(dataLayer.length, 1);
+      const serialized = JSON.stringify(dataLayer[0]);
+      assert.strictEqual(serialized.includes("SECRET_"), false);
+      assert.strictEqual(dataLayer[0].safeMetric, 42);
+      assert.strictEqual(dataLayer[0].circularObj.keep, "yes");
+      assert.strictEqual(dataLayer[0].circularObj.self, undefined);
+      assert.strictEqual(dataLayer[0].circularArr[0], "safe_item");
+      assert.strictEqual(dataLayer[0].circularArr[1].ok, 1);
+      assert.strictEqual(dataLayer[0].circularArr.length, 2);
+    });
+
+    await runAsyncTest("18. Analytics sanitization: fails closed on unsafe/unparseable values without pushing raw data", async () => {
+      const dataLayer: any[] = [];
+      (globalThis as any).window = {
+        location: {
+          href: "https://digitalmuid.in/paid?%E0%A4%A=badkey&token=SECRET_RAW_LOC"
+        },
+        dataLayer
+      };
+
+      // Property-level malformed URL & throwing getter fail closed while preserving unrelated safe properties
+      const unsafePropPayload: Record<string, any> = {
+        safe_field: "preserved",
+        malformedTokenUrl: "https://digitalmuid.in/paid?%E0%A4%A=1&token=SECRET_UNSAFE_URL",
+        embeddedUnsafe: "See https://digitalmuid.in/paid?%E0%A4%A=1&resourceAccessToken=SECRET_EMBED"
+      };
+      Object.defineProperty(unsafePropPayload, "throwingGetter", {
+        enumerable: true,
+        get() {
+          throw new Error("boom SECRET_GETTER");
+        }
+      });
+
+      trackEvent("partial_fail_closed_event", unsafePropPayload);
+      assert.strictEqual(dataLayer.length, 1);
+      const firstDump = JSON.stringify(dataLayer[0]);
+      assert.strictEqual(firstDump.includes("SECRET_"), false);
+      assert.strictEqual(dataLayer[0].event, "partial_fail_closed_event");
+      assert.strictEqual(dataLayer[0].safe_field, "preserved");
+      assert.strictEqual("malformedTokenUrl" in dataLayer[0], false);
+      assert.strictEqual("embeddedUnsafe" in dataLayer[0], false);
+      assert.strictEqual("throwingGetter" in dataLayer[0], false);
+      assert.strictEqual("page_location" in dataLayer[0], false);
+
+      // Top-level unreadable Proxy params must fail closed completely (never push raw dataLayer entry)
+      const countBeforeProxy = dataLayer.length;
+      const throwingProxy = new Proxy(
+        { token: "SECRET_RAW_PROXY", amount: 999 },
+        {
+          ownKeys() {
+            throw new Error("Proxy enumeration blocked");
+          }
+        }
+      );
+      trackEvent("proxy_fail_closed_event", throwingProxy as any);
+      assert.strictEqual(dataLayer.length, countBeforeProxy, "Throwing top-level params must not push raw data to dataLayer");
+
+      // Unrelated safe event still dispatches normally even if window.location.href throws
+      (globalThis as any).window = {
+        location: {
+          get href() {
+            throw new Error("Location blocked");
+          }
+        },
+        dataLayer
+      };
+      trackEvent("unrelated_safe_event", { cta_name: "Book Consultation", destination: "/business-growth-consultation" });
+      assert.strictEqual(dataLayer.length, countBeforeProxy + 1);
+      assert.strictEqual(dataLayer[countBeforeProxy].event, "unrelated_safe_event");
+      assert.strictEqual(dataLayer[countBeforeProxy].cta_name, "Book Consultation");
+      assert.strictEqual("page_location" in dataLayer[countBeforeProxy], false);
+    });
   } finally {
     if (originalWindow === undefined) delete (globalThis as any).window;
     else (globalThis as any).window = originalWindow;
