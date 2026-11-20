@@ -14,7 +14,7 @@ enforceStagingSafety({
 // ==============================================================================
 
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
-import * as XLSX from "xlsx";
+import { createCalculatorSpreadsheet } from "./calculatorSpreadsheetBuilder.js";
 import fs from "fs";
 import path from "path";
 import { getSupabaseServerClient } from "../server/supabaseServer.js";
@@ -632,86 +632,6 @@ async function createWorkbookPdf() {
   return Buffer.from(pdfBytes);
 }
 
-function createCalculatorSpreadsheet() {
-  const wb = XLSX.utils.book_new();
-
-  // SHEET 1: Unit Economics & Break-Even
-  const sheet1Data = [
-    ["DIGITAL MUID — META ADS UNIT ECONOMICS & BREAK-EVEN CALCULATOR", "", ""],
-    ["Confidential & Proprietary Operating System", "", ""],
-    ["", "", ""],
-    ["1. PRODUCT & MARGIN INPUTS", "VALUE", "NOTES / FORMULA"],
-    ["Selling Price per Unit (Gross Revenue)", 1999, "Selling price to customer in INR"],
-    ["Cost of Goods Sold (COGS)", 450, "Direct manufacturing, licensing or fulfillment cost"],
-    ["Packaging & Shipping Cost", 120, "Physical shipping, handling, or delivery fee"],
-    ["Payment Gateway Fee % (Razorpay/Stripe)", 0.02, "Standard 2.0% gateway transaction fee"],
-    ["GST on Payment Gateway Fee (18%)", 0.0036, "18% GST applicable on gateway fee"],
-    ["Total Payment Gateway Cost per Unit", { f: "B5*(B8+B9)" }, "=Price * (Gateway Fee + GST)"],
-    ["Net Margin per Unit (Before Ad Spend)", { f: "B5-B6-B7-B10" }, "Gross Profit available for ad acquisition"],
-    ["Net Margin %", { f: "B11/B5" }, "Gross profit margin percentage"],
-    ["", "", ""],
-    ["2. BREAK-EVEN ADVERTISING THRESHOLDS", "VALUE", "STRATEGIC MEANING"],
-    ["Break-Even ROAS", { f: "1/B12" }, "Minimum ROAS required to not lose money on ad spend"],
-    ["Break-Even CPA (Max Allowable Ad Spend)", { f: "B11" }, "Maximum you can spend to acquire 1 customer before losing money"],
-    ["Target Desired Net Profit Margin %", 0.25, "Target net profit margin after all ad spend (e.g. 25%)"],
-    ["Target Max CPA for Desired Profit", { f: "B11*(1-B17)" }, "Target CPA needed to hit your desired profit margin"],
-    ["Target ROAS for Desired Profit", { f: "B5/B18" }, "Target ROAS needed inside Meta Ads Manager"]
-  ];
-
-  const ws1 = XLSX.utils.aoa_to_sheet(sheet1Data);
-  ws1["!cols"] = [{ wch: 45 }, { wch: 18 }, { wch: 55 }];
-  XLSX.utils.book_append_sheet(wb, ws1, "Unit Economics");
-
-  // SHEET 2: Target ROAS Forecaster
-  const sheet2Data = [
-    ["DIGITAL MUID — TARGET ROAS & PROFIT FORECASTER", "", "", "", "", ""],
-    ["", "", "", "", "", ""],
-    ["Monthly Ad Spend", "Projected ROAS", "Gross Revenue", "Product & Ops Costs", "Total Ad Spend", "Net Profit (INR)"],
-    [25000, 2.5, { f: "A4*B4" }, { f: "C4*0.3" }, { f: "A4" }, { f: "C4-D4-E4" }],
-    [50000, 2.8, { f: "A5*B5" }, { f: "C5*0.3" }, { f: "A5" }, { f: "C5-D5-E5" }],
-    [100000, 3.0, { f: "A6*B6" }, { f: "C6*0.3" }, { f: "A6" }, { f: "C6-D6-E6" }],
-    [250000, 2.6, { f: "A7*B7" }, { f: "C7*0.3" }, { f: "A7" }, { f: "C7-D7-E7" }],
-    [500000, 2.4, { f: "A8*B8" }, { f: "C8*0.3" }, { f: "A8" }, { f: "C8-D8-E8" }]
-  ];
-  const ws2 = XLSX.utils.aoa_to_sheet(sheet2Data);
-  ws2["!cols"] = [{ wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 22 }, { wch: 18 }, { wch: 20 }];
-  XLSX.utils.book_append_sheet(wb, ws2, "ROAS Forecaster");
-
-  // SHEET 3: Volume Scenario Planner
-  const sheet3Data = [
-    ["DIGITAL MUID — VOLUME SCENARIO PLANNER", "", "", "", "", "", ""],
-    ["Sales Orders", "Selling Price", "Gross Revenue", "Total Product COGS", "Estimated Ad Spend", "Net Margin Available", "Projected Net Profit"],
-    [10, 1999, { f: "A3*B3" }, { f: "A3*570" }, { f: "A3*700" }, { f: "C3-D3" }, { f: "F3-E3" }],
-    [25, 1999, { f: "A4*B4" }, { f: "A4*570" }, { f: "A4*700" }, { f: "C4-D4" }, { f: "F4-E4" }],
-    [50, 1999, { f: "A5*B5" }, { f: "A5*570" }, { f: "A5*680" }, { f: "C5-D5" }, { f: "F5-E5" }],
-    [100, 1999, { f: "A6*B6" }, { f: "A6*570" }, { f: "A6*650" }, { f: "C6-D6" }, { f: "F6-E6" }],
-    [250, 1999, { f: "A7*B7" }, { f: "A7*550" }, { f: "A7*650" }, { f: "C7-D7" }, { f: "F7-E7" }],
-    [500, 1999, { f: "A8*B8" }, { f: "A8*530" }, { f: "A8*670" }, { f: "C8-D8" }, { f: "F8-E8" }]
-  ];
-  const ws3 = XLSX.utils.aoa_to_sheet(sheet3Data);
-  ws3["!cols"] = [{ wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 20 }, { wch: 22 }, { wch: 22 }];
-  XLSX.utils.book_append_sheet(wb, ws3, "Volume Scenarios");
-
-  // SHEET 4: Daily Campaign Tracker
-  const sheet4Data = [
-    ["DIGITAL MUID — DAILY CAMPAIGN PERFORMANCE TRACKER", "", "", "", "", "", "", "", "", "", "", "", "", ""],
-    ["Date", "Campaign Name", "Ad Spend (INR)", "Impressions", "Clicks", "CTR %", "CPC (INR)", "Landing Page Views", "LP View Rate %", "Purchases", "Conv Rate %", "CPA (INR)", "Revenue (INR)", "ROAS"],
-    ["2026-10-01", "TOF - Advantage+ Broad Test", 2500, 12000, 240, { f: "E3/D3" }, { f: "C3/E3" }, 185, { f: "H3/E3" }, 4, { f: "J3/H3" }, { f: "C3/J3" }, 7996, { f: "M3/C3" }],
-    ["2026-10-02", "TOF - Advantage+ Broad Test", 3000, 15500, 310, { f: "E4/D4" }, { f: "C4/E4" }, 245, { f: "H4/E4" }, 6, { f: "J4/H4" }, { f: "C4/J4" }, 11994, { f: "M4/C4" }],
-    ["2026-10-03", "MOF - 30D Engagers Retargeting", 1200, 4800, 120, { f: "E5/D5" }, { f: "C5/E5" }, 105, { f: "H5/E5" }, 3, { f: "J5/H5" }, { f: "C5/J5" }, 5997, { f: "M5/C5" }],
-    ["2026-10-04", "BOF - 7D Cart Abandoners", 800, 1900, 65, { f: "E6/D6" }, { f: "C6/E6" }, 60, { f: "H6/E6" }, 2, { f: "J6/H6" }, { f: "C6/J6" }, 3998, { f: "M6/C6" }]
-  ];
-  const ws4 = XLSX.utils.aoa_to_sheet(sheet4Data);
-  ws4["!cols"] = [
-    { wch: 14 }, { wch: 32 }, { wch: 16 }, { wch: 14 }, { wch: 10 }, { wch: 12 },
-    { wch: 12 }, { wch: 20 }, { wch: 16 }, { wch: 12 }, { wch: 14 }, { wch: 14 },
-    { wch: 16 }, { wch: 12 }
-  ];
-  XLSX.utils.book_append_sheet(wb, ws4, "Daily Tracker");
-
-  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-}
-
 async function createCalculatorPdf() {
   const doc = await PDFDocument.create();
   const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -1214,7 +1134,7 @@ export async function generateAndUploadAllAssets() {
   console.log("Generating authentic bundle assets...");
 
   const workbookPdf = await createWorkbookPdf();
-  const calculatorXlsx = createCalculatorSpreadsheet();
+  const calculatorXlsx = await createCalculatorSpreadsheet();
   const calculatorPdf = await createCalculatorPdf();
   const copyFrameworksPdf = await createCopyFrameworksPdf();
 
