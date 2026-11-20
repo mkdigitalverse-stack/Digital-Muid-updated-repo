@@ -58,33 +58,250 @@ function buildClientEnvScript(isProd: boolean): string {
   return `<script>window.__ENV__ = Object.assign(window.__ENV__ || {}, ${serializedEnv});</script>`;
 }
 
-async function startServer() {
+export const PROTECTED_ASSET_IDENTIFIERS = [
+  "meta-ads-campaign-planner-workbook",
+  "the-ad-budget-break-even-calculator",
+  "the-ad-budget-breat-even-calculate",
+  "10-high-converting-meta-ads-copy-frameworks",
+  "pre-launch-tracking-audit-checklist",
+  "meta-ads-campaign-planner-bundle",
+] as const;
+
+// Strictly extensionless SPA routes that legitimately contain a resource or bundle slug.
+// File extensions (dots), extra nested paths, /downloads/*, and /protected_downloads/* are never matched.
+const ALLOWED_PROTECTED_SLUG_SPA_PATTERNS: readonly RegExp[] = [
+  /^\/resources\/[a-z0-9-]+$/,
+  /^\/resources\/bundle\/[a-z0-9-]+$/,
+];
+
+const MAX_PATH_DECODE_ROUNDS = 3;
+const CONTROL_CHAR_REGEX = /[\x00-\x1f\x7f]/;
+const ENCODED_NULL_OR_BACKSLASH_REGEX = /%(?:00|5c)/i;
+const VALID_PERCENT_ENCODED_PAIR_REGEX = /%[0-9a-fA-F]{2}/;
+const MALFORMED_PERCENT_REGEX = /%(?![0-9a-fA-F]{2})/;
+
+export interface ProtectedAssetGuardDecision {
+  allowed: boolean;
+  statusCode?: 400 | 403;
+  code?: string;
+  error?: string;
+  message?: string;
+  normalizedPath?: string;
+}
+
+function hasTraversalSegment(candidatePath: string): boolean {
+  const segments = candidatePath.split("/");
+  return segments.some((segment) => segment === "..");
+}
+
+function setNoStoreSecurityHeaders(res: express.Response): void {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.setHeader("Pragma", "no-cache");
+}
+
+/**
+ * Evaluates whether an incoming request URL is permitted through the protected asset guard.
+ *
+ * Rules:
+ * - Inspects pathname only (never query string or fragment), so SPA query params like
+ *   `/resources?slug=<protected-slug>` are never falsely blocked.
+ * - Rejects malformed percent-encoding, unresolved multi-layer encoding, null bytes,
+ *   control characters, backslashes, and `..` path traversal segments (fail-closed).
+ * - Blocks direct access to `/protected_downloads` (at any depth) and any path referencing
+ *   protected asset identifiers unless it matches an explicitly allowed, extensionless SPA route
+ *   without percent-encoded obfuscation.
+ */
+export function evaluateProtectedAssetRequest(rawUrlInput: string): ProtectedAssetGuardDecision {
+  const rawUrl = typeof rawUrlInput === "string" && rawUrlInput.length > 0 ? rawUrlInput : "/";
+  const queryOrHashIndex = rawUrl.search(/[?#]/);
+  const rawPathname = (queryOrHashIndex === -1 ? rawUrl : rawUrl.slice(0, queryOrHashIndex)) || "/";
+
+  // 1. Immediate raw checks for null bytes, control chars, backslashes, and traversal
+  if (
+    rawPathname.includes("\0") ||
+    CONTROL_CHAR_REGEX.test(rawPathname) ||
+    ENCODED_NULL_OR_BACKSLASH_REGEX.test(rawPathname) ||
+    rawPathname.includes("\\")
+  ) {
+    return {
+      allowed: false,
+      statusCode: 400,
+      code: "INVALID_PATH_CHARACTERS",
+      error: "Bad Request",
+      message: "Request path contains prohibited characters or escape sequences.",
+    };
+  }
+
+  if (hasTraversalSegment(rawPathname)) {
+    return {
+      allowed: false,
+      statusCode: 400,
+      code: "PATH_TRAVERSAL_REJECTED",
+      error: "Bad Request",
+      message: "Path traversal segments are strictly prohibited.",
+    };
+  }
+
+  // 2. Bounded iterative percent-decoding (rejects malformed or unresolved repeated encodings)
+  let decodedPath = rawPathname;
+  let decodeRounds = 0;
+
+  for (let round = 0; round < MAX_PATH_DECODE_ROUNDS; round++) {
+    if (!decodedPath.includes("%")) {
+      break;
+    }
+
+    if (MALFORMED_PERCENT_REGEX.test(decodedPath)) {
+      return {
+        allowed: false,
+        statusCode: 400,
+        code: "MALFORMED_URL_ENCODING",
+        error: "Bad Request",
+        message: "Malformed URL percent-encoding is not permitted.",
+      };
+    }
+
+    let nextDecoded: string;
+    try {
+      nextDecoded = decodeURIComponent(decodedPath);
+    } catch {
+      return {
+        allowed: false,
+        statusCode: 400,
+        code: "MALFORMED_URL_ENCODING",
+        error: "Bad Request",
+        message: "Malformed URL percent-encoding is not permitted.",
+      };
+    }
+
+    decodeRounds += 1;
+
+    if (
+      nextDecoded.includes("\0") ||
+      CONTROL_CHAR_REGEX.test(nextDecoded) ||
+      nextDecoded.includes("\\")
+    ) {
+      return {
+        allowed: false,
+        statusCode: 400,
+        code: "INVALID_DECODED_PATH",
+        error: "Bad Request",
+        message: "Decoded request path contains prohibited characters.",
+      };
+    }
+
+    if (hasTraversalSegment(nextDecoded)) {
+      return {
+        allowed: false,
+        statusCode: 400,
+        code: "PATH_TRAVERSAL_REJECTED",
+        error: "Bad Request",
+        message: "Path traversal segments are strictly prohibited.",
+      };
+    }
+
+    if (nextDecoded === decodedPath) {
+      break;
+    }
+    decodedPath = nextDecoded;
+  }
+
+  // Fail closed if unresolved or malformed percent-encoding still remains after bounded decoding
+  if (
+    decodedPath.includes("%") &&
+    (VALID_PERCENT_ENCODED_PAIR_REGEX.test(decodedPath) || MALFORMED_PERCENT_REGEX.test(decodedPath))
+  ) {
+    return {
+      allowed: false,
+      statusCode: 400,
+      code: "UNRESOLVED_URL_ENCODING",
+      error: "Bad Request",
+      message: "Repeated or unresolved URL encoding is not permitted.",
+    };
+  }
+
+  // 3. Normalize POSIX path (collapses duplicate slashes and `.` segments)
+  const posixNormalized = path.posix.normalize(decodedPath.startsWith("/") ? decodedPath : `/${decodedPath}`);
+  const normalizedPath = posixNormalized.length > 1 ? posixNormalized.replace(/\/+$/, "") : posixNormalized;
+  const lowerPath = normalizedPath.toLowerCase();
+
+  // Exempt legitimate /api/* routes (already validated above against traversal/encoding attacks)
+  if (lowerPath === "/api" || lowerPath.startsWith("/api/")) {
+    return { allowed: true, normalizedPath };
+  }
+
+  // 4. Always block any direct access to protected_downloads directory
+  const lowerSegments = lowerPath.split("/").filter(Boolean);
+  if (lowerSegments.includes("protected_downloads")) {
+    return {
+      allowed: false,
+      statusCode: 403,
+      code: "PROTECTED_ASSET_FORBIDDEN",
+      error: "Forbidden",
+      message: "Direct access to paid digital assets is strictly prohibited. A confirmed, verified purchase is required.",
+      normalizedPath,
+    };
+  }
+
+  // 5. Block paths matching protected asset identifiers unless they are an explicitly allowed extensionless SPA route
+  const matchesProtectedAsset = PROTECTED_ASSET_IDENTIFIERS.some((ident) =>
+    lowerPath.includes(ident)
+  );
+
+  if (matchesProtectedAsset) {
+    const rawTrimmedLower = (rawPathname.length > 1 ? rawPathname.replace(/\/+$/, "") : rawPathname).toLowerCase();
+    const isAllowedSpaRoute =
+      decodeRounds === 0 &&
+      ALLOWED_PROTECTED_SLUG_SPA_PATTERNS.some(
+        (pattern) => pattern.test(lowerPath) && pattern.test(rawTrimmedLower)
+      );
+
+    if (!isAllowedSpaRoute) {
+      return {
+        allowed: false,
+        statusCode: 403,
+        code: "PROTECTED_ASSET_FORBIDDEN",
+        error: "Forbidden",
+        message: "Direct access to paid digital assets is strictly prohibited. A confirmed, verified purchase is required.",
+        normalizedPath,
+      };
+    }
+  }
+
+  return { allowed: true, normalizedPath };
+}
+
+export function protectedAssetGuardMiddleware(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  const decision = evaluateProtectedAssetRequest(req.originalUrl || req.url || req.path || "/");
+  if (!decision.allowed) {
+    setNoStoreSecurityHeaders(res);
+    return res.status(decision.statusCode || 403).json({
+      error: decision.error || "Forbidden",
+      code: decision.code || "PROTECTED_ASSET_FORBIDDEN",
+      message:
+        decision.message ||
+        "Direct access to paid digital assets is strictly prohibited. A confirmed, verified purchase is required.",
+    });
+  }
+  return next();
+}
+
+export interface CreateAppOptions {
+  isProduction?: boolean;
+  distDir?: string;
+}
+
+export async function createApp(options: CreateAppOptions = {}) {
   const app = express();
 
   // Configure reverse proxy trust for Cloud Run / Nginx / Load Balancer (SEC-05 Compliance)
   app.set("trust proxy", 1);
 
-  const portArgIndex = process.argv.indexOf("--port");
-  const cliPort = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? process.argv[portArgIndex + 1] : null;
-
-  // In AI Studio development container, Nginx reverse-proxies from external 8080 to internal 3000.
-  // In Cloud Run live deployment (ais-pre / live service), the container MUST listen directly
-  // on the port specified by Cloud Run (process.env.PORT, default 8080).
-  const isDevContainer = Boolean(
-    process.env.NGINX_PORT ||
-    process.env.DEFAULT_APP_PORT ||
-    process.env.CONTROL_PLANE_PORT ||
-    process.env.K_SERVICE?.startsWith("ais-dev-")
-  );
-
-  const isProduction = isProductionEnvironment();
-
-  // Respect TEST_PORT for local testing; otherwise in dev use 3000, and in Cloud Run use process.env.PORT (8080)
-  const PORT = process.env.TEST_PORT
-    ? parseInt(process.env.TEST_PORT, 10)
-    : (isDevContainer && process.env.NODE_ENV !== "production"
-        ? parseInt(cliPort || "3000", 10)
-        : parseInt(process.env.PORT || cliPort || "8080", 10));
+  const isProduction = options.isProduction ?? isProductionEnvironment();
 
   // 0. Mount Development Safety Gate BEFORE any write endpoints, webhooks, or API handlers
   app.use(developmentSafetyMiddleware);
@@ -157,43 +374,7 @@ async function startServer() {
   app.use(seoRedirectMiddleware);
 
   // 8.5. Security Guard: Prohibit unauthorised direct HTTP/GET/HEAD access to paid digital assets
-  const PROTECTED_ASSET_IDENTIFIERS = [
-    "meta-ads-campaign-planner-workbook",
-    "the-ad-budget-break-even-calculator",
-    "the-ad-budget-breat-even-calculate",
-    "10-high-converting-meta-ads-copy-frameworks",
-    "pre-launch-tracking-audit-checklist",
-    "meta-ads-campaign-planner-bundle"
-  ];
-
-  app.use((req, res, next) => {
-    // Exempt authorized API routes
-    if (req.path.startsWith("/api/")) {
-      return next();
-    }
-
-    let decodedPath = "";
-    try {
-      decodedPath = decodeURIComponent(req.originalUrl || req.url || req.path).toLowerCase();
-    } catch {
-      decodedPath = (req.originalUrl || req.url || req.path).toLowerCase();
-    }
-
-    const matchesProtectedAsset = PROTECTED_ASSET_IDENTIFIERS.some((ident) =>
-      decodedPath.includes(ident.toLowerCase())
-    );
-
-    if (matchesProtectedAsset) {
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
-      res.setHeader("Pragma", "no-cache");
-      return res.status(403).json({
-        error: "Forbidden",
-        message: "Direct access to paid digital assets is strictly prohibited. A confirmed, verified purchase is required."
-      });
-    }
-
-    next();
-  });
+  app.use(protectedAssetGuardMiddleware);
 
   // 9. Vite middleware for development / Static fallback for production
   if (!isProduction) {
@@ -260,11 +441,13 @@ async function startServer() {
       }
     });
   } else {
-    const distPath = fs.existsSync(path.join(process.cwd(), "dist", "index.html"))
-      ? path.join(process.cwd(), "dist")
-      : (fs.existsSync(path.join(process.cwd(), "index.html"))
-          ? process.cwd()
-          : path.join(__dirname, "..", "dist"));
+    const distPath = options.distDir
+      ? options.distDir
+      : (fs.existsSync(path.join(process.cwd(), "dist", "index.html"))
+          ? path.join(process.cwd(), "dist")
+          : (fs.existsSync(path.join(process.cwd(), "index.html"))
+              ? process.cwd()
+              : path.join(__dirname, "..", "dist")));
     const indexPath = path.join(distPath, "index.html");
 
     app.use(express.static(distPath, { index: false, redirect: false }));
@@ -314,6 +497,34 @@ async function startServer() {
     });
   }
 
+  return app;
+}
+
+export async function startServer() {
+  const portArgIndex = process.argv.indexOf("--port");
+  const cliPort = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? process.argv[portArgIndex + 1] : null;
+
+  // In AI Studio development container, Nginx reverse-proxies from external 8080 to internal 3000.
+  // In Cloud Run live deployment (ais-pre / live service), the container MUST listen directly
+  // on the port specified by Cloud Run (process.env.PORT, default 8080).
+  const isDevContainer = Boolean(
+    process.env.NGINX_PORT ||
+    process.env.DEFAULT_APP_PORT ||
+    process.env.CONTROL_PLANE_PORT ||
+    process.env.K_SERVICE?.startsWith("ais-dev-")
+  );
+
+  const isProduction = isProductionEnvironment();
+
+  // Respect TEST_PORT for local testing; otherwise in dev use 3000, and in Cloud Run use process.env.PORT (8080)
+  const PORT = process.env.TEST_PORT
+    ? parseInt(process.env.TEST_PORT, 10)
+    : (isDevContainer && process.env.NODE_ENV !== "production"
+        ? parseInt(cliPort || "3000", 10)
+        : parseInt(process.env.PORT || cliPort || "8080", 10));
+
+  const app = await createApp({ isProduction });
+
   const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT} (mode: ${isProduction ? 'production' : 'development'})`);
     if (isRazorpayConfigured()) {
@@ -326,6 +537,30 @@ async function startServer() {
   server.on("error", (err: any) => {
     console.error("[Server Error]", err);
   });
+
+  return server;
 }
 
-startServer();
+const isDirectEntrypoint = (() => {
+  // CommonJS bundle execution (e.g. `node dist/server.cjs`)
+  if (typeof require === "function" && typeof module !== "undefined" && require.main === module) {
+    return true;
+  }
+  // ESM execution (e.g. `tsx server.ts`)
+  try {
+    const entryArg = process.argv[1];
+    if (entryArg) {
+      const base = path.basename(path.resolve(entryArg));
+      if (base === "server.ts" || base === "server.cjs" || base === "server.js") {
+        return true;
+      }
+    }
+  } catch {
+    // Ignore argv resolution errors
+  }
+  return false;
+})();
+
+if (isDirectEntrypoint) {
+  startServer();
+}

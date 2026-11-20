@@ -1,0 +1,71 @@
+name: PR Offline Security, Build & Regression Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-offline-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-offline:
+    name: TypeCheck, Build & Offline Test Suites (Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout pull request head
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies (deterministic lockfile)
+        run: npm ci
+
+      - name: TypeScript validation & lint (tsc --noEmit)
+        run: npm run lint
+
+      - name: Production build (Vite + esbuild CJS server + static SEO pages)
+        run: npm run build
+
+      - name: Run P0 hotfix regression suites (P0-1 & P0-2)
+        run: |
+          set -euo pipefail
+          npx --no-install tsx tests/p0_server_pipeline_integration_test.ts
+          node tests/p0_invoice_uuid_lookup_test.js
+
+      - name: Run security, authorization & billing offline suites
+        run: |
+          set -euo pipefail
+          node tests/invoice_authorization_patch_test.js
+          node tests/v4_3_remediation_regression_test.js
+          node tests/xlsx_remediation_test.js
+          npx --no-install tsx tests/aud_01_resource_email_delivery_test.ts
+          node tests/p0_payment_security_test.js
+          node tests/v4_3_hmac_cutover_test.js
+
+      - name: Run audit, schema compatibility & safety-guard offline suites
+        run: |
+          set -euo pipefail
+          node tests/audit_v4_3_verification.js
+          node tests/v4_3_unified_migration_audit_test.js
+          node tests/phase_b_preflight_test.js
+          node tests/ci_harness_regression_test.js
+          npx --no-install tsx tests/profile_schema_compatibility_test.ts
+          node tests/audit_v4_2_hardening_test.js
+          node tests/audit_v4_verification.js
+          node tests/audit_v2_comprehensive_test.js
+          node tests/audit_billing_verification.js
+          node tests/concurrency_and_security_test.js
+          node tests/staging_verification_suite.js
+          node scripts/testSafetyGuard.js
+          node scripts/testServerSafetyIntegration.js
