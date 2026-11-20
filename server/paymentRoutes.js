@@ -4068,21 +4068,265 @@ export function verifyInvoicePaymentAuthorization({
   };
 }
 
+const INVOICE_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const INVOICE_RAZORPAY_PAYMENT_ID_REGEX = /^pay_[A-Za-z0-9_]{1,96}$/;
+const INVOICE_RAZORPAY_ORDER_ID_REGEX = /^order_[A-Za-z0-9_]{1,96}$/;
+const INVOICE_BOOKING_PREFIX_ID_REGEX = /^bkg_[A-Za-z0-9_-]{1,96}$/i;
+const INVOICE_SAFE_TEXT_ID_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const INVOICE_WHITESPACE_OR_CONTROL_REGEX = /[\s\x00-\x1f\x7f]/;
+
+/**
+ * Strictly validates req.params.paymentId BEFORE any trimming or normalization.
+ * Rejects empty values, leading/trailing whitespace, control characters, PostgREST syntax
+ * characters (, ( ) . * ; ' " / \ %), and overlong identifiers.
+ */
+export function validateInvoiceLookupIdentifier(originalPaymentId) {
+  if (typeof originalPaymentId !== "string" || originalPaymentId.length === 0) {
+    return {
+      valid: false,
+      error: "Payment reference is required."
+    };
+  }
+
+  // Reject leading/trailing whitespace BEFORE trimming
+  if (originalPaymentId !== originalPaymentId.trim()) {
+    return {
+      valid: false,
+      error: "Invalid payment reference format."
+    };
+  }
+
+  if (
+    originalPaymentId.length > 128 ||
+    INVOICE_WHITESPACE_OR_CONTROL_REGEX.test(originalPaymentId) ||
+    !INVOICE_SAFE_TEXT_ID_REGEX.test(originalPaymentId)
+  ) {
+    return {
+      valid: false,
+      error: "Invalid payment reference format."
+    };
+  }
+
+  const isUuid = INVOICE_UUID_REGEX.test(originalPaymentId);
+  const isRazorpayPaymentId = INVOICE_RAZORPAY_PAYMENT_ID_REGEX.test(originalPaymentId);
+  const isRazorpayOrderId = INVOICE_RAZORPAY_ORDER_ID_REGEX.test(originalPaymentId);
+  const isBookingPrefixId = INVOICE_BOOKING_PREFIX_ID_REGEX.test(originalPaymentId);
+
+  let kind = "booking_text_id";
+  if (isUuid) {
+    kind = "uuid";
+  } else if (isRazorpayPaymentId) {
+    kind = "razorpay_payment_id";
+  } else if (isRazorpayOrderId) {
+    kind = "razorpay_order_id";
+  } else if (isBookingPrefixId) {
+    kind = "booking_id";
+  }
+
+  return {
+    valid: true,
+    value: originalPaymentId,
+    kind,
+    isUuid,
+    isRazorpayPaymentId,
+    isRazorpayOrderId,
+    isBookingPrefixId
+  };
+}
+
+async function runSingleEqLookup(supabaseServer, table, column, value) {
+  try {
+    const result = await supabaseServer
+      .from(table)
+      .select("*")
+      .eq(column, value)
+      .maybeSingle();
+
+    if (result?.error) {
+      return {
+        data: null,
+        error: {
+          table,
+          column,
+          code: result.error.code || "DB_ERROR",
+          message: result.error.message || String(result.error)
+        }
+      };
+    }
+
+    return {
+      data: result?.data || null,
+      error: null
+    };
+  } catch (err) {
+    return {
+      data: null,
+      error: {
+        table,
+        column,
+        code: err?.code || "DB_EXCEPTION",
+        message: err?.message || String(err)
+      }
+    };
+  }
+}
+
+/**
+ * Performs schema-type-safe `.eq()` lookups across payments, bookings, and resource_purchases.
+ * - `payments.id` (UUID) and `resource_purchases.id` (UUID) are ONLY queried when the identifier is a valid UUID.
+ * - `payments.razorpay_payment_id` (TEXT), `payments.razorpay_order_id` (TEXT),
+ *   `resource_purchases.razorpay_payment_id` (TEXT), `resource_purchases.razorpay_order_id` (TEXT),
+ *   `bookings.id` (TEXT), `bookings.payment_id` (TEXT), and `bookings.razorpay_order_id` (TEXT)
+ *   are queried strictly by identifier classification.
+ * - Zero PostgREST `.or(...)` string interpolation is used.
+ */
+export async function lookupInvoiceTransactionRecords(supabaseServer, idInfo) {
+  let paymentRecord = null;
+  let bookingRecord = null;
+  let resourceRecord = null;
+  const primaryErrors = [];
+  const secondaryErrors = [];
+
+  const rawPaymentId = idInfo.value;
+
+  if (idInfo.isRazorpayPaymentId) {
+    // Razorpay payment ID (`pay_...`): TEXT columns only; never query UUID `id` columns.
+    const payRes = await runSingleEqLookup(supabaseServer, "payments", "razorpay_payment_id", rawPaymentId);
+    if (payRes.error) primaryErrors.push(payRes.error);
+    if (payRes.data) paymentRecord = payRes.data;
+
+    const bkgRes = await runSingleEqLookup(supabaseServer, "bookings", "payment_id", rawPaymentId);
+    if (bkgRes.error) primaryErrors.push(bkgRes.error);
+    if (bkgRes.data) bookingRecord = bkgRes.data;
+
+    const resRes = await runSingleEqLookup(supabaseServer, "resource_purchases", "razorpay_payment_id", rawPaymentId);
+    if (resRes.error) primaryErrors.push(resRes.error);
+    if (resRes.data) resourceRecord = resRes.data;
+  } else if (idInfo.isUuid) {
+    // Canonical UUID: safe for UUID `payments.id` and `resource_purchases.id`, plus TEXT `bookings.id` / `bookings.payment_id`.
+    const payRes = await runSingleEqLookup(supabaseServer, "payments", "id", rawPaymentId);
+    if (payRes.error) primaryErrors.push(payRes.error);
+    if (payRes.data) paymentRecord = payRes.data;
+
+    const bkgByIdRes = await runSingleEqLookup(supabaseServer, "bookings", "id", rawPaymentId);
+    if (bkgByIdRes.error) primaryErrors.push(bkgByIdRes.error);
+    if (bkgByIdRes.data) {
+      bookingRecord = bkgByIdRes.data;
+    } else if (!bkgByIdRes.error) {
+      const bkgByPayIdRes = await runSingleEqLookup(supabaseServer, "bookings", "payment_id", rawPaymentId);
+      if (bkgByPayIdRes.error) primaryErrors.push(bkgByPayIdRes.error);
+      if (bkgByPayIdRes.data) bookingRecord = bkgByPayIdRes.data;
+    }
+
+    const resRes = await runSingleEqLookup(supabaseServer, "resource_purchases", "id", rawPaymentId);
+    if (resRes.error) primaryErrors.push(resRes.error);
+    if (resRes.data) resourceRecord = resRes.data;
+  } else if (idInfo.isRazorpayOrderId) {
+    // Razorpay order ID (`order_...`): TEXT `razorpay_order_id` columns only.
+    const payRes = await runSingleEqLookup(supabaseServer, "payments", "razorpay_order_id", rawPaymentId);
+    if (payRes.error) primaryErrors.push(payRes.error);
+    if (payRes.data) paymentRecord = payRes.data;
+
+    const bkgRes = await runSingleEqLookup(supabaseServer, "bookings", "razorpay_order_id", rawPaymentId);
+    if (bkgRes.error) primaryErrors.push(bkgRes.error);
+    if (bkgRes.data) bookingRecord = bkgRes.data;
+
+    const resRes = await runSingleEqLookup(supabaseServer, "resource_purchases", "razorpay_order_id", rawPaymentId);
+    if (resRes.error) primaryErrors.push(resRes.error);
+    if (resRes.data) resourceRecord = resRes.data;
+  } else {
+    // Non-UUID booking identifier (`bkg_...` or legacy booking ID): TEXT `bookings.id` column only.
+    // Never query UUID `payments.id` or `resource_purchases.id`.
+    const bkgRes = await runSingleEqLookup(supabaseServer, "bookings", "id", rawPaymentId);
+    if (bkgRes.error) primaryErrors.push(bkgRes.error);
+    if (bkgRes.data) bookingRecord = bkgRes.data;
+  }
+
+  // Optional secondary cross-table enrichment when a primary record has already been found.
+  // Failures here are recorded as secondaryErrors and must NEVER turn an established record into 503.
+  const linkedPayIdCandidate =
+    paymentRecord?.razorpay_payment_id ||
+    bookingRecord?.payment_id ||
+    resourceRecord?.razorpay_payment_id ||
+    null;
+  const linkedOrderIdCandidate =
+    paymentRecord?.razorpay_order_id ||
+    bookingRecord?.razorpay_order_id ||
+    resourceRecord?.razorpay_order_id ||
+    null;
+
+  const hasValidLinkedPayId =
+    typeof linkedPayIdCandidate === "string" &&
+    INVOICE_RAZORPAY_PAYMENT_ID_REGEX.test(linkedPayIdCandidate);
+  const hasValidLinkedOrderId =
+    typeof linkedOrderIdCandidate === "string" &&
+    INVOICE_RAZORPAY_ORDER_ID_REGEX.test(linkedOrderIdCandidate);
+
+  const alreadyQueriedByPayId = idInfo.isRazorpayPaymentId && linkedPayIdCandidate === rawPaymentId;
+  const alreadyQueriedByOrderId = idInfo.isRazorpayOrderId && linkedOrderIdCandidate === rawPaymentId;
+
+  if (!paymentRecord && (bookingRecord || resourceRecord)) {
+    if (hasValidLinkedPayId && !alreadyQueriedByPayId) {
+      const secPayRes = await runSingleEqLookup(supabaseServer, "payments", "razorpay_payment_id", linkedPayIdCandidate);
+      if (secPayRes.error) secondaryErrors.push(secPayRes.error);
+      if (secPayRes.data) paymentRecord = secPayRes.data;
+    } else if (hasValidLinkedOrderId && !alreadyQueriedByOrderId) {
+      const secPayRes = await runSingleEqLookup(supabaseServer, "payments", "razorpay_order_id", linkedOrderIdCandidate);
+      if (secPayRes.error) secondaryErrors.push(secPayRes.error);
+      if (secPayRes.data) paymentRecord = secPayRes.data;
+    }
+  }
+
+  if (!bookingRecord && paymentRecord) {
+    if (hasValidLinkedPayId && !alreadyQueriedByPayId) {
+      const secBkgRes = await runSingleEqLookup(supabaseServer, "bookings", "payment_id", linkedPayIdCandidate);
+      if (secBkgRes.error) secondaryErrors.push(secBkgRes.error);
+      if (secBkgRes.data) bookingRecord = secBkgRes.data;
+    } else if (hasValidLinkedOrderId && !alreadyQueriedByOrderId) {
+      const secBkgRes = await runSingleEqLookup(supabaseServer, "bookings", "razorpay_order_id", linkedOrderIdCandidate);
+      if (secBkgRes.error) secondaryErrors.push(secBkgRes.error);
+      if (secBkgRes.data) bookingRecord = secBkgRes.data;
+    }
+  }
+
+  if (!resourceRecord && paymentRecord) {
+    if (hasValidLinkedPayId && !alreadyQueriedByPayId) {
+      const secResRes = await runSingleEqLookup(supabaseServer, "resource_purchases", "razorpay_payment_id", linkedPayIdCandidate);
+      if (secResRes.error) secondaryErrors.push(secResRes.error);
+      if (secResRes.data) resourceRecord = secResRes.data;
+    }
+  }
+
+  return {
+    paymentRecord,
+    bookingRecord,
+    resourceRecord,
+    primaryErrors,
+    secondaryErrors
+  };
+}
+
 /**
  * GET /api/payments/invoice/:paymentId
  * Generates and streams an authoritative PDF tax invoice/receipt for a verified payment.
  * Security & Authorization:
- * - Requires authentication via Bearer token (verifySupabaseToken).
+ * - Requires authentication via Bearer token (verifySupabaseToken) or signed invoice token.
  * - Verified owner (matching user_id or email) or verified Administrator can access.
  * - Non-owners receive 403 Forbidden.
  * - Unauthenticated requests receive 401 Unauthorized.
  */
 async function handleInvoiceOrCreditNoteRequest(req, res, { forceCreditNote = false } = {}) {
   try {
-    const rawPaymentId = String(req.params.paymentId || "").trim();
-    if (!rawPaymentId) {
-      return res.status(400).json({ success: false, error: "Payment reference is required." });
+    // Validate ORIGINAL req.params.paymentId BEFORE trimming or normalizing
+    const idValidation = validateInvoiceLookupIdentifier(req.params.paymentId);
+    if (!idValidation.valid) {
+      return res.status(400).json({
+        success: false,
+        code: "INVALID_PAYMENT_REFERENCE",
+        error: idValidation.error
+      });
     }
+    const rawPaymentId = idValidation.value;
 
     const authHeader = req.headers.authorization;
     const signedToken = req.query.token;
@@ -4116,40 +4360,31 @@ async function handleInvoiceOrCreditNoteRequest(req, res, { forceCreditNote = fa
       return res.status(503).json({ success: false, error: "Database service is currently unavailable." });
     }
 
-    // 1. Locate record across payments, bookings, and resource_purchases
-    let paymentRecord = null;
-    let bookingRecord = null;
-    let resourceRecord = null;
+    // 1. Locate record across payments, bookings, and resource_purchases using validated type-safe .eq() queries
+    const lookupResult = await lookupInvoiceTransactionRecords(supabaseServer, idValidation);
+    let paymentRecord = lookupResult.paymentRecord;
+    const bookingRecord = lookupResult.bookingRecord;
+    const resourceRecord = lookupResult.resourceRecord;
+    const primaryErrors = lookupResult.primaryErrors;
+    const secondaryErrors = lookupResult.secondaryErrors;
 
-    // A. Check payments table
-    try {
-      const { data } = await supabaseServer
-        .from("payments")
-        .select("*")
-        .or(`razorpay_payment_id.eq.${rawPaymentId},id.eq.${rawPaymentId}`)
-        .maybeSingle();
-      if (data) paymentRecord = data;
-    } catch {}
+    const hasEstablishedDbRecord = Boolean(paymentRecord || bookingRecord || resourceRecord);
 
-    // B. Check bookings table
-    try {
-      const { data } = await supabaseServer
-        .from("bookings")
-        .select("*")
-        .or(`payment_id.eq.${rawPaymentId},razorpay_order_id.eq.${rawPaymentId},id.eq.${rawPaymentId}`)
-        .maybeSingle();
-      if (data) bookingRecord = data;
-    } catch {}
+    if (!hasEstablishedDbRecord && primaryErrors.length > 0) {
+      console.error("[Invoice Endpoint] Database lookup failed with no established record:", primaryErrors);
+      return res.status(503).json({
+        success: false,
+        code: "DATABASE_LOOKUP_FAILED",
+        error: "Unable to verify invoice transaction due to a database error."
+      });
+    }
 
-    // C. Check resource_purchases table
-    try {
-      const { data } = await supabaseServer
-        .from("resource_purchases")
-        .select("*")
-        .or(`razorpay_payment_id.eq.${rawPaymentId},id.eq.${rawPaymentId}`)
-        .maybeSingle();
-      if (data) resourceRecord = data;
-    } catch {}
+    if (hasEstablishedDbRecord && (primaryErrors.length > 0 || secondaryErrors.length > 0)) {
+      console.warn("[Invoice Endpoint] Optional secondary lookup notice (established record preserved):", {
+        primaryErrors,
+        secondaryErrors
+      });
+    }
 
     // Gateway reconciliation: Check gateway if Razorpay is configured
     let rzpPayment = null;
@@ -4664,6 +4899,16 @@ async function handleInvoiceOrCreditNoteRequest(req, res, { forceCreditNote = fa
     });
 
     if (!authCheck.authorized) {
+      const hadPaymentsLookupError =
+        primaryErrors.some((e) => e.table === "payments") ||
+        secondaryErrors.some((e) => e.table === "payments");
+      if (!paymentRecord && !bookingRecord && !rzpPayment && hadPaymentsLookupError) {
+        return res.status(503).json({
+          success: false,
+          code: "DATABASE_LOOKUP_FAILED",
+          error: "Unable to verify payment capture status due to a database error."
+        });
+      }
       return res.status(authCheck.statusCode || 400).json({
         success: false,
         error: authCheck.error
