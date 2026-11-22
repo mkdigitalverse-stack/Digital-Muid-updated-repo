@@ -6,7 +6,7 @@
 -- Initializes ONLY the minimal PostgreSQL extensions, Supabase-compatible roles
 -- & auth stubs, pre-20260830000002 public.is_admin() dependency stub, and the 5
 -- undocumented pre-20260826 tables missing from supabase/migrations/ so the full
--- 28-file chronological sequence (20260826..20261116) can be replayed cleanly inside
+-- 29-file chronological sequence (20260826..20261121) can be replayed cleanly inside
 -- a disposable local/CI PostgreSQL 17 container.
 --
 -- IMPORTANT SCHEMA UNCERTAINTY DISCLOSURE:

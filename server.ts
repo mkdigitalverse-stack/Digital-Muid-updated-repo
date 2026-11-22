@@ -340,6 +340,8 @@ export async function createApp(options: CreateAppOptions = {}) {
     const assetTokenSecretConfigured = isAssetTokenSecretConfigured();
     const resourceTokenSecretConfigured = isResourceTokenSecretConfigured();
     const invoiceTokenSecretConfigured = isInvoiceTokenSecretConfigured();
+    const downloadRateLimitSecretConfigured = isDownloadRateLimitSecretConfigured();
+    const trustProxyHealth = resolveTrustProxyConfig(process.env, isProduction);
     const allRequiredTokenSecretsConfigured =
       assetTokenSecretConfigured &&
       resourceTokenSecretConfigured &&
@@ -356,8 +358,9 @@ export async function createApp(options: CreateAppOptions = {}) {
         assetTokenSecretConfigured,
         resourceTokenSecretConfigured,
         invoiceTokenSecretConfigured,
-        downloadRateLimitSecretConfigured: isDownloadRateLimitSecretConfigured(),
-        trustProxyHopsConfigured: resolveTrustProxyConfig(process.env, isProduction).configured,
+        downloadRateLimitSecretConfigured,
+        trustProxyHopsConfigured: trustProxyHealth.configured,
+        downloadCounterReady: downloadRateLimitSecretConfigured && trustProxyHealth.valid,
       },
     });
   });

@@ -73,7 +73,7 @@ jobs:
           diff -u "$MANIFEST_LIST" "$ACTUAL_LIST"
           rm -f "$ACTUAL_LIST" "$MANIFEST_LIST"
 
-      - name: Initialize disposable DB and replay all 28 migrations chronologically
+      - name: Initialize disposable DB and replay all 29 migrations chronologically
         run: |
           set -euo pipefail
           CI_DB="digitalmuid_ci_chronological_replay"
@@ -107,6 +107,7 @@ jobs:
           set -euo pipefail
           CI_DB="digitalmuid_ci_chronological_replay"
           psql -v ON_ERROR_STOP=1 -d "$CI_DB" -f supabase/tests/v4_3_postgres_integration_test.sql
+          psql -v ON_ERROR_STOP=1 -d "$CI_DB" -f supabase/tests/p0_3_postgres_integration_test.sql
 
       - name: Install npm devDependencies and run separate-connection concurrency tests
         run: |
@@ -114,6 +115,7 @@ jobs:
           export PGDATABASE="digitalmuid_ci_chronological_replay"
           npm ci --ignore-scripts
           node supabase/tests/v4_3_postgres_concurrency_test.mjs
+          node supabase/tests/p0_3_postgres_concurrency_test.mjs
 
       - name: Run isolated static & mocked JS regression suites (kept separate from actual PG results)
         run: |

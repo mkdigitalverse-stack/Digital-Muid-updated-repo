@@ -128,6 +128,26 @@ export const AUTHORITATIVE_PAID_RESOURCES = {
   "pre-launch-tracking-audit-checklist": { price: 79, accessType: "paid", currency: "INR" }
 };
 
+/**
+ * Strictly validates that a database price value represents primitive numeric zero (0, "0", "0.00").
+ * Rejects non-primitive values (arrays, objects, boxed Number/String), null, undefined, booleans,
+ * empty/whitespace strings, hex/scientific/signed strings, NaN, Infinity, negative, and positive values.
+ */
+export function isZeroPriceStrict(amount) {
+  if (typeof amount === "number") {
+    return Number.isFinite(amount) && amount === 0;
+  }
+  if (typeof amount === "string") {
+    const trimmed = amount.trim();
+    if (!trimmed || !/^0+(?:\.0+)?$/.test(trimmed)) {
+      return false;
+    }
+    const num = Number(trimmed);
+    return Number.isFinite(num) && num === 0;
+  }
+  return false;
+}
+
 export function getAuthoritativeResourcePricing(idOrSlug, resourceRecord = null) {
   const clean = String(idOrSlug || "").trim();
   const known = AUTHORITATIVE_PAID_RESOURCES[clean] ||
@@ -154,7 +174,6 @@ export function getAuthoritativeResourcePricing(idOrSlug, resourceRecord = null)
   const dbAccessType = resourceRecord?.access_type ?? resourceRecord?.accessType;
   const normalizedDbAccessType = dbAccessType != null ? String(dbAccessType).trim().toLowerCase() : null;
   const rawDbPrice = resourceRecord?.price;
-  const numericDbPrice = rawDbPrice != null ? Number(rawDbPrice) : NaN;
   const strictDbPaise = normalizedDbAccessType === "paid" ? toPaiseStrict(rawDbPrice) : null;
 
   if (normalizedDbAccessType === "paid") {
@@ -180,7 +199,10 @@ export function getAuthoritativeResourcePricing(idOrSlug, resourceRecord = null)
     };
   }
 
-  if (normalizedDbAccessType === "free" || (normalizedDbAccessType == null && numericDbPrice === 0)) {
+  // Strictly require BOTH authoritative access_type === "free" AND explicit numeric price === 0.
+  // Inconsistent records (e.g., access_type="free" with price > 0, null price, or missing access_type)
+  // fail closed as "unverified" (C6-1).
+  if (normalizedDbAccessType === "free" && isZeroPriceStrict(rawDbPrice)) {
     return {
       accessType: "free",
       price: 0,

@@ -124,6 +124,7 @@ ON CONFLICT (id) DO UPDATE SET
   allowed_mime_types = EXCLUDED.allowed_mime_types;
 
 -- Fail-closed check: verify no non-service-role policy exists for paid-resources
+-- AND no blanket `storage.objects` policy omits a `bucket_id` predicate (E-10).
 DO $$
 DECLARE
   v_allowed_storage_policies CONSTANT TEXT[] := ARRAY[
@@ -131,22 +132,35 @@ DECLARE
   ];
   v_unexpected_storage_policies TEXT;
 BEGIN
-  SELECT pg_catalog.string_agg(p.policyname, ', ' ORDER BY p.policyname)
+  SELECT pg_catalog.string_agg(
+    pg_catalog.format('%s (cmd=%s, roles=%s)', p.policyname, p.cmd, pg_catalog.array_to_string(p.roles, ',')),
+    '; '
+    ORDER BY p.policyname
+  )
     INTO v_unexpected_storage_policies
   FROM pg_catalog.pg_policies p
   WHERE p.schemaname = 'storage'
     AND p.tablename = 'objects'
+    AND NOT (p.policyname = ANY (v_allowed_storage_policies))
     AND (
+      -- (a) Any unexpected policy explicitly referencing paid-resources
       COALESCE(p.qual, '') ILIKE '%paid-resources%'
       OR COALESCE(p.with_check, '') ILIKE '%paid-resources%'
-    )
-    AND NOT (p.policyname = ANY (v_allowed_storage_policies));
+      -- (b) Any blanket policy for non-service_role principals lacking a bucket_id filter
+      OR (
+        NOT (p.roles = ARRAY['service_role']::name[])
+        AND (
+          (p.cmd IN ('SELECT', 'UPDATE', 'DELETE', 'ALL') AND COALESCE(p.qual, '') !~* '\bbucket_id\b')
+          OR (p.cmd IN ('INSERT', 'UPDATE', 'ALL') AND COALESCE(p.with_check, '') !~* '\bbucket_id\b')
+        )
+      )
+    );
 
   IF v_unexpected_storage_policies IS NOT NULL THEN
     RAISE EXCEPTION USING
       ERRCODE = 'P0001',
       MESSAGE = pg_catalog.format(
-        'P0-3B FAIL-CLOSED ABORT: Unexpected storage.objects policies referencing paid-resources: [%s].',
+        'P0-3B FAIL-CLOSED ABORT: Unexpected or blanket storage.objects policies detected (paid-resources or missing bucket_id filter): [%s].',
         v_unexpected_storage_policies
       );
   END IF;

@@ -332,7 +332,7 @@ runTest("2.1b Validation matrix: empty, <32-byte, exact 32-byte, 64-char hex, an
   }
 });
 
-runTest("2.1c Legacy asset-token verification compatibility and runtime process.env responsiveness", () => {
+runTest("2.1c Dedicated ASSET_TOKEN_HMAC_SECRET exclusivity (Razorpay fallback removed) and runtime process.env responsiveness", () => {
   const snap = snapshotSecretEnv();
   try {
     const assetSecret = crypto.randomBytes(32).toString("hex");
@@ -347,15 +347,26 @@ runTest("2.1c Legacy asset-token verification compatibility and runtime process.
     assert.strictEqual(decoded?.resourceId, "res_asset_01");
     assert.strictEqual(decoded?.authId, "user_asset_01");
 
-    // Legacy 1-hour transitional token signed with RAZORPAY_KEY_SECRET remains verifiable
+    // Legacy v1 payload signed by dedicated ASSET_TOKEN_HMAC_SECRET remains verifiable within max TTL
     const legacyPayload = Buffer.from(JSON.stringify({
       resourceId: "res_legacy_asset",
       authId: "guest",
       expiresAt: Date.now() + 60_000
     })).toString("base64url");
-    const legacySig = crypto.createHmac("sha256", rzpLegacySecret).update(legacyPayload).digest("base64url");
-    const legacyAssetTok = `${legacyPayload}.${legacySig}`;
-    assert.strictEqual(verifyAssetAccessToken(legacyAssetTok)?.resourceId, "res_legacy_asset");
+    const legacyDedicatedSig = crypto.createHmac("sha256", assetSecret).update(legacyPayload, "ascii").digest("base64url");
+    const legacyDedicatedTok = `${legacyPayload}.${legacyDedicatedSig}`;
+    assert.strictEqual(verifyAssetAccessToken(legacyDedicatedTok)?.resourceId, "res_legacy_asset");
+
+    // Tokens signed with RAZORPAY_KEY_SECRET are strictly rejected (legacy fallback removed)
+    const legacyRzpSig = crypto.createHmac("sha256", rzpLegacySecret).update(legacyPayload, "ascii").digest("base64url");
+    const legacyRzpTok = `${legacyPayload}.${legacyRzpSig}`;
+    assert.strictEqual(verifyAssetAccessToken(legacyRzpTok), null);
+
+    // Missing ASSET_TOKEN_HMAC_SECRET fails closed even when RAZORPAY_KEY_SECRET is present
+    delete process.env.ASSET_TOKEN_HMAC_SECRET;
+    assert.strictEqual(isAssetTokenSecretConfigured(), false);
+    assert.strictEqual(verifyAssetAccessToken(assetTok), null);
+    assert.strictEqual(verifyAssetAccessToken(legacyRzpTok), null);
 
     // Runtime process.env changes take effect dynamically without import-time caching
     delete process.env.RESOURCE_TOKEN_HMAC_SECRET;

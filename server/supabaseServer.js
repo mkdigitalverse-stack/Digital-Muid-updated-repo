@@ -158,6 +158,19 @@ export async function verifySupabaseToken(token) {
 }
 
 /**
+ * Verifies strictly that a Supabase user has a confirmed email timestamp.
+ * Aligned with PostgreSQL `auth.users.email_confirmed_at IS NOT NULL` (E-4 / E-8).
+ * Does NOT fall back to `confirmed_at` (which in Supabase Auth can reflect phone confirmation).
+ *
+ * @param {import('@supabase/supabase-js').User|null} user
+ * @returns {boolean}
+ */
+export function isEmailConfirmed(user) {
+  if (!user || !user.email_confirmed_at) return false;
+  return String(user.email_confirmed_at).trim().length > 0;
+}
+
+/**
  * Checks if a user has admin privileges based on verified email or metadata.
  * @param {import('@supabase/supabase-js').User|null} user
  * @returns {boolean}
@@ -165,10 +178,9 @@ export async function verifySupabaseToken(token) {
 export function checkIsAdmin(user) {
   if (!user) return false;
 
-  // Mandatory email confirmation gate for ALL admin authorization paths (P0-3 / SEC-04)
-  // Aligns server-side checks with hardened PostgreSQL public.is_admin().
-  const isConfirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
-  if (!isConfirmed) return false;
+  // Mandatory email confirmation gate for ALL admin authorization paths (P0-3 / SEC-04 / E-4 / E-8)
+  // Strictly aligned with hardened PostgreSQL public.is_admin() (`email_confirmed_at IS NOT NULL`).
+  if (!isEmailConfirmed(user)) return false;
 
   // 1. Independent server-trusted role check via app_metadata
   // (app_metadata can only be written by service_role, never by client users)

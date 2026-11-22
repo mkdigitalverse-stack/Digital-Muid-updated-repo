@@ -340,7 +340,9 @@ export const resourceService = {
         return { data: null, error };
       }
 
-      const mapped = (data || []).map(mapDbRowToResource);
+      // Admin CMS query is protected by RLS `public.is_admin()` on `public.resources`;
+      // preserve editable URL fields (`__allow_paid_urls: true`) so confirmed admins can view & edit paid assets.
+      const mapped = (data || []).map((row) => mapDbRowToResource({ ...row, __allow_paid_urls: true }));
       return { data: mapped, error: null };
     } catch (err: any) {
       console.warn('[Supabase Resources] fetchAllResources unexpected failure:', err);
@@ -455,7 +457,7 @@ export const resourceService = {
           return { data: null, error: retry.error };
         }
 
-        const created = mapDbRowToResource(retry.data);
+        const created = mapDbRowToResource({ ...retry.data, __allow_paid_urls: true });
         const at = (resource.accessType || resource.access_type || 'free').toLowerCase() === 'paid' ? 'paid' : 'free';
         const pr = typeof resource.price === 'number' ? Math.max(0, resource.price) : 0;
         const cur = resource.currency || 'INR';
@@ -504,7 +506,7 @@ export const resourceService = {
         });
       }
 
-      const created = mapDbRowToResource(data);
+      const created = mapDbRowToResource({ ...data, __allow_paid_urls: true });
       console.info('[Supabase Resources] Successfully inserted resource ID:', created.id);
       return { data: created, error: null };
     } catch (err: any) {
@@ -561,7 +563,7 @@ export const resourceService = {
           return { data: null, error: retry.error };
         }
 
-        const updated = mapDbRowToResource(retry.data);
+        const updated = mapDbRowToResource({ ...retry.data, __allow_paid_urls: true });
         const at = (updates.accessType || updates.access_type || updated.accessType || 'free').toLowerCase() === 'paid' ? 'paid' : 'free';
         const pr = typeof updates.price === 'number' ? Math.max(0, updates.price) : (updated.price || 0);
         const cur = updates.currency || updated.currency || 'INR';
@@ -610,7 +612,7 @@ export const resourceService = {
         });
       }
 
-      const updated = mapDbRowToResource(data);
+      const updated = mapDbRowToResource({ ...data, __allow_paid_urls: true });
       console.info(`[Supabase Resources] Successfully updated resource ${id}`);
       return { data: updated, error: null };
     } catch (err: any) {
@@ -748,28 +750,51 @@ export const resourceService = {
    * Handles:
    * 1. External URLs (Google Drive, Dropbox, Notion, GitHub, etc.)
    * 2. Supabase Storage URLs (public and signed URLs)
-   * 3. Static server assets (/downloads/*.pdf)
-   * 4. Reliable Client-Side standard PDF generation fallback
+   * 3. Static server assets (/downloads/*.pdf) & protected local compatibility assets
+   * 4. Reliable Client-Side standard PDF generation fallback (free resources only)
    */
   async deliverResource(
     resource: Resource,
     options?: { isAuthorized?: boolean; orderId?: string; paymentId?: string; resourceAccessToken?: string }
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    errorCategory?: DownloadFailureCategory;
+    status?: number;
+    code?: string;
+    isBundle?: boolean;
+    bundleUrl?: string;
+  }> {
     if (!resource) {
       console.error('[Resource Delivery Error] No resource object provided');
-      return { success: false, error: 'This resource is temporarily unavailable. Please try again later.' };
+      return {
+        success: false,
+        errorCategory: 'download_failed',
+        error: 'This resource is temporarily unavailable. Please try again later.'
+      };
     }
 
     const isAuthoritativelyPaid = isAuthoritativePaidResource(resource.id) || isAuthoritativePaidResource(resource.slug);
-    const isPaid = isAuthoritativelyPaid || ((resource.accessType === 'paid' || (resource as any).access_type === 'paid') && (resource.price || 0) > 0);
+    const isPaid =
+      isAuthoritativelyPaid ||
+      ((resource.accessType === 'paid' || (resource as any).access_type === 'paid') && (resource.price || 0) > 0);
 
-    let externalUrl = resource.externalUrl?.trim() || null;
-    let rawFileUrl = (resource.fileUrl || resource.downloadUrl)?.trim() || null;
+    let externalUrl = isPaid ? null : (resource.externalUrl?.trim() || null);
+    let rawFileUrl = isPaid ? null : ((resource.fileUrl || resource.downloadUrl)?.trim() || null);
 
     // Strict Server-Side Purchase Verification:
     // Client-side isAuthorized flags are NEVER accepted as proof of purchase.
     // Every paid download must be authoritatively verified by the server.
-    if (isPaid) {
+    const requestAuthorizedPaidDownloadUrl = async (): Promise<{
+      ok: boolean;
+      downloadUrl?: string | null;
+      isBundle?: boolean;
+      bundleUrl?: string;
+      error?: string;
+      errorCategory?: DownloadFailureCategory;
+      status?: number;
+      code?: string;
+    }> => {
       try {
         const { data: authSessionData } = isSupabaseConfigured()
           ? await supabase.auth.getSession()
@@ -796,32 +821,82 @@ export const resourceService = {
           })
         });
 
-        const verifyData = await verifyResp.json();
-        if (!verifyResp.ok || !verifyData.success) {
-          console.warn('[Resource Delivery Guard] Server rejected download authorization:', verifyData.error);
+        const { json: verifyData } = await safeParseResponseBody(verifyResp);
+        if (!verifyResp.ok || !verifyData || verifyData.success !== true) {
+          const classified = classifyHttpFailure(
+            verifyResp.status,
+            verifyData,
+            'A confirmed payment is required to download this paid asset.'
+          );
+          console.warn(
+            '[Resource Delivery Guard] Download authorization failed:',
+            verifyResp.status,
+            classified.code || classified.errorCategory
+          );
           return {
-            success: false,
-            error: verifyData.error || 'A confirmed payment is required to download this paid asset.'
+            ok: false,
+            status: verifyResp.status,
+            code: classified.code,
+            errorCategory: classified.errorCategory,
+            error: classified.error
           };
         }
 
         if (verifyData.isBundle) {
           return {
-            success: true,
+            ok: true,
             isBundle: true,
             bundleUrl: verifyData.bundleAccessUrl || '/resources/bundle/meta-ads-campaign-planner-bundle'
-          } as any;
+          };
         }
 
-        rawFileUrl = (verifyData.downloadUrl || verifyData.fileUrl)?.trim() || null;
-        externalUrl = verifyData.externalUrl?.trim() || null;
-      } catch (fetchErr: any) {
-        console.error('[Resource Delivery Guard] Verification call failed:', fetchErr);
+        const authorizedUrl = (verifyData.downloadUrl || verifyData.fileUrl)?.trim() || null;
+        if (!authorizedUrl) {
+          return {
+            ok: false,
+            status: verifyResp.status,
+            errorCategory: 'server_error',
+            error: 'The server did not return a valid download link. Please try again shortly.'
+          };
+        }
+
         return {
-          success: false,
-          error: 'Unable to verify payment authorization with server. Please try again.'
+          ok: true,
+          downloadUrl: authorizedUrl
+        };
+      } catch (fetchErr: any) {
+        console.error(
+          '[Resource Delivery Guard] Verification request failed:',
+          redactSensitiveText(fetchErr?.message || 'Network error')
+        );
+        return {
+          ok: false,
+          errorCategory: 'network_error',
+          error: 'Network error while verifying download authorization. Please check your connection and try again.'
         };
       }
+    };
+
+    if (isPaid) {
+      const authResult = await requestAuthorizedPaidDownloadUrl();
+      if (!authResult.ok) {
+        return {
+          success: false,
+          error: authResult.error,
+          errorCategory: authResult.errorCategory,
+          status: authResult.status,
+          code: authResult.code
+        };
+      }
+      if (authResult.isBundle) {
+        return {
+          success: true,
+          isBundle: true,
+          bundleUrl: authResult.bundleUrl || '/resources/bundle/meta-ads-campaign-planner-bundle'
+        };
+      }
+      rawFileUrl = authResult.downloadUrl || null;
+      externalUrl = null;
     }
 
     let deliveryMethod = 'Unknown';
@@ -845,70 +920,281 @@ export const resourceService = {
     const rawName = (resource.slug || resource.title || resource.name || 'resource').replace(/[^a-zA-Z0-9_-]/g, '_');
     const safeFilename = rawName.endsWith(fileExt) ? rawName : `${rawName}${fileExt}`;
 
+    const MAX_EXPIRED_RETRIES = 1;
+    let expiredRetryCount = 0;
+
     try {
-      // -------------------------------------------------------------
-      // 1. External URL Delivery (Google Drive, Dropbox, Notion, etc.)
-      // -------------------------------------------------------------
-      if (externalUrl && /^https?:\/\//i.test(externalUrl)) {
-        deliveryMethod = 'External URL';
-        resolvedUrl = externalUrl;
+      while (true) {
+        // -------------------------------------------------------------
+        // 1. External URL Delivery (Free resources ONLY)
+        // -------------------------------------------------------------
+        if (!isPaid && externalUrl && /^https?:\/\//i.test(externalUrl)) {
+          deliveryMethod = 'External URL';
+          resolvedUrl = externalUrl;
 
-        try {
-          window.open(externalUrl, '_blank', 'noopener,noreferrer');
-          deliveryResult = 'success';
-          this.logDeliveryDiagnostic({
-            resource,
-            deliveryMethod,
-            resolvedUrl,
-            storageBucket,
-            storageObjectPath,
-            deliveryResult,
-            errorCode,
-            errorMessage
-          });
-          return { success: true };
-        } catch (extErr: any) {
-          console.warn('[Resource Delivery Error] Failed to open external URL:', extErr);
-          errorCode = 'EXTERNAL_URL_POPUP_BLOCKED';
-          errorMessage = extErr?.message || 'Failed to open external link';
+          try {
+            window.open(externalUrl, '_blank', 'noopener,noreferrer');
+            deliveryResult = 'success';
+            this.logDeliveryDiagnostic({
+              resource,
+              deliveryMethod,
+              resolvedUrl,
+              storageBucket,
+              storageObjectPath,
+              deliveryResult,
+              errorCode,
+              errorMessage
+            });
+            return { success: true };
+          } catch (extErr: any) {
+            console.warn(
+              '[Resource Delivery Error] Failed to open external URL:',
+              redactSensitiveText(extErr?.message || 'Popup blocked')
+            );
+            errorCode = 'EXTERNAL_URL_POPUP_BLOCKED';
+            errorMessage = redactSensitiveText(extErr?.message || 'Failed to open external link');
+          }
         }
-      }
 
-      // -------------------------------------------------------------
-      // 2. Full HTTP/HTTPS URL (Supabase Storage / Cloud CDN)
-      // -------------------------------------------------------------
-      if (rawFileUrl && /^https?:\/\//i.test(rawFileUrl)) {
-        deliveryMethod = 'Supabase Storage';
-        resolvedUrl = rawFileUrl;
+        // -------------------------------------------------------------
+        // 2. Full HTTP/HTTPS URL (Supabase Storage / Cloud CDN)
+        // -------------------------------------------------------------
+        if (rawFileUrl && /^https?:\/\//i.test(rawFileUrl)) {
+          deliveryMethod = 'Supabase Storage';
+          resolvedUrl = rawFileUrl;
 
-        try {
-          let downloadTarget = rawFileUrl;
+          try {
+            let downloadTarget = rawFileUrl;
 
-          // Check if this is a Supabase storage URL that needs signed URL generation for private buckets
-          if (isSupabaseConfigured() && rawFileUrl.includes('/storage/v1/object/')) {
-            storageBucket = 'resources';
-            const match = rawFileUrl.match(/\/resources\/(.+)$/);
-            if (match && match[1]) {
-              storageObjectPath = decodeURIComponent(match[1].split('?')[0]);
-              const { data: signedData, error: signErr } = await supabase.storage
-                .from('resources')
-                .createSignedUrl(storageObjectPath, 3600);
-              if (signedData?.signedUrl && !signErr) {
-                downloadTarget = signedData.signedUrl;
-                resolvedUrl = downloadTarget;
+            // Skip redundant client-side signing if the server already supplied a valid signed Storage URL
+            // Paid resources must NEVER fall back to client-side signing or public Storage URLs.
+            const isAlreadySignedStorageUrl =
+              rawFileUrl.includes('/storage/v1/object/sign/') && /[?&]token=/.test(rawFileUrl);
+            if (
+              !isPaid &&
+              isSupabaseConfigured() &&
+              rawFileUrl.includes('/storage/v1/object/') &&
+              !isAlreadySignedStorageUrl
+            ) {
+              storageBucket = 'resources';
+              const match = rawFileUrl.match(/\/resources\/(.+)$/);
+              if (match && match[1]) {
+                storageObjectPath = decodeURIComponent(match[1].split('?')[0]);
+                const { data: signedData, error: signErr } = await supabase.storage
+                  .from('resources')
+                  .createSignedUrl(storageObjectPath, 3600);
+                if (signedData?.signedUrl && !signErr) {
+                  downloadTarget = signedData.signedUrl;
+                  resolvedUrl = downloadTarget;
+                }
               }
             }
-          }
 
-          // Try downloading via fetched blob for seamless download prompt
+            // Try downloading via fetched blob for seamless download prompt
+            try {
+              const resp = await fetch(downloadTarget, { mode: 'cors' });
+              if (resp.ok) {
+                const contentType = resp.headers.get('content-type') || '';
+                if (isPaid && contentType.includes('text/html')) {
+                  errorCode = 'UNEXPECTED_HTML_RESPONSE';
+                  errorMessage = 'Paid asset endpoint returned unexpected HTML content';
+                  this.logDeliveryDiagnostic({
+                    resource,
+                    deliveryMethod,
+                    resolvedUrl,
+                    storageBucket,
+                    storageObjectPath,
+                    deliveryResult: 'failure',
+                    errorCode,
+                    errorMessage
+                  });
+                  return {
+                    success: false,
+                    errorCategory: 'download_failed',
+                    error: 'The authorized paid asset could not be downloaded. Please try again or contact support.'
+                  };
+                }
+
+                const blob = await resp.blob();
+                const blobUrl = URL.createObjectURL(blob);
+                const resolvedFilename = extractSafeDownloadFilename(
+                  resp.headers.get('content-disposition'),
+                  isPaid ? null : downloadTarget,
+                  safeFilename
+                );
+                const link = document.createElement('a');
+                link.href = blobUrl;
+                link.download = resolvedFilename;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+
+                deliveryResult = 'success';
+                this.logDeliveryDiagnostic({
+                  resource,
+                  deliveryMethod,
+                  resolvedUrl,
+                  storageBucket,
+                  storageObjectPath,
+                  deliveryResult,
+                  errorCode,
+                  errorMessage
+                });
+                return { success: true };
+              }
+
+              // Non-OK HTTP response from Storage/CDN
+              const { json: errBody, text: errText } = await safeParseResponseBody(resp);
+              const isExpiredStorage = isExpiredSignedStorageResponse(resp.status, errBody, errText);
+
+              if (isPaid && isExpiredStorage && expiredRetryCount < MAX_EXPIRED_RETRIES) {
+                expiredRetryCount += 1;
+                const refreshed = await requestAuthorizedPaidDownloadUrl();
+                if (!refreshed.ok || !refreshed.downloadUrl) {
+                  return {
+                    success: false,
+                    error:
+                      refreshed.error ||
+                      'Your download link expired and could not be refreshed. Please try downloading again.',
+                    errorCategory: refreshed.errorCategory || 'expired_link',
+                    status: refreshed.status,
+                    code: refreshed.code
+                  };
+                }
+                rawFileUrl = refreshed.downloadUrl;
+                continue;
+              }
+
+              errorCode = isExpiredStorage ? 'SIGNED_URL_EXPIRED' : `STORAGE_HTTP_${resp.status}`;
+              errorMessage = `Storage download returned HTTP ${resp.status}`;
+
+              if (isPaid) {
+                this.logDeliveryDiagnostic({
+                  resource,
+                  deliveryMethod,
+                  resolvedUrl,
+                  storageBucket,
+                  storageObjectPath,
+                  deliveryResult: 'failure',
+                  errorCode,
+                  errorMessage
+                });
+                if (resp.status === 429) {
+                  return {
+                    success: false,
+                    status: 429,
+                    errorCategory: 'rate_limited',
+                    error: 'Too many download requests. Please wait a moment and try again.'
+                  };
+                }
+                if (resp.status >= 500) {
+                  return {
+                    success: false,
+                    status: resp.status,
+                    errorCategory: 'server_error',
+                    error: 'The file storage service is temporarily unavailable. Please try again shortly.'
+                  };
+                }
+                if (isExpiredStorage) {
+                  return {
+                    success: false,
+                    status: resp.status,
+                    errorCategory: 'expired_link',
+                    error: 'Your temporary download link expired. Please click Download again to get a fresh link.'
+                  };
+                }
+                return {
+                  success: false,
+                  status: resp.status,
+                  errorCategory: 'download_failed',
+                  error: 'The authorized paid asset could not be downloaded right now. Please try again or contact support.'
+                };
+              }
+            } catch (corsOrNetErr: any) {
+              if (isPaid) {
+                errorCode = 'STORAGE_NETWORK_ERROR';
+                errorMessage = redactSensitiveText(corsOrNetErr?.message || 'Network error downloading paid asset');
+                this.logDeliveryDiagnostic({
+                  resource,
+                  deliveryMethod,
+                  resolvedUrl,
+                  storageBucket,
+                  storageObjectPath,
+                  deliveryResult: 'failure',
+                  errorCode,
+                  errorMessage
+                });
+                return {
+                  success: false,
+                  errorCategory: 'network_error',
+                  error: 'Network error while downloading this paid file. Please check your connection and try again.'
+                };
+              }
+
+              // Direct browser link fallback if CORS blocks fetch (free resources ONLY)
+              const link = document.createElement('a');
+              link.href = downloadTarget;
+              link.download = safeFilename;
+              link.target = '_blank';
+              link.rel = 'noopener noreferrer';
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+
+              deliveryResult = 'success';
+              this.logDeliveryDiagnostic({
+                resource,
+                deliveryMethod,
+                resolvedUrl,
+                storageBucket,
+                storageObjectPath,
+                deliveryResult,
+                errorCode,
+                errorMessage
+              });
+              return { success: true };
+            }
+          } catch (storageErr: any) {
+            console.warn(
+              '[Resource Delivery Error] Supabase storage access notice:',
+              redactSensitiveText(storageErr?.message || 'Storage download error')
+            );
+            errorCode = 'STORAGE_DOWNLOAD_ERROR';
+            errorMessage = redactSensitiveText(storageErr?.message || 'Storage download error');
+          }
+        }
+
+        // -------------------------------------------------------------
+        // 3. Static Server Asset (/downloads/...) or Protected Local Asset (/api/payments/download-paid-asset?token=...)
+        // -------------------------------------------------------------
+        if (
+          rawFileUrl &&
+          (rawFileUrl.startsWith('/downloads/') || rawFileUrl.startsWith('/') || rawFileUrl.startsWith('downloads/'))
+        ) {
+          const isProtectedLocalEndpoint = rawFileUrl.startsWith('/api/payments/download-paid-asset');
+          deliveryMethod = isProtectedLocalEndpoint ? 'Protected Local Asset' : 'Static Asset';
+          const cleanPath = rawFileUrl.startsWith('/') ? rawFileUrl : `/${rawFileUrl}`;
+          resolvedUrl = cleanPath;
+
           try {
-            const resp = await fetch(downloadTarget, { mode: 'cors' });
-            if (resp.ok) {
+            const resp = await fetch(cleanPath);
+            const contentType = resp.headers.get('content-type') || '';
+            // Confirm file exists and is not SPA index.html fallback
+            if (resp.ok && !contentType.includes('text/html')) {
               const blob = await resp.blob();
               const blobUrl = URL.createObjectURL(blob);
+              const assetFilename = extractSafeDownloadFilename(
+                resp.headers.get('content-disposition'),
+                isProtectedLocalEndpoint ? null : cleanPath,
+                safeFilename
+              );
+
               const link = document.createElement('a');
               link.href = blobUrl;
-              link.download = safeFilename;
+              link.download = assetFilename;
               link.target = '_blank';
               link.rel = 'noopener noreferrer';
               document.body.appendChild(link);
@@ -929,85 +1215,108 @@ export const resourceService = {
               });
               return { success: true };
             }
-          } catch {
-            // Direct browser link fallback if CORS blocks fetch
-            const link = document.createElement('a');
-            link.href = downloadTarget;
-            link.download = safeFilename;
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
 
-            deliveryResult = 'success';
-            this.logDeliveryDiagnostic({
-              resource,
-              deliveryMethod,
-              resolvedUrl,
-              storageBucket,
-              storageObjectPath,
-              deliveryResult,
-              errorCode,
-              errorMessage
-            });
-            return { success: true };
+            const { json: errBody } = await safeParseResponseBody(resp);
+            const isExpiredToken =
+              isProtectedLocalEndpoint && isExpiredAssetTokenResponse(resp.status, errBody);
+
+            if (isPaid && isExpiredToken && expiredRetryCount < MAX_EXPIRED_RETRIES) {
+              expiredRetryCount += 1;
+              const refreshed = await requestAuthorizedPaidDownloadUrl();
+              if (!refreshed.ok || !refreshed.downloadUrl) {
+                return {
+                  success: false,
+                  error:
+                    refreshed.error ||
+                    'Your download link expired and could not be refreshed. Please try downloading again.',
+                  errorCategory: refreshed.errorCategory || 'expired_link',
+                  status: refreshed.status,
+                  code: refreshed.code
+                };
+              }
+              rawFileUrl = refreshed.downloadUrl;
+              continue;
+            }
+
+            errorCode = isExpiredToken ? 'INVALID_DOWNLOAD_TOKEN' : 'STATIC_ASSET_NOT_FOUND';
+            errorMessage = `Asset at ${redactSensitiveUrl(cleanPath)} returned ${resp.status} with content-type: ${contentType || 'unknown'}`;
+
+            if (isPaid) {
+              this.logDeliveryDiagnostic({
+                resource,
+                deliveryMethod,
+                resolvedUrl,
+                storageBucket,
+                storageObjectPath,
+                deliveryResult: 'failure',
+                errorCode,
+                errorMessage
+              });
+              if (resp.status === 429) {
+                return {
+                  success: false,
+                  status: 429,
+                  code: errBody?.code,
+                  errorCategory: 'rate_limited',
+                  error: errBody?.error || 'Too many download requests. Please wait a moment and try again.'
+                };
+              }
+              if (resp.status >= 500) {
+                return {
+                  success: false,
+                  status: resp.status,
+                  code: errBody?.code,
+                  errorCategory: 'server_error',
+                  error: errBody?.error || 'Asset delivery service is temporarily unavailable. Please try again shortly.'
+                };
+              }
+              if (isExpiredToken) {
+                return {
+                  success: false,
+                  status: resp.status,
+                  code: 'INVALID_DOWNLOAD_TOKEN',
+                  errorCategory: 'expired_link',
+                  error: 'Your temporary download link expired. Please click Download again to generate a fresh link.'
+                };
+              }
+              return {
+                success: false,
+                status: resp.status,
+                code: errBody?.code,
+                errorCategory: 'download_failed',
+                error:
+                  errBody?.error ||
+                  'The authorized paid asset could not be delivered. Please try again or contact support.'
+              };
+            }
+          } catch (staticErr: any) {
+            console.warn(
+              '[Resource Delivery Error] Asset fetch notice:',
+              redactSensitiveText(staticErr?.message || 'Failed to fetch asset')
+            );
+            errorCode = 'STATIC_FETCH_FAILED';
+            errorMessage = redactSensitiveText(staticErr?.message || 'Failed to fetch asset');
+            if (isPaid) {
+              this.logDeliveryDiagnostic({
+                resource,
+                deliveryMethod,
+                resolvedUrl,
+                storageBucket,
+                storageObjectPath,
+                deliveryResult: 'failure',
+                errorCode,
+                errorMessage
+              });
+              return {
+                success: false,
+                errorCategory: 'network_error',
+                error: 'Network error while downloading this paid file. Please check your connection and try again.'
+              };
+            }
           }
-        } catch (storageErr: any) {
-          console.warn('[Resource Delivery Error] Supabase storage access notice:', storageErr);
-          errorCode = 'STORAGE_DOWNLOAD_ERROR';
-          errorMessage = storageErr?.message || 'Storage download error';
         }
-      }
 
-      // -------------------------------------------------------------
-      // 3. Static Server Asset (e.g. /downloads/META.pdf)
-      // -------------------------------------------------------------
-      if (rawFileUrl && (rawFileUrl.startsWith('/downloads/') || rawFileUrl.startsWith('/') || rawFileUrl.startsWith('downloads/'))) {
-        deliveryMethod = 'Static Asset';
-        const cleanPath = rawFileUrl.startsWith('/') ? rawFileUrl : `/${rawFileUrl}`;
-        resolvedUrl = cleanPath;
-
-        try {
-          const resp = await fetch(cleanPath);
-          const contentType = resp.headers.get('content-type') || '';
-          // Confirm file exists and is not SPA index.html fallback
-          if (resp.ok && !contentType.includes('text/html')) {
-            const blob = await resp.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            const assetFilename = cleanPath.split('/').pop() || safeFilename;
-
-            const link = document.createElement('a');
-            link.href = blobUrl;
-            link.download = assetFilename;
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
-
-            deliveryResult = 'success';
-            this.logDeliveryDiagnostic({
-              resource,
-              deliveryMethod,
-              resolvedUrl,
-              storageBucket,
-              storageObjectPath,
-              deliveryResult,
-              errorCode,
-              errorMessage
-            });
-            return { success: true };
-          } else {
-            errorCode = 'STATIC_ASSET_NOT_FOUND';
-            errorMessage = `Asset at ${cleanPath} returned ${resp.status} with content-type: ${contentType}`;
-          }
-        } catch (staticErr: any) {
-          console.warn('[Resource Delivery Error] Static fetch notice:', staticErr);
-          errorCode = 'STATIC_FETCH_FAILED';
-          errorMessage = staticErr?.message || 'Failed to fetch static asset';
-        }
+        break;
       }
 
       // -------------------------------------------------------------
@@ -1017,6 +1326,7 @@ export const resourceService = {
       if (isPaid) {
         return {
           success: false,
+          errorCategory: 'download_failed',
           error: 'The authorized paid asset could not be delivered. Please try again or contact support.'
         };
       }
@@ -1027,7 +1337,7 @@ export const resourceService = {
       try {
         const pdfBlob = generateResourcePdfBlob(resource);
         const blobUrl = URL.createObjectURL(pdfBlob);
-        const targetFilename = rawFileUrl?.split('/').pop() || safeFilename;
+        const targetFilename = extractSafeDownloadFilename(null, rawFileUrl, safeFilename);
         const filename = targetFilename.toLowerCase().endsWith('.pdf') ? targetFilename : `${targetFilename}.pdf`;
 
         const link = document.createElement('a');
@@ -1054,9 +1364,12 @@ export const resourceService = {
         });
         return { success: true };
       } catch (blobErr: any) {
-        console.error('[Resource Delivery Error] Dynamic PDF generation failure:', blobErr);
+        console.error(
+          '[Resource Delivery Error] Dynamic PDF generation failure:',
+          redactSensitiveText(blobErr?.message || 'PDF generator failure')
+        );
         errorCode = 'PDF_GENERATOR_FAILED';
-        errorMessage = blobErr?.message || 'PDF generator failure';
+        errorMessage = redactSensitiveText(blobErr?.message || 'PDF generator failure');
       }
 
       this.logDeliveryDiagnostic({
@@ -1072,19 +1385,25 @@ export const resourceService = {
 
       return {
         success: false,
+        errorCategory: 'download_failed',
         error: "We're unable to open this resource right now. Please try again."
       };
     } catch (unexpectedErr: any) {
-      console.error('[Resource Delivery Error] Unexpected delivery failure:', unexpectedErr);
+      console.error(
+        '[Resource Delivery Error] Unexpected delivery failure:',
+        redactSensitiveText(unexpectedErr?.message || 'Unexpected error')
+      );
       return {
         success: false,
+        errorCategory: 'download_failed',
         error: "We're unable to open this resource right now. Please try again."
       };
     }
   },
 
   /**
-   * Internal structured diagnostic logger for Resource Delivery tracing
+   * Internal structured diagnostic logger for Resource Delivery tracing.
+   * Strictly redacts signed URLs, query parameters, bearer tokens, and access tokens.
    */
   logDeliveryDiagnostic(diag: {
     resource: Resource;
@@ -1101,18 +1420,18 @@ export const resourceService = {
       `resource id: ${diag.resource.id || 'N/A'}\n` +
       `resource slug: ${diag.resource.slug || 'N/A'}\n` +
       `resource title: ${diag.resource.title || diag.resource.name || 'N/A'}\n` +
-      `file_url: ${diag.resource.fileUrl || 'N/A'}\n` +
-      `external_url: ${diag.resource.externalUrl || 'N/A'}\n` +
+      `file_url: ${redactSensitiveUrl(diag.resource.fileUrl)}\n` +
+      `external_url: ${redactSensitiveUrl(diag.resource.externalUrl)}\n` +
       `delivery method:\n` +
       `- ${diag.deliveryMethod}\n` +
-      `resolved URL: ${diag.resolvedUrl}\n` +
+      `resolved URL: ${redactSensitiveUrl(diag.resolvedUrl)}\n` +
       `Storage bucket: ${diag.storageBucket}\n` +
       `Storage object path: ${diag.storageObjectPath}\n` +
       `lead submission confirmed: true\n` +
       `download counter update: true\n` +
       `delivery result: ${diag.deliveryResult}\n` +
       `error code: ${diag.errorCode || 'none'}\n` +
-      `error message: ${diag.errorMessage || 'none'}`
+      `error message: ${diag.errorMessage ? redactSensitiveText(diag.errorMessage) : 'none'}`
     );
   },
 
@@ -1223,6 +1542,7 @@ export const resourceService = {
   /**
    * Fetches the 4 authorized deliverable files for the Meta Ads Campaign Planner Bundle.
    * Calls the server-side /api/payments/bundle-files endpoint which verifies payment status.
+   * Safely parses non-JSON/malformed responses and classifies entitlement vs rate-limit/server/network errors.
    */
   async fetchBundleFiles(
     bundleId: string,
@@ -1230,6 +1550,10 @@ export const resourceService = {
   ): Promise<{
     success: boolean;
     authorized: boolean;
+    status?: number;
+    code?: string;
+    retryAfterSeconds?: number;
+    errorCategory?: DownloadFailureCategory;
     bundle?: any;
     files?: Array<{
       id: string;
@@ -1266,11 +1590,290 @@ export const resourceService = {
           ...(guestResourceToken ? { 'x-resource-access-token': guestResourceToken } : {})
         }
       });
-      const data = await resp.json();
-      return data;
+
+      const { json: data } = await safeParseResponseBody(resp);
+
+      if (resp.ok && data && data.success === true && data.authorized === true && Array.isArray(data.files)) {
+        return {
+          ...data,
+          status: resp.status
+        };
+      }
+
+      const classified = classifyHttpFailure(
+        resp.status,
+        data,
+        'A verified purchase is required to access these bundle deliverables.'
+      );
+      const retryAfterHeader = resp.headers?.get?.('retry-after');
+      const retryAfterSeconds =
+        typeof data?.retryAfterSeconds === 'number'
+          ? data.retryAfterSeconds
+          : retryAfterHeader
+          ? Number.parseInt(retryAfterHeader, 10) || undefined
+          : undefined;
+
+      return {
+        success: false,
+        authorized: false,
+        status: resp.status,
+        code: classified.code,
+        retryAfterSeconds,
+        errorCategory: classified.errorCategory,
+        error: classified.error
+      };
     } catch (err: any) {
-      console.error('[ResourceService] Exception fetching bundle files:', err);
-      return { success: false, authorized: false, error: err?.message || 'Failed to fetch bundle files.' };
+      console.error(
+        '[ResourceService] Network error fetching bundle files:',
+        redactSensitiveText(err?.message || 'Network error')
+      );
+      return {
+        success: false,
+        authorized: false,
+        errorCategory: 'network_error',
+        error: 'Network error while verifying bundle access. Please check your connection and try again.'
+      };
     }
   }
 };
+
+export type DownloadFailureCategory =
+  | 'entitlement_denied'
+  | 'rate_limited'
+  | 'server_error'
+  | 'network_error'
+  | 'expired_link'
+  | 'download_failed';
+
+/**
+ * Safely reads and parses an HTTP response body without throwing on HTML, empty, or malformed JSON.
+ */
+export async function safeParseResponseBody(
+  resp: Response
+): Promise<{ json: any | null; text: string }> {
+  try {
+    const text = await resp.text();
+    if (!text || !text.trim()) {
+      return { json: null, text: '' };
+    }
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === 'object') {
+        return { json: parsed, text };
+      }
+      return { json: null, text };
+    } catch {
+      return { json: null, text };
+    }
+  } catch {
+    return { json: null, text: '' };
+  }
+}
+
+/**
+ * Classifies non-OK or malformed authorization API responses so UI never mistakes
+ * HTTP 429, HTTP 503, or server errors for a payment/entitlement denial.
+ */
+export function classifyHttpFailure(
+  status: number,
+  data: any,
+  defaultEntitlementError: string
+): { errorCategory: DownloadFailureCategory; error: string; code?: string } {
+  const code = typeof data?.code === 'string' ? data.code : undefined;
+  const serverMessage = typeof data?.error === 'string' && data.error.trim() ? data.error.trim() : null;
+
+  if (status === 429) {
+    return {
+      errorCategory: 'rate_limited',
+      code: code || 'RATE_LIMIT_EXCEEDED',
+      error: serverMessage || 'Too many download requests. Please wait a moment and try again.'
+    };
+  }
+
+  if (status === 503 || status >= 500) {
+    return {
+      errorCategory: 'server_error',
+      code,
+      error:
+        serverMessage ||
+        'Our download service is temporarily unavailable. Your purchase is unaffected—please try again shortly.'
+    };
+  }
+
+  if (status === 401 || status === 403) {
+    return {
+      errorCategory: 'entitlement_denied',
+      code,
+      error: serverMessage || defaultEntitlementError
+    };
+  }
+
+  if (status >= 200 && status < 300) {
+    // HTTP 200 with malformed/non-JSON or unexpected payload
+    return {
+      errorCategory: 'server_error',
+      code,
+      error: serverMessage || 'Received an invalid response from the download service. Please try again.'
+    };
+  }
+
+  return {
+    errorCategory: 'download_failed',
+    code,
+    error: serverMessage || 'Unable to prepare your download right now. Please try again.'
+  };
+}
+
+const SIGNED_STORAGE_EXPIRY_RE =
+  /invalidjwt|jwt\s*expired|exp\s+claim|token\s*(?:has\s*)?expired|signature\s*(?:has\s*)?expired|expired\s*(?:url|token|signature)/i;
+
+/**
+ * Returns true ONLY when a Supabase Storage signed-URL response reliably indicates an expired credential.
+ * Never returns true for 429, 5xx, 404, or unrelated 400/403 errors.
+ */
+export function isExpiredSignedStorageResponse(
+  status: number,
+  parsedBody: any,
+  rawText = ''
+): boolean {
+  if (status !== 400 && status !== 403) {
+    return false;
+  }
+  const combinedParts: string[] = [];
+  if (parsedBody && typeof parsedBody === 'object') {
+    for (const key of ['error', 'message', 'code', 'error_description']) {
+      if (typeof parsedBody[key] === 'string' && parsedBody[key].trim()) {
+        combinedParts.push(parsedBody[key]);
+      }
+    }
+  }
+  if (typeof rawText === 'string' && rawText.trim()) {
+    combinedParts.push(rawText.slice(0, 512));
+  }
+  return SIGNED_STORAGE_EXPIRY_RE.test(combinedParts.join(' '));
+}
+
+/**
+ * Returns true ONLY when /api/payments/download-paid-asset reliably indicates an expired/invalid download token.
+ * Never returns true for mismatch codes, 429, 5xx, 404, or non-JSON responses.
+ */
+export function isExpiredAssetTokenResponse(status: number, parsedBody: any): boolean {
+  return (
+    status === 403 &&
+    Boolean(parsedBody && typeof parsedBody === 'object' && parsedBody.code === 'INVALID_DOWNLOAD_TOKEN')
+  );
+}
+
+/**
+ * Extracts a safe download filename from Content-Disposition or a non-API path,
+ * ensuring query-string tokens (e.g. `?token=...`) are never included in the filename.
+ */
+export function extractSafeDownloadFilename(
+  contentDisposition: string | null | undefined,
+  rawPath: string | null | undefined,
+  fallbackFilename: string
+): string {
+  const sanitizeCandidate = (candidate: string | null | undefined): string | null => {
+    if (!candidate || typeof candidate !== 'string') return null;
+    const stripped = candidate
+      .split(/[?#]/)[0]
+      .replace(/^["']+|["']+$/g, '')
+      .replace(/[\x00-\x1f\x7f]/g, '')
+      .replace(/[/\\]/g, '_')
+      .trim();
+    if (!stripped || stripped === '.' || stripped === '..' || stripped.includes('..')) {
+      return null;
+    }
+    if (/token=|download-paid-asset|get-resource-download-url|bundle-files/i.test(stripped)) {
+      return null;
+    }
+    return stripped;
+  };
+
+  if (contentDisposition && typeof contentDisposition === 'string') {
+    const extMatch = contentDisposition.match(/filename\*\s*=\s*(?:UTF-8''|utf-8'')([^;\r\n]+)/i);
+    if (extMatch && extMatch[1]) {
+      try {
+        const decoded = decodeURIComponent(extMatch[1].trim());
+        const clean = sanitizeCandidate(decoded);
+        if (clean) return clean;
+      } catch {
+        // Fall through to standard filename parameter
+      }
+    }
+
+    const quotedMatch = contentDisposition.match(/filename\s*=\s*"([^"\r\n]+)"/i);
+    if (quotedMatch && quotedMatch[1]) {
+      const clean = sanitizeCandidate(quotedMatch[1]);
+      if (clean) return clean;
+    }
+
+    const unquotedMatch = contentDisposition.match(/filename\s*=\s*([^;\r\n]+)/i);
+    if (unquotedMatch && unquotedMatch[1]) {
+      const clean = sanitizeCandidate(unquotedMatch[1]);
+      if (clean) return clean;
+    }
+  }
+
+  if (rawPath && typeof rawPath === 'string') {
+    const pathOnly = rawPath.split(/[?#]/)[0];
+    const lastSeg = pathOnly.split('/').pop();
+    const clean = sanitizeCandidate(lastSeg);
+    if (clean && /\.[a-z0-9]{2,6}$/i.test(clean)) {
+      return clean;
+    }
+  }
+
+  return sanitizeCandidate(fallbackFilename) || 'resource.pdf';
+}
+
+/**
+ * Redacts signed URLs, query parameters, embedded credentials, and access tokens before logging.
+ */
+export function redactSensitiveUrl(rawUrl: string | null | undefined): string {
+  if (!rawUrl || typeof rawUrl !== 'string') return 'N/A';
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return 'N/A';
+  if (/^blob:/i.test(trimmed)) return 'blob:[redacted]';
+
+  if (trimmed.startsWith('/')) {
+    const pathOnly = trimmed.split(/[?#]/)[0];
+    const hasQueryOrHash = /[?#]/.test(trimmed);
+    if (/\/api\/payments\/download-paid-asset/i.test(pathOnly)) {
+      return '/api/payments/download-paid-asset?[redacted]';
+    }
+    if (/\/storage\/v1\/object\/sign\//i.test(pathOnly)) {
+      return '/storage/v1/object/sign/[redacted]';
+    }
+    return hasQueryOrHash ? `${pathOnly}?[redacted]` : pathOnly;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (/\/storage\/v1\/object\/sign\//i.test(parsed.pathname)) {
+      return `${parsed.origin}/storage/v1/object/sign/[redacted]`;
+    }
+    if (/\/api\/payments\/download-paid-asset/i.test(parsed.pathname)) {
+      return `${parsed.origin}/api/payments/download-paid-asset?[redacted]`;
+    }
+    return `${parsed.origin}${parsed.pathname}${parsed.search || parsed.hash ? '?[redacted]' : ''}`;
+  } catch {
+    const stripped = trimmed.split(/[?#]/)[0];
+    return /[?#]/.test(trimmed) ? `${stripped}?[redacted]` : '[redacted-url]';
+  }
+}
+
+/**
+ * Redacts bearer tokens, signed-URL query parameters, and token query values from log strings.
+ */
+export function redactSensitiveText(input: string | null | undefined): string {
+  if (!input || typeof input !== 'string') return 'none';
+  return input
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [redacted]')
+    .replace(
+      /\b(token|resourceAccessToken|resource_access_token|access_token|sig|signature|authorization)=([^&\s"']+)/gi,
+      '$1=[redacted]'
+    )
+    .replace(/((?:https?:\/\/|\/api\/|\/storage\/)[^\s?"'#]+)[?#][^\s"']+/gi, '$1?[redacted]');
+}
+

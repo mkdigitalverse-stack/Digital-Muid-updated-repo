@@ -1,7 +1,9 @@
 import express from "express";
 import crypto from "crypto";
 import fs from "fs";
+import net from "net";
 import path from "path";
+import { fileURLToPath } from "url";
 import {
   getRazorpayClient,
   getRazorpayKeyId,
@@ -13,12 +15,14 @@ import {
   getSupabaseDbClient,
   getSupabaseServerClient,
   checkIsAdmin,
+  isEmailConfirmed,
   isValidUUID
 } from "./supabaseServer.js";
 import { handleRazorpayWebhook } from "./paymentWebhook.js";
 import {
   AUTHORITATIVE_PAID_RESOURCES,
   getAuthoritativeResourcePricing,
+  isZeroPriceStrict,
   calculateAuthoritativeCoursePrice,
   fulfillCourseEnrollment,
   fulfillConsultationPayment,
@@ -135,11 +139,60 @@ export function resetPaymentRateLimits() {
 // Authoritative paid resource pricing helpers are imported from ./paymentFulfillment.js
 // and re-exported above to maintain a single source of truth without circular dependencies.
 
+const MIN_ASSET_HMAC_SECRET_BYTES = 32;
+const EXACT_PLACEHOLDER_ASSET_SECRETS = new Set([
+  "undefined",
+  "null",
+  "none",
+  "changeme",
+  "change_me",
+  "replace_me",
+  "placeholder",
+  "secret",
+  "generate_at_least_32_bytes_random_hex_secret_here"
+]);
+
+function isInvalidOrWeakAssetSecret(clean) {
+  if (!clean || typeof clean !== "string") {
+    return true;
+  }
+  // Reject internal whitespace or ASCII control characters
+  if (/[\s\x00-\x1f\x7f]/.test(clean)) {
+    return true;
+  }
+  // Require minimum 32 UTF-8 bytes (256 bits) of key material
+  if (Buffer.byteLength(clean, "utf8") < MIN_ASSET_HMAC_SECRET_BYTES) {
+    return true;
+  }
+  const lower = clean.toLowerCase();
+  if (EXACT_PLACEHOLDER_ASSET_SECRETS.has(lower)) {
+    return true;
+  }
+  if (
+    lower.startsWith("generate_at_least_32_bytes") ||
+    lower.startsWith("your_") ||
+    lower.startsWith("my_") ||
+    lower.includes("placeholder") ||
+    lower.includes("replace_me") ||
+    lower.includes("change_me") ||
+    lower.includes("secret_here") ||
+    lower.includes("example_secret")
+  ) {
+    return true;
+  }
+  // Reject trivial low-entropy repeated character patterns (e.g. "0".repeat(64), "ab".repeat(32))
+  if (new Set(clean).size < 4) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Dedicated high-entropy HMAC secret for paid asset access tokens.
- * Requires at least 32 bytes (256 bits) of entropy.
- * Returns null if missing, empty, or under 32 bytes (fails closed).
- * Does NOT use Supabase service role key or hardcoded fallback.
+ * Enforces the project secret policy: non-empty string, no internal whitespace/control chars,
+ * >= 32 UTF-8 bytes (256 bits), non-placeholder, and >= 4 distinct characters.
+ * Returns null if missing or invalid (fails closed).
+ * Does NOT fall back to RAZORPAY_KEY_SECRET, Supabase service role key, or any hardcoded value.
  */
 export function getAssetHmacSecret() {
   const secret = process.env.ASSET_TOKEN_HMAC_SECRET;
@@ -147,9 +200,8 @@ export function getAssetHmacSecret() {
     return null;
   }
   const clean = secret.trim();
-  // Ensure minimum 32 bytes of key material
-  if (Buffer.byteLength(clean, "utf8") < 32) {
-    console.error("[Security Alert] ASSET_TOKEN_HMAC_SECRET has insufficient entropy (< 32 bytes). Failing closed.");
+  if (isInvalidOrWeakAssetSecret(clean)) {
+    console.error("[Security Alert] ASSET_TOKEN_HMAC_SECRET is missing, malformed, placeholder, or has insufficient entropy. Failing closed.");
     return null;
   }
   return clean;
@@ -159,17 +211,58 @@ export function isAssetTokenSecretConfigured() {
   return Boolean(getAssetHmacSecret());
 }
 
+export const ASSET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour (3,600 seconds)
+export const ASSET_TOKEN_MAX_TTL_MS = ASSET_TOKEN_TTL_MS; // Strict 1-hour maximum future lifetime (no silent extension)
+const ASSET_TOKEN_MAX_LENGTH = 4096;
+const HMAC_SHA256_DIGEST_BYTES = 32;
+const ASSET_TOKEN_BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+const ALLOWED_ASSET_TOKEN_V2_KEYS = new Set(["v", "resourceId", "authId", "filename", "expiresAt"]);
+const ALLOWED_ASSET_TOKEN_V1_KEYS = new Set(["resourceId", "authId", "expiresAt"]);
+const UTF8_FATAL_DECODER = new TextDecoder("utf-8", { fatal: true });
+
 /**
- * Transitional fallback secret for validating active unexpired tokens issued within the past 1 hour.
- * Allows graceful cutover without breaking active sessions for legitimate buyers.
+ * Strictly decodes an unpadded canonical base64url string.
+ * Rejects non-base64url characters (including '=', '+', '/', whitespace, multibyte UTF-8),
+ * impossible lengths (mod 4 === 1), non-canonical trailing bits, and unexpected byte lengths.
  */
-function getTransitionalLegacySecret() {
-  const legacy = process.env.RAZORPAY_KEY_SECRET;
-  if (!legacy || typeof legacy !== "string") return null;
-  const clean = legacy.trim();
-  return clean.length >= 8 ? clean : null;
+function decodeStrictBase64Url(input, expectedByteLength = null) {
+  if (typeof input !== "string" || input.length === 0) {
+    return null;
+  }
+  if (!ASSET_TOKEN_BASE64URL_RE.test(input) || input.length % 4 === 1) {
+    return null;
+  }
+  let decoded;
+  try {
+    decoded = Buffer.from(input, "base64url");
+  } catch {
+    return null;
+  }
+  if (decoded.length === 0) {
+    return null;
+  }
+  if (expectedByteLength !== null && decoded.length !== expectedByteLength) {
+    return null;
+  }
+  if (decoded.toString("base64url") !== input) {
+    return null;
+  }
+  return decoded;
 }
 
+/**
+ * Generates a short-lived (1-hour) HMAC-SHA256 resource-scoped bearer capability token
+ * for `GET /api/payments/download-paid-asset` (analogous to a signed Storage URL).
+ *
+ * Security model (A-1 / Finding 5):
+ * - Minted ONLY after full server-side payment/purchase/ownership/guest-token verification
+ *   in `POST /api/payments/get-resource-download-url`.
+ * - Signed exclusively with mandatory high-entropy `ASSET_TOKEN_HMAC_SECRET`.
+ * - Cryptographically binds `resourceId`, `expiresAt` (<= 3,600s), and (for allowlisted local
+ *   assets) exact `filename`.
+ * - `authId` is an opaque issuance reference tag only (NOT a caller identity proof).
+ * - Does NOT embed unvalidated `paymentId`/`orderId`/`userId`/`email` metadata.
+ */
 export function generateAssetAccessToken(resourceId, authId) {
   const secret = getAssetHmacSecret();
   if (!secret) {
@@ -177,54 +270,159 @@ export function generateAssetAccessToken(resourceId, authId) {
     return null;
   }
 
+  if (typeof resourceId !== "string" || !resourceId.trim()) {
+    return null;
+  }
+
+  const cleanResourceId = resourceId.trim();
+  const cleanAuthId = typeof authId === "string" && authId.trim() ? authId.trim() : "guest";
+  const allowlistedFilename = resolveAllowlistedProtectedFilename(cleanResourceId);
+
   const payload = {
-    resourceId: String(resourceId).trim(),
-    authId: String(authId || "guest").trim(),
-    expiresAt: Date.now() + 60 * 60 * 1000 // 1 hour expiration
+    v: 2,
+    resourceId: cleanResourceId,
+    authId: cleanAuthId,
+    ...(allowlistedFilename ? { filename: allowlistedFilename } : {}),
+    expiresAt: Date.now() + ASSET_TOKEN_TTL_MS
   };
   const json = JSON.stringify(payload);
-  const data = Buffer.from(json).toString("base64url");
-  const sig = crypto.createHmac("sha256", secret).update(data).digest("base64url");
+  const data = Buffer.from(json, "utf8").toString("base64url");
+  const sig = crypto.createHmac("sha256", secret).update(data, "ascii").digest("base64url");
   return `${data}.${sig}`;
 }
 
+/**
+ * Strictly parses and verifies a signed asset capability token (A-1 / A-2 / Finding 5).
+ *
+ * Cryptographic & schema policy:
+ * - `ASSET_TOKEN_HMAC_SECRET` is mandatory; missing/weak/placeholder secret fails closed immediately.
+ * - `RAZORPAY_KEY_SECRET` fallback is completely removed for all token versions (v2 and v1).
+ * - Signature must strictly decode from canonical unpadded base64url to exactly 32 raw bytes
+ *   and match the 32-byte HMAC-SHA256 digest via `crypto.timingSafeEqual`.
+ * - Payload must strictly decode from canonical base64url and valid UTF-8 (fatal decoding).
+ * - Supported payload schemas (both signed exclusively by `ASSET_TOKEN_HMAC_SECRET`):
+ *   - v2 (`v: 2`, `resourceId`, `authId`, optional allowlisted `filename`, `expiresAt`).
+ *   - Legacy v1 (`v` omitted, `resourceId`, optional `authId`, `expiresAt`, NO `filename`).
+ * - Enforces both expiration (`now <= expiresAt`) and maximum lifetime (`expiresAt <= now + ASSET_TOKEN_MAX_TTL_MS`).
+ *
+ * Fails closed (returns `null`, never throws) on any malformed, tampered, expired,
+ * over-TTL, or unsupported token.
+ */
 export function verifyAssetAccessToken(token) {
-  if (!token || typeof token !== "string" || !token.includes(".")) return null;
-  const [data, sig] = token.split(".");
-  if (!data || !sig) return null;
-
+  // 1. Dedicated ASSET_TOKEN_HMAC_SECRET is strictly mandatory (zero legacy secret fallback)
   const primarySecret = getAssetHmacSecret();
-  let isValidSig = false;
-
-  // 1. Primary verification using dedicated high-entropy ASSET_TOKEN_HMAC_SECRET
-  if (primarySecret) {
-    const expectedSig = crypto.createHmac("sha256", primarySecret).update(data).digest("base64url");
-    if (sig.length === expectedSig.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
-      isValidSig = true;
-    }
+  if (!primarySecret) {
+    return null;
   }
 
-  // 2. Safe transitional grace period: if token was generated with legacy RAZORPAY_KEY_SECRET in the last hour
-  if (!isValidSig) {
-    const legacySecret = getTransitionalLegacySecret();
-    if (legacySecret) {
-      const expectedLegacySig = crypto.createHmac("sha256", legacySecret).update(data).digest("base64url");
-      if (sig.length === expectedLegacySig.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedLegacySig))) {
-        isValidSig = true;
-      }
-    }
+  if (typeof token !== "string" || token.length === 0 || token.length > ASSET_TOKEN_MAX_LENGTH) {
+    return null;
   }
 
-  // Fail closed if signature did not match either key
-  if (!isValidSig) return null;
+  const parts = token.split(".");
+  if (parts.length !== 2) {
+    return null;
+  }
 
+  const [data, sig] = parts;
+
+  // 2. Strict canonical base64url validation for payload and exact 32-byte decoded signature
+  const decodedPayloadBuf = decodeStrictBase64Url(data);
+  if (!decodedPayloadBuf) {
+    return null;
+  }
+
+  const providedSigBuf = decodeStrictBase64Url(sig, HMAC_SHA256_DIGEST_BYTES);
+  if (!providedSigBuf || providedSigBuf.length !== HMAC_SHA256_DIGEST_BYTES) {
+    return null;
+  }
+
+  // 3. Exclusive verification against ASSET_TOKEN_HMAC_SECRET raw 32-byte HMAC-SHA256 digest
+  const expectedSigBuf = crypto
+    .createHmac("sha256", primarySecret)
+    .update(data, "ascii")
+    .digest();
+
+  if (
+    expectedSigBuf.length !== HMAC_SHA256_DIGEST_BYTES ||
+    providedSigBuf.length !== expectedSigBuf.length ||
+    !crypto.timingSafeEqual(providedSigBuf, expectedSigBuf)
+  ) {
+    return null;
+  }
+
+  // 4. Fatal UTF-8 decoding and strict JSON object parsing
+  let payload;
   try {
-    const payload = JSON.parse(Buffer.from(data, "base64url").toString("utf8"));
-    if (!payload.expiresAt || Date.now() > payload.expiresAt) return null;
-    return payload;
+    const jsonText = UTF8_FATAL_DECODER.decode(decodedPayloadBuf);
+    payload = JSON.parse(jsonText);
   } catch {
     return null;
   }
+
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+
+  const isLegacyV1 = payload.v === undefined;
+  const isV2 = payload.v === 2;
+  if (!isLegacyV1 && !isV2) {
+    return null;
+  }
+
+  const allowedKeys = isV2 ? ALLOWED_ASSET_TOKEN_V2_KEYS : ALLOWED_ASSET_TOKEN_V1_KEYS;
+  for (const key of Object.keys(payload)) {
+    if (!allowedKeys.has(key)) {
+      return null;
+    }
+  }
+
+  if (typeof payload.resourceId !== "string" || payload.resourceId.trim().length === 0) {
+    return null;
+  }
+
+  if (isV2) {
+    if (typeof payload.authId !== "string" || payload.authId.trim().length === 0) {
+      return null;
+    }
+  } else if (payload.authId !== undefined) {
+    if (typeof payload.authId !== "string" || payload.authId.trim().length === 0) {
+      return null;
+    }
+  }
+
+  if (payload.filename !== undefined) {
+    if (
+      !isV2 ||
+      typeof payload.filename !== "string" ||
+      !payload.filename.trim() ||
+      payload.filename !== path.basename(payload.filename) ||
+      payload.filename.includes("..") ||
+      /[\\/\x00-\x1f\x7f]/.test(payload.filename)
+    ) {
+      return null;
+    }
+  }
+
+  const now = Date.now();
+  if (
+    typeof payload.expiresAt !== "number" ||
+    !Number.isSafeInteger(payload.expiresAt) ||
+    payload.expiresAt <= 0 ||
+    now > payload.expiresAt ||
+    payload.expiresAt > now + ASSET_TOKEN_MAX_TTL_MS
+  ) {
+    return null;
+  }
+
+  return {
+    v: isV2 ? 2 : 1,
+    ...(isLegacyV1 ? { legacy: true } : {}),
+    resourceId: payload.resourceId.trim(),
+    ...(payload.authId !== undefined ? { authId: payload.authId.trim() } : {}),
+    ...(payload.filename !== undefined ? { filename: payload.filename.trim() } : {}),
+    expiresAt: payload.expiresAt
+  };
 }
 
 // ==============================================================================
@@ -2331,9 +2529,645 @@ function getAllowedResourceIdsForAuthorization(targetResourceRecord) {
   return [targetResourceRecord.id];
 }
 
+function getCurrentModuleDir() {
+  try {
+    if (typeof import.meta !== "undefined" && import.meta.url) {
+      return path.dirname(fileURLToPath(import.meta.url));
+    }
+  } catch {}
+  if (typeof __dirname !== "undefined") {
+    return __dirname;
+  }
+  return process.cwd();
+}
+
+/**
+ * Explicit legacy protected local-disk asset allowlist (C6-2).
+ * Maps ONLY exact canonical paid deliverable UUIDs/slugs to their exact flat filename
+ * inside `server/protected_downloads/`. No arbitrary DB paths and no default fallback filename.
+ */
+export const PROTECTED_LOCAL_ASSET_ALLOWLIST = Object.freeze({
+  "27ef2c04-4d4a-4dbe-a702-d4013b2542b9": "meta-ads-campaign-planner-workbook.pdf",
+  "meta-ads-campaign-planner-workbook": "meta-ads-campaign-planner-workbook.pdf",
+  "fafe5ffc-3323-4761-9d22-50a2588f6326": "the-ad-budget-break-even-calculator.xlsx",
+  "the-ad-budget-breat-even-calculate": "the-ad-budget-break-even-calculator.xlsx",
+  "the-ad-budget-break-even-calculator": "the-ad-budget-break-even-calculator.xlsx",
+  "004d374c-d872-4bfe-bf54-8083504e9174": "10-high-converting-meta-ads-copy-frameworks.pdf",
+  "10-high-converting-meta-ads-copy-frameworks": "10-high-converting-meta-ads-copy-frameworks.pdf",
+  "6867ecdd-2797-40f0-bdc8-ead20600ac6c": "pre-launch-tracking-audit-checklist.pdf",
+  "pre-launch-tracking-audit-checklist": "pre-launch-tracking-audit-checklist.pdf"
+});
+
+export function resolveAllowlistedProtectedFilename(resourceIdOrSlug) {
+  if (!resourceIdOrSlug || typeof resourceIdOrSlug !== "string") {
+    return null;
+  }
+  const cleanId = resourceIdOrSlug.trim();
+  if (!cleanId || !Object.prototype.hasOwnProperty.call(PROTECTED_LOCAL_ASSET_ALLOWLIST, cleanId)) {
+    return null;
+  }
+  const filename = PROTECTED_LOCAL_ASSET_ALLOWLIST[cleanId];
+  if (
+    !filename ||
+    filename !== path.basename(filename) ||
+    filename.includes("..") ||
+    /[\\/\x00-\x1f\x7f]/.test(filename)
+  ) {
+    return null;
+  }
+  return filename;
+}
+
+let testProtectedAssetDirsOverride = null;
+let testProtectedAssetHooks = null;
+
+/**
+ * Test-only helper (NODE_ENV === "test" strictly) allowing offline HTTP integration tests
+ * to exercise symlink attacks and deterministic TOCTOU races in an isolated temp directory
+ * without mutating repository files. Strictly disabled in non-test environments.
+ */
+export function setTestProtectedAssetConfig(config = null) {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("setTestProtectedAssetConfig is only permitted when NODE_ENV === 'test'.");
+  }
+  if (!config) {
+    testProtectedAssetDirsOverride = null;
+    testProtectedAssetHooks = null;
+    return;
+  }
+  testProtectedAssetDirsOverride = Array.isArray(config.candidateDirs) ? [...config.candidateDirs] : null;
+  testProtectedAssetHooks = config.hooks && typeof config.hooks === "object" ? { ...config.hooks } : null;
+}
+
+function closeFdSafe(fd) {
+  if (typeof fd !== "number" || fd < 0) return;
+  try {
+    fs.closeSync(fd);
+  } catch {}
+}
+
+/**
+ * Race-safe, single-open protected asset descriptor opener (B-1).
+ *
+ * Guarantees:
+ * - Rejects traversal, nested paths, backslashes, NUL/control characters.
+ * - Requires platform `O_NOFOLLOW` support; fails closed if unavailable.
+ * - Resolves the approved base directory via `realpathSync`, opens the flat child file ONCE
+ *   with `O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK`.
+ * - Verifies via `fstatSync(fd)` that the opened descriptor is a regular file and confirms
+ *   `(dev, ino)` consistency against the confined directory entry and canonical realpath.
+ * - Closes `fd` on every failure path so callers never leak descriptors.
+ */
+export function openConfinedProtectedAssetFd(filename, customCandidateDirs = null) {
+  if (!filename || typeof filename !== "string") {
+    return { ok: false, reason: "invalid_filename" };
+  }
+  const cleanName = filename.trim();
+  if (
+    !cleanName ||
+    cleanName !== path.basename(cleanName) ||
+    cleanName.includes("..") ||
+    cleanName.includes("/") ||
+    cleanName.includes("\\") ||
+    /[\x00-\x1f\x7f]/.test(cleanName)
+  ) {
+    return { ok: false, reason: "traversal_or_invalid_filename" };
+  }
+
+  const O_NOFOLLOW = fs.constants.O_NOFOLLOW;
+  if (typeof O_NOFOLLOW !== "number" || O_NOFOLLOW === 0) {
+    return { ok: false, reason: "nofollow_unsupported" };
+  }
+
+  const openFlags =
+    fs.constants.O_RDONLY |
+    O_NOFOLLOW |
+    (typeof fs.constants.O_CLOEXEC === "number" ? fs.constants.O_CLOEXEC : 0) |
+    (typeof fs.constants.O_NONBLOCK === "number" ? fs.constants.O_NONBLOCK : 0);
+
+  const moduleDir = getCurrentModuleDir();
+  const activeTestDirs = process.env.NODE_ENV === "test" ? testProtectedAssetDirsOverride : null;
+  const activeTestHooks = process.env.NODE_ENV === "test" ? testProtectedAssetHooks : null;
+  const candidateDirs =
+    Array.isArray(customCandidateDirs) && customCandidateDirs.length > 0
+      ? customCandidateDirs
+      : Array.isArray(activeTestDirs) && activeTestDirs.length > 0
+      ? activeTestDirs
+      : [
+          path.resolve(process.cwd(), "server", "protected_downloads"),
+          path.resolve(moduleDir, "protected_downloads"),
+          path.resolve(moduleDir, "..", "server", "protected_downloads")
+        ];
+
+  for (const rawDir of candidateDirs) {
+    const resolvedBaseDir = path.resolve(rawDir);
+    let realBaseDir;
+    let realBaseDirStat;
+    try {
+      realBaseDir = fs.realpathSync(resolvedBaseDir);
+      realBaseDirStat = fs.lstatSync(realBaseDir);
+      if (!realBaseDirStat.isDirectory() || realBaseDirStat.isSymbolicLink()) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+
+    const candidatePath = path.resolve(realBaseDir, cleanName);
+    // 1. Strict lexical confinement with trailing path.sep boundary and zero nested segments
+    if (!candidatePath.startsWith(realBaseDir + path.sep) || path.dirname(candidatePath) !== realBaseDir) {
+      return { ok: false, reason: "lexical_traversal_rejected" };
+    }
+
+    // 2. Single atomic open with O_NOFOLLOW (kernel rejects final-component symlink with ELOOP)
+    let fd = null;
+    try {
+      fd = fs.openSync(candidatePath, openFlags);
+    } catch (openErr) {
+      if (openErr?.code === "ENOENT") {
+        continue;
+      }
+      if (openErr?.code === "ELOOP") {
+        return { ok: false, reason: "symlink_rejected" };
+      }
+      if (openErr?.code === "EISDIR") {
+        return { ok: false, reason: "not_a_regular_file" };
+      }
+      return { ok: false, reason: "open_failed" };
+    }
+
+    // Deterministic test-only race injection hook immediately after openSync
+    if (activeTestHooks && typeof activeTestHooks.onAfterOpen === "function") {
+      try {
+        activeTestHooks.onAfterOpen({ candidatePath, realBaseDir, filename: cleanName, fd });
+      } catch {
+        closeFdSafe(fd);
+        return { ok: false, reason: "hook_failed" };
+      }
+    }
+
+    // 3. Validate the ALREADY-OPENED descriptor via fstatSync + directory/entry identity consistency
+    try {
+      const fdStat = fs.fstatSync(fd);
+      if (!fdStat.isFile()) {
+        closeFdSafe(fd);
+        return { ok: false, reason: "not_a_regular_file" };
+      }
+
+      const postDirStat = fs.lstatSync(realBaseDir);
+      if (
+        !postDirStat.isDirectory() ||
+        postDirStat.isSymbolicLink() ||
+        postDirStat.dev !== realBaseDirStat.dev ||
+        postDirStat.ino !== realBaseDirStat.ino
+      ) {
+        closeFdSafe(fd);
+        return { ok: false, reason: "directory_changed" };
+      }
+
+      const postEntryLstat = fs.lstatSync(candidatePath);
+      if (postEntryLstat.isSymbolicLink()) {
+        closeFdSafe(fd);
+        return { ok: false, reason: "symlink_rejected" };
+      }
+      if (
+        !postEntryLstat.isFile() ||
+        postEntryLstat.dev !== fdStat.dev ||
+        postEntryLstat.ino !== fdStat.ino
+      ) {
+        closeFdSafe(fd);
+        return { ok: false, reason: "file_identity_mismatch" };
+      }
+
+      const realFilePath = fs.realpathSync(candidatePath);
+      if (!realFilePath.startsWith(realBaseDir + path.sep) || path.dirname(realFilePath) !== realBaseDir) {
+        closeFdSafe(fd);
+        return { ok: false, reason: "realpath_escape_rejected" };
+      }
+
+      return {
+        ok: true,
+        fd,
+        size: fdStat.size,
+        filePath: realFilePath,
+        baseDir: realBaseDir
+      };
+    } catch {
+      closeFdSafe(fd);
+      return { ok: false, reason: "stat_failed" };
+    }
+  }
+
+  return { ok: false, reason: "file_not_found" };
+}
+
+/**
+ * Confirms an allowlisted flat filename exists as a confined regular file inside `protected_downloads`
+ * using the same O_NOFOLLOW + fstat verification, closing the descriptor immediately.
+ * Download streaming MUST use `openConfinedProtectedAssetFd()` directly (never reopen by path).
+ */
+export function resolveConfinedProtectedAssetPath(filename, customCandidateDirs = null) {
+  const opened = openConfinedProtectedAssetFd(filename, customCandidateDirs);
+  if (!opened.ok) {
+    return { ok: false, reason: opened.reason };
+  }
+  closeFdSafe(opened.fd);
+  return { ok: true, filePath: opened.filePath, baseDir: opened.baseDir };
+}
+
+const PROTECTED_URL_PATTERNS = [
+  /^supabase:\/\//i,
+  /\/storage\/v1\/(?:object|render|s3)\//i,
+  /(^|\/)protected_downloads(\/|$)/i,
+  /(^|\/)paid-resources(\/|$)/i,
+  /(^|\/)paid(\/|$)/i,
+  /(^|\/)private(\/|$)/i,
+  /\/api\/payments\/download-paid-asset/i,
+  /(meta-ads-campaign-planner-workbook|the-ad-budget-break-even-calculator|the-ad-budget-breat-even-calculate|10-high-converting-meta-ads-copy-frameworks|pre-launch-tracking-audit-checklist|meta-ads-campaign-planner-bundle)/i
+];
+
+/**
+ * Server-side mirror of SQL `public.is_protected_resource_url(TEXT)` with bounded
+ * 3-round ASCII percent-decoding. Fails closed (returns true) on control characters,
+ * backslashes, traversal (`..`), protected Storage/local paths, download endpoints,
+ * known paid product identifiers, or persistent >3-layer ASCII percent-encoding (C6-1).
+ */
+export function isProtectedResourceUrl(rawUrl) {
+  if (rawUrl === null || rawUrl === undefined || typeof rawUrl !== "string") {
+    return false;
+  }
+  let cand = rawUrl.trim();
+  if (!cand) {
+    return false;
+  }
+
+  for (let round = 0; round < 3; round += 1) {
+    if (
+      /[\x00-\x1f\x7f\\]/.test(cand) ||
+      /%(?:[01][0-9a-f]|7f|5c)/i.test(cand) ||
+      /(^|\/)\.\.(\/|$)/.test(cand) ||
+      PROTECTED_URL_PATTERNS.some((re) => re.test(cand))
+    ) {
+      return true;
+    }
+
+    if (!/%[0-7][0-9a-f]/i.test(cand)) {
+      break;
+    }
+
+    let decoded = "";
+    for (let pos = 0; pos < cand.length; ) {
+      const ch = cand[pos];
+      if (ch === "%" && pos + 2 < cand.length) {
+        const hex = cand.slice(pos + 1, pos + 3);
+        if (/^[0-9a-fA-F]{2}$/.test(hex)) {
+          const byteVal = parseInt(hex, 16);
+          if (byteVal < 32 || byteVal === 127) {
+            return true;
+          }
+          if (byteVal <= 126) {
+            decoded += String.fromCharCode(byteVal);
+            pos += 3;
+            continue;
+          }
+          decoded += `%${hex}`;
+          pos += 3;
+          continue;
+        }
+      }
+      decoded += ch;
+      pos += 1;
+    }
+
+    if (decoded === cand) {
+      break;
+    }
+    cand = decoded;
+  }
+
+  if (
+    /[\x00-\x1f\x7f\\]/.test(cand) ||
+    /%[0-7][0-9a-f]/i.test(cand) ||
+    /(^|\/)\.\.(\/|$)/.test(cand) ||
+    PROTECTED_URL_PATTERNS.some((re) => re.test(cand))
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function isDisallowedIpv4Literal(ipv4) {
+  const octets = ipv4.split(".");
+  if (octets.length !== 4) return true;
+  const nums = octets.map((part) => (/^\d{1,3}$/.test(part) ? Number(part) : NaN));
+  if (nums.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+  const [a, b, c] = nums;
+
+  // 0.0.0.0/8 (unspecified / "this network")
+  if (a === 0) return true;
+  // 10.0.0.0/8 (RFC 1918 private)
+  if (a === 10) return true;
+  // 100.64.0.0/10 (RFC 6598 Shared Address Space / CGNAT)
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  // 127.0.0.0/8 (loopback)
+  if (a === 127) return true;
+  // 169.254.0.0/16 (link-local / cloud metadata)
+  if (a === 169 && b === 254) return true;
+  // 172.16.0.0/12 (RFC 1918 private)
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  // 192.0.0.0/24 (IETF protocol assignments), 192.0.2.0/24 (TEST-NET-1), 192.88.99.0/24 (6to4 relay)
+  if (a === 192 && b === 0 && (c === 0 || c === 2)) return true;
+  if (a === 192 && b === 88 && c === 99) return true;
+  // 192.168.0.0/16 (RFC 1918 private)
+  if (a === 192 && b === 168) return true;
+  // 198.18.0.0/15 (benchmarking), 198.51.100.0/24 (TEST-NET-2)
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  if (a === 198 && b === 51 && c === 100) return true;
+  // 203.0.113.0/24 (TEST-NET-3)
+  if (a === 203 && b === 0 && c === 113) return true;
+  // 224.0.0.0/4 (multicast) & 240.0.0.0/4 (reserved / broadcast 255.255.255.255)
+  if (a >= 224) return true;
+
+  return false;
+}
+
+function parseIpv6Hextets(ipv6) {
+  if (!ipv6 || typeof ipv6 !== "string" || ipv6.includes("%")) {
+    return null;
+  }
+
+  let normalized = ipv6.toLowerCase();
+  // Convert embedded IPv4 tail (e.g. ::ffff:127.0.0.1) to two hex hextets
+  const lastColon = normalized.lastIndexOf(":");
+  const tail = lastColon >= 0 ? normalized.slice(lastColon + 1) : "";
+  if (tail.includes(".")) {
+    if (net.isIP(tail) !== 4) return null;
+    const octets = tail.split(".").map(Number);
+    const hi = ((octets[0] << 8) | octets[1]).toString(16);
+    const lo = ((octets[2] << 8) | octets[3]).toString(16);
+    normalized = `${normalized.slice(0, lastColon + 1)}${hi}:${lo}`;
+  }
+
+  const doubleColonParts = normalized.split("::");
+  if (doubleColonParts.length > 2) return null;
+
+  const left = doubleColonParts[0] ? doubleColonParts[0].split(":") : [];
+  const right = doubleColonParts.length === 2 && doubleColonParts[1] ? doubleColonParts[1].split(":") : [];
+
+  let groups;
+  if (doubleColonParts.length === 2) {
+    const missing = 8 - (left.length + right.length);
+    if (missing < 1) return null;
+    groups = [...left, ...Array(missing).fill("0"), ...right];
+  } else {
+    if (left.length !== 8) return null;
+    groups = left;
+  }
+
+  const hextets = [];
+  for (const g of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(g)) return null;
+    hextets.push(parseInt(g, 16));
+  }
+  return hextets;
+}
+
+function isDisallowedIpv6Literal(ipv6) {
+  const h = parseIpv6Hextets(ipv6);
+  if (!h || h.length !== 8) {
+    return true; // Fail closed on unparseable IPv6 literal
+  }
+
+  const [h0, h1, h2, h3, h4, h5] = h;
+
+  // Reject all IPv4-mapped IPv6 (::ffff:0:0/96), IPv4-translated (::ffff:0:0:0/96),
+  // deprecated IPv4-compatible (::/96), unspecified (::/128), and loopback (::1/128)
+  if (h0 === 0 && h1 === 0 && h2 === 0 && h3 === 0 && (h4 === 0 || h4 === 0xffff)) {
+    return true;
+  }
+  // NAT64 well-known & local-use prefixes (64:ff9b::/96, 64:ff9b:1::/48)
+  if (h0 === 0x0064 && h1 === 0xff9b) {
+    return true;
+  }
+  // Unique-Local Addresses fc00::/7, Link-Local fe80::/10, Site-Local fec0::/10, Multicast ff00::/8
+  if ((h0 & 0xfe00) === 0xfc00) return true;
+  if ((h0 & 0xffc0) === 0xfe80) return true;
+  if ((h0 & 0xffc0) === 0xfec0) return true;
+  if ((h0 & 0xff00) === 0xff00) return true;
+  // Restrict strictly to Global Unicast 2000::/3 (rejects ::, ::1, 100::/64, and all reserved prefixes)
+  if ((h0 & 0xe000) !== 0x2000) return true;
+  // IETF Special-Purpose 2001::/23 (Teredo, Benchmarking, etc.), Documentation 2001:db8::/32, 6to4 2002::/16
+  if (h0 === 0x2001 && (h1 & 0xfe00) === 0x0000) return true;
+  if (h0 === 0x2001 && h1 === 0x0db8) return true;
+  if (h0 === 0x2002) return true;
+
+  return false;
+}
+
+/**
+ * Classifies hostnames and IP literals without DNS lookups (C-2).
+ * Rejects non-public IPv4/IPv6 ranges (including IPv4-mapped IPv6, 0.0.0.0/8, 100.64.0.0/10,
+ * ::, ::1, fc00::/7, fe80::/10, link-local metadata, private, multicast, reserved) and
+ * local/internal DNS suffixes while preserving legitimate public hostnames (including fc* / fd*).
+ */
+export function isDisallowedFreeExternalHost(hostname) {
+  if (!hostname || typeof hostname !== "string") return true;
+  const rawHost = hostname.trim().toLowerCase();
+  if (!rawHost || /[\s\x00-\x1f\x7f%]/.test(rawHost)) return true;
+
+  const isBracketed = rawHost.startsWith("[") && rawHost.endsWith("]");
+  const unbracketed = isBracketed ? rawHost.slice(1, -1) : rawHost;
+  if (!unbracketed || unbracketed.includes("[") || unbracketed.includes("]")) {
+    return true;
+  }
+
+  // Strip trailing DNS root dot(s) for classification
+  const host = unbracketed.replace(/\.+$/, "");
+  if (!host) return true;
+
+  const ipType = net.isIP(host);
+  if (isBracketed && ipType !== 6) {
+    return true;
+  }
+  if (ipType === 4) {
+    return isDisallowedIpv4Literal(host);
+  }
+  if (ipType === 6) {
+    return isDisallowedIpv6Literal(host);
+  }
+
+  // Reject numeric-only or non-FQDN single-label internal hosts (e.g., localhost, metadata, 2130706433)
+  if (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host.endsWith(".localdomain") ||
+    host.endsWith(".home.arpa") ||
+    !host.includes(".") ||
+    /^(?:\d+|0x[0-9a-f]+)$/i.test(host)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Validates that a free resource URL is genuinely public and safe to return to callers.
+ * Permits ONLY:
+ *  - Public static site downloads under `/downloads/<filename>` (strictly confined, no traversal/protected paths)
+ *  - Public `https://` or `http://` external URLs with no credentials, no private/loopback/reserved IP hosts,
+ *    and no protected Storage/asset patterns.
+ */
+export function validatePublicFreeResourceUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== "string") {
+    return { valid: false, url: null, reason: "missing_url" };
+  }
+  const trimmed = rawUrl.trim();
+  if (!trimmed) {
+    return { valid: false, url: null, reason: "empty_url" };
+  }
+
+  if (isProtectedResourceUrl(trimmed) || parseProtectedStorageUrl(trimmed).isStorage) {
+    return { valid: false, url: null, reason: "protected_url" };
+  }
+
+  if (trimmed.startsWith("//")) {
+    return { valid: false, url: null, reason: "protocol_relative_disallowed" };
+  }
+
+  if (trimmed.startsWith("/")) {
+    const pathOnly = trimmed.split(/[?#]/)[0];
+    let decodedPath;
+    try {
+      decodedPath = decodeURIComponent(pathOnly);
+    } catch {
+      return { valid: false, url: null, reason: "malformed_encoding" };
+    }
+    if (isProtectedResourceUrl(decodedPath) || decodedPath.includes("\\") || /[\x00-\x1f\x7f]/.test(decodedPath)) {
+      return { valid: false, url: null, reason: "protected_or_invalid_path" };
+    }
+    const normalized = path.posix.normalize(decodedPath);
+    if (!normalized.startsWith("/downloads/") || normalized.length <= "/downloads/".length || normalized.endsWith("/")) {
+      return { valid: false, url: null, reason: "non_public_relative_path" };
+    }
+    return { valid: true, url: trimmed, kind: "public_path" };
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return { valid: false, url: null, reason: "invalid_url" };
+  }
+
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return { valid: false, url: null, reason: "disallowed_scheme" };
+  }
+  if (parsed.username || parsed.password || /^https?:\/\/[^/?#]*@/i.test(trimmed)) {
+    return { valid: false, url: null, reason: "embedded_credentials_disallowed" };
+  }
+  if (isDisallowedFreeExternalHost(parsed.hostname)) {
+    return { valid: false, url: null, reason: "disallowed_host" };
+  }
+  if (isProtectedResourceUrl(`${parsed.pathname}${parsed.search}${parsed.hash}`)) {
+    return { valid: false, url: null, reason: "protected_url" };
+  }
+
+  return { valid: true, url: trimmed, kind: "public_external" };
+}
+
+/**
+ * Parses a protected Supabase Storage URL (`supabase://<bucket>/<path>` or
+ * `/storage/v1/object/{public|sign|authenticated}/<bucket>/<path>`) into an
+ * authoritative `{ isStorage, bucket, objectPath }` target.
+ * Rejects path traversal (`..`), NUL/control characters, backslashes, or empty paths
+ * by returning `{ isStorage: true, bucket: null, objectPath: null }` so callers fail closed.
+ */
+export function parseProtectedStorageUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== "string") {
+    return { isStorage: false, bucket: null, objectPath: null };
+  }
+
+  const trimmed = rawUrl.trim();
+  if (!trimmed) {
+    return { isStorage: false, bucket: null, objectPath: null };
+  }
+
+  const looksLikeStorage =
+    /\/storage\/v1\/(?:object|render|s3)\//i.test(trimmed) ||
+    /^supabase:\/\//i.test(trimmed);
+
+  if (!looksLikeStorage) {
+    return { isStorage: false, bucket: null, objectPath: null };
+  }
+
+  let bucket = null;
+  let objectPath = null;
+
+  if (/^supabase:\/\/paid-resources\//i.test(trimmed)) {
+    bucket = "paid-resources";
+    try {
+      objectPath = decodeURIComponent(trimmed.slice("supabase://paid-resources/".length)).trim();
+    } catch {
+      return { isStorage: true, bucket: null, objectPath: null };
+    }
+  } else if (/^supabase:\/\/resources\//i.test(trimmed)) {
+    bucket = "resources";
+    try {
+      objectPath = decodeURIComponent(trimmed.slice("supabase://resources/".length)).trim();
+    } catch {
+      return { isStorage: true, bucket: null, objectPath: null };
+    }
+  } else if (/^supabase:\/\//i.test(trimmed)) {
+    // Unknown or malformed supabase:// scheme -> fail closed
+    return { isStorage: true, bucket: null, objectPath: null };
+  } else {
+    const match = trimmed.match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/i);
+    if (match && match[1] && match[2]) {
+      try {
+        bucket = decodeURIComponent(match[1]).trim();
+        objectPath = decodeURIComponent(match[2].split("?")[0]).trim();
+      } catch {
+        return { isStorage: true, bucket: null, objectPath: null };
+      }
+    } else {
+      const legacyMatch = trimmed.match(/\/resources\/(.+)$/);
+      if (legacyMatch && legacyMatch[1]) {
+        try {
+          bucket = "resources";
+          objectPath = decodeURIComponent(legacyMatch[1].split("?")[0]).trim();
+        } catch {
+          return { isStorage: true, bucket: null, objectPath: null };
+        }
+      }
+    }
+  }
+
+  if (bucket !== "paid-resources" && bucket !== "resources") {
+    return { isStorage: true, bucket: null, objectPath: null };
+  }
+
+  if (
+    !objectPath ||
+    objectPath.startsWith("/") ||
+    objectPath.includes("\\") ||
+    /[\x00-\x1f\x7f]/.test(objectPath) ||
+    /%2e|%2f|%5c|%(?:[01][0-9a-f]|7f)/i.test(objectPath) ||
+    objectPath.split("/").some((seg) => seg === ".." || seg === "." || seg === "")
+  ) {
+    return { isStorage: true, bucket: null, objectPath: null };
+  }
+
+  return { isStorage: true, bucket, objectPath };
+}
+
 /**
  * Enforces fail-closed record ownership across DB and gateway fallback paths.
- * A non-null owner user_id NEVER authorizes an unauthenticated (null) caller.
+ * A non-null owner user_id NEVER authorizes an unauthenticated (null) caller
+ * and requires confirmed `email_confirmed_at` for both buyer and admin accounts (E-4 / E-8).
  */
 export function evaluateRecordOwnership(ownerUserId, authenticatedUser) {
   const cleanOwnerId = ownerUserId != null ? String(ownerUserId).trim() : "";
@@ -2346,7 +3180,18 @@ export function evaluateRecordOwnership(ownerUserId, authenticatedUser) {
         reason: "Authentication required for user-owned purchase."
       };
     }
-    if (String(authenticatedUser.id || "").trim() === cleanOwnerId || checkIsAdmin(authenticatedUser)) {
+    if (checkIsAdmin(authenticatedUser)) {
+      return { allowed: true, denied: false, isGuest: false };
+    }
+    if (String(authenticatedUser.id || "").trim() === cleanOwnerId) {
+      if (!isEmailConfirmed(authenticatedUser)) {
+        return {
+          allowed: false,
+          denied: true,
+          isGuest: false,
+          reason: "Email confirmation is required to access user-owned paid purchases."
+        };
+      }
       return { allowed: true, denied: false, isGuest: false };
     }
     return {
@@ -2443,12 +3288,32 @@ async function resolveResourceAccessAuthoritative(
   if (recordStatus === "published") {
     const pricing = getAuthoritativeResourcePricing(targetId, resourceRecord);
     if (pricing.accessType === "free") {
+      // Defense-in-depth verification (C6-1): resource is genuinely free ONLY when DB fields
+      // establish both access_type === "free" and strict price === 0 and it is NOT a paid catalog item.
+      const dbAccessType = String(resourceRecord?.access_type ?? resourceRecord?.accessType ?? "").trim().toLowerCase();
+      const targetSlug = resourceRecord?.slug ? String(resourceRecord.slug).trim() : "";
+      const isAuthoritativePaid =
+        Boolean(AUTHORITATIVE_PAID_RESOURCES[targetId] || (targetSlug && AUTHORITATIVE_PAID_RESOURCES[targetSlug])) ||
+        isBundleOrBundleItem(targetId).isBundle ||
+        isBundleOrBundleItem(targetId).isChild ||
+        (targetSlug ? (isBundleOrBundleItem(targetSlug).isBundle || isBundleOrBundleItem(targetSlug).isChild) : false);
+
+      if (dbAccessType === "free" && isZeroPriceStrict(resourceRecord?.price) && !isAuthoritativePaid) {
+        return {
+          isFree: true,
+          pricing,
+          expectedPaiseById,
+          archivedExpectedPaiseById,
+          allAllowedIds: getAllowedResourceIdsForAuthorization(resourceRecord)
+        };
+      }
+
       return {
-        isFree: true,
-        pricing,
+        isFree: false,
+        pricing: { accessType: "unverified", price: 0, currency: "INR" },
         expectedPaiseById,
         archivedExpectedPaiseById,
-        allAllowedIds: getAllowedResourceIdsForAuthorization(resourceRecord)
+        allAllowedIds: []
       };
     }
     const targetPaise = toPaiseStrict(pricing.price);
@@ -2842,8 +3707,8 @@ router.get("/verify-purchase-status", async (req, res) => {
       });
     }
 
-    // 3. Authenticated user ownership lookup (only when no ownership denial occurred)
-    if (authenticatedUser) {
+    // 3. Authenticated user ownership lookup (only when no ownership denial occurred & email confirmed)
+    if (isEmailConfirmed(authenticatedUser)) {
       if (checkIsAdmin(authenticatedUser)) {
         return res.json({
           success: true,
@@ -2964,25 +3829,71 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
       allowArchivedExistingOwner: Boolean(authenticatedUser)
     });
 
-    // ONLY legitimately published free resources are served without paid entitlement
+    // ONLY legitimately published free resources (access_type === 'free' AND price === 0)
+    // are served without paid entitlement, and ONLY after validating a genuinely public URL (C6-1).
     if (accessSpec.isFree) {
-      let freeDownloadUrl = resourceRecord.file_url || resourceRecord.external_url || null;
-      const matchedBundleItem = BUNDLE_ITEMS.find((i) => i.id === resourceRecord.id || i.slug === resourceRecord.slug);
-      if (matchedBundleItem && supabaseServer.storage?.from) {
-        const { data: sData } = await supabaseServer.storage
-          .from("resources")
-          .createSignedUrl(matchedBundleItem.storagePath, 3600);
-        if (sData?.signedUrl) {
-          freeDownloadUrl = sData.signedUrl;
+      const rawFileUrl = resourceRecord.file_url != null ? String(resourceRecord.file_url).trim() : "";
+      const rawExternalUrl = resourceRecord.external_url != null ? String(resourceRecord.external_url).trim() : "";
+
+      // Fail closed if either field references a protected Storage object, protected local path,
+      // traversal attempt, or known paid asset identifier — never expose raw protected URLs.
+      if (
+        (rawFileUrl && isProtectedResourceUrl(rawFileUrl)) ||
+        (rawExternalUrl && isProtectedResourceUrl(rawExternalUrl))
+      ) {
+        return res.status(503).json({
+          success: false,
+          code: "FREE_RESOURCE_URL_PROTECTED",
+          error: "This resource points to a protected asset location and cannot be served as a public free download."
+        });
+      }
+
+      let publicDownloadUrl = null;
+      if (rawFileUrl) {
+        const checkedFile = validatePublicFreeResourceUrl(rawFileUrl);
+        if (!checkedFile.valid) {
+          return res.status(503).json({
+            success: false,
+            code: "FREE_RESOURCE_URL_INVALID",
+            error: "This free resource does not have a valid public download URL."
+          });
         }
+        publicDownloadUrl = checkedFile.url;
+      } else if (rawExternalUrl) {
+        const checkedExt = validatePublicFreeResourceUrl(rawExternalUrl);
+        if (!checkedExt.valid) {
+          return res.status(503).json({
+            success: false,
+            code: "FREE_RESOURCE_URL_INVALID",
+            error: "This free resource does not have a valid public download URL."
+          });
+        }
+        publicDownloadUrl = checkedExt.url;
+      } else {
+        // Never fall back to /downloads/META.pdf or any default file when URL is missing.
+        return res.status(503).json({
+          success: false,
+          code: "FREE_RESOURCE_URL_MISSING",
+          error: "This free resource does not have a configured public download URL."
+        });
       }
 
       return res.json({
         success: true,
-        downloadUrl: freeDownloadUrl || "/downloads/META.pdf",
+        downloadUrl: publicDownloadUrl,
         externalUrl: null,
-        fileUrl: freeDownloadUrl || "/downloads/META.pdf",
+        fileUrl: publicDownloadUrl,
         accessType: "free"
+      });
+    }
+
+    // Fail closed immediately on inconsistent/unverified pricing configurations
+    // (e.g., published access_type='free' with price > 0, or paid with invalid price) (C6-1).
+    if (accessSpec.pricing?.accessType === "unverified" && accessSpec.allAllowedIds.length === 0) {
+      return res.status(403).json({
+        success: false,
+        code: "RESOURCE_ACCESS_UNVERIFIED",
+        error: "Resource access configuration could not be verified."
       });
     }
 
@@ -3168,10 +4079,8 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
     }
 
     // 3. Check authenticated user ownership (unless explicit ownership mismatch occurred)
-    // Require confirmed email on authenticated user session before granting paid asset access (P0-3 / SERVER-1).
-    const isConfirmedAuthenticatedUser = Boolean(
-      authenticatedUser && (authenticatedUser.email_confirmed_at || authenticatedUser.confirmed_at)
-    );
+    // Strictly require `email_confirmed_at` on authenticated user session before granting paid asset access (P0-3 / E-4 / E-8).
+    const isConfirmedAuthenticatedUser = isEmailConfirmed(authenticatedUser);
     if (!isAuthorized && !ownershipDenied && isConfirmedAuthenticatedUser) {
       if (checkIsAdmin(authenticatedUser)) {
         isAuthorized = true;
@@ -3232,94 +4141,75 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
       });
     }
 
-    // Generate signed URL from private Supabase Storage (fail closed on signing errors)
+    // Generate signed URL from private Supabase Storage (fail closed HTTP 503 on any signing error or missing signed URL;
+    // NEVER return a raw external_url or unmapped local path for a paid resource — E-3 / C6-2)
     let finalDownloadUrl = null;
+    const rawPaidFileUrl = resourceRecord.file_url ? String(resourceRecord.file_url).trim() : null;
+    const parsedStorage = parseProtectedStorageUrl(rawPaidFileUrl);
 
     // Check if item is in BUNDLE_ITEMS
     const bundleItem = BUNDLE_ITEMS.find(
       (i) => i.id === resourceRecord.id || i.slug === resourceRecord.slug ||
         (i.slug === "the-ad-budget-breat-even-calculate" && resourceRecord.slug === "the-ad-budget-break-even-calculator")
     );
-    if (bundleItem) {
-      if (supabaseServer.storage?.from) {
-        const storageBucket = String(resourceRecord.file_url || "").startsWith("supabase://paid-resources/")
-          ? "paid-resources"
-          : "resources";
-        const { data: signedData, error: signErr } = await supabaseServer.storage
-          .from(storageBucket)
-          .createSignedUrl(bundleItem.storagePath, 3600);
-        if (signErr) {
-          return res.status(503).json({
-            success: false,
-            error: "Failed to generate signed download URL for paid asset."
-          });
-        }
-        if (signedData?.signedUrl) {
-          finalDownloadUrl = signedData.signedUrl;
-        }
+
+    // Explicit exact resource-ID-to-filename allowlist for legacy protected disk compatibility (C6-2)
+    const allowlistedLocalFilename = resolveAllowlistedProtectedFilename(resourceRecord.id);
+
+    if (parsedStorage.isStorage) {
+      if (!parsedStorage.bucket || !parsedStorage.objectPath || !supabaseServer.storage?.from) {
+        return res.status(503).json({
+          success: false,
+          error: "Failed to generate signed download URL for paid asset."
+        });
       }
-    } else {
-      const rawUrl = resourceRecord.file_url || resourceRecord.external_url || null;
-      const isStorageUrl = Boolean(
-        rawUrl &&
-        (
-          rawUrl.includes("/storage/v1/object/") ||
-          rawUrl.startsWith("supabase://paid-resources/") ||
-          rawUrl.startsWith("supabase://resources/")
-        )
+      const { data: signedData, error: signErr } = await supabaseServer.storage
+        .from(parsedStorage.bucket)
+        .createSignedUrl(parsedStorage.objectPath, 3600);
+      if (signErr || !signedData?.signedUrl) {
+        return res.status(503).json({
+          success: false,
+          error: "Failed to generate signed download URL for paid asset."
+        });
+      }
+      finalDownloadUrl = signedData.signedUrl;
+    } else if (bundleItem && !rawPaidFileUrl) {
+      // Canonical bundle item with no explicit file_url override: sign from private `paid-resources` bucket
+      if (!supabaseServer.storage?.from) {
+        return res.status(503).json({
+          success: false,
+          error: "Failed to generate signed download URL for paid asset."
+        });
+      }
+      const { data: signedData, error: signErr } = await supabaseServer.storage
+        .from("paid-resources")
+        .createSignedUrl(bundleItem.storagePath, 3600);
+      if (signErr || !signedData?.signedUrl) {
+        return res.status(503).json({
+          success: false,
+          error: "Failed to generate signed download URL for paid asset."
+        });
+      }
+      finalDownloadUrl = signedData.signedUrl;
+    } else if (
+      allowlistedLocalFilename &&
+      rawPaidFileUrl === `/protected_downloads/${allowlistedLocalFilename}`
+    ) {
+      // Restricted legacy local-disk compatibility path ONLY for exact allowlisted resource IDs
+      // whose DB record explicitly matches `/protected_downloads/<allowlistedFilename>` and passes
+      // strict lexical + symlink confinement validation. Arbitrary `/downloads/*` or unmapped
+      // `/protected_downloads/*` records fail closed HTTP 503 (C6-2).
+      const confined = resolveConfinedProtectedAssetPath(allowlistedLocalFilename);
+      if (!confined.ok) {
+        return res.status(503).json({
+          success: false,
+          error: "Paid asset storage location is not configured for signed delivery."
+        });
+      }
+      const token = generateAssetAccessToken(
+        resourceRecord.id,
+        cleanPaymentId || authenticatedUser?.id || "authorized"
       );
-
-      if (isStorageUrl) {
-        let storageBucket = "resources";
-        let objectPath = "";
-
-        if (rawUrl.startsWith("supabase://paid-resources/")) {
-          storageBucket = "paid-resources";
-          objectPath = rawUrl.replace("supabase://paid-resources/", "");
-        } else if (rawUrl.startsWith("supabase://resources/")) {
-          storageBucket = "resources";
-          objectPath = rawUrl.replace("supabase://resources/", "");
-        } else {
-          const match = rawUrl.match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/);
-          if (match && match[1] && match[2]) {
-            storageBucket = decodeURIComponent(match[1]);
-            objectPath = decodeURIComponent(match[2].split("?")[0]);
-          } else {
-            const legacyMatch = rawUrl.match(/\/resources\/(.+)$/);
-            if (legacyMatch && legacyMatch[1]) {
-              storageBucket = "resources";
-              objectPath = decodeURIComponent(legacyMatch[1].split("?")[0]);
-            }
-          }
-        }
-
-        if (!objectPath || !supabaseServer.storage?.from) {
-          return res.status(503).json({
-            success: false,
-            error: "Failed to generate signed download URL for paid asset."
-          });
-        }
-
-        const { data: signedData, error: signErr } = await supabaseServer.storage
-          .from(storageBucket)
-          .createSignedUrl(objectPath, 3600);
-
-        if (signErr || !signedData?.signedUrl) {
-          return res.status(503).json({
-            success: false,
-            error: "Failed to generate signed download URL for paid asset."
-          });
-        }
-
-        finalDownloadUrl = signedData.signedUrl;
-      } else {
-        finalDownloadUrl = rawUrl;
-      }
-    }
-
-    // Fallback: For local protected disk assets only (non-Storage), mint an HMAC server download link
-    if (!finalDownloadUrl || finalDownloadUrl.startsWith("/downloads/") || finalDownloadUrl.startsWith("/protected_downloads/")) {
-      const token = generateAssetAccessToken(resourceRecord.id, cleanPaymentId || authenticatedUser?.id || "authorized");
       if (!token) {
         return res.status(503).json({
           success: false,
@@ -3327,6 +4217,14 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
         });
       }
       finalDownloadUrl = `/api/payments/download-paid-asset?token=${token}`;
+    } else {
+      // Missing storage location, arbitrary /downloads/ or /protected_downloads/ path,
+      // unmapped standalone local path, traversal attempt, or raw non-Storage external URL:
+      // fail closed HTTP 503.
+      return res.status(503).json({
+        success: false,
+        error: "Paid asset storage location is not configured for signed delivery."
+      });
     }
 
     return res.json({
@@ -3602,8 +4500,8 @@ async function handleBundleFilesRequest(req, res) {
       }
     }
 
-    // 3. Check authenticated user ownership (unless explicit ownership mismatch occurred on supplied credentials)
-    if (!isAuthorized && !ownershipDenied && authenticatedUser) {
+    // 3. Check authenticated user ownership (unless explicit ownership mismatch occurred; strictly requires email_confirmed_at — E-4/E-8)
+    if (!isAuthorized && !ownershipDenied && isEmailConfirmed(authenticatedUser)) {
       if (checkIsAdmin(authenticatedUser)) {
         isAuthorized = true;
       } else {
@@ -3651,26 +4549,75 @@ async function handleBundleFilesRequest(req, res) {
       });
     }
 
-    // Generate signed URLs for all 4 bundle files ONLY after full authorization
+    // Generate signed URLs for all 4 bundle files ONLY after full authorization.
+    // Strictly fail closed (HTTP 503) on missing Storage client, signing error, or missing signedUrl — NEVER silently fall back (E-1).
+    if (!supabaseServer.storage?.from) {
+      return res.status(503).json({
+        success: false,
+        authorized: false,
+        error: "Storage signing service is unavailable for paid bundle assets."
+      });
+    }
+
+    // Query existing child resource records so pre-cutover (`resources`) and post-cutover (`paid-resources`)
+    // Storage URLs and custom object paths are respected while preserving bundle metadata compatibility.
+    const bundleItemIds = BUNDLE_ITEMS.map((i) => i.id);
+    const { data: childResourceRows, error: childFetchErr } = await supabaseServer
+      .from("resources")
+      .select("id, slug, file_url")
+      .in("id", bundleItemIds);
+
+    if (childFetchErr) {
+      return res.status(503).json({
+        success: false,
+        authorized: false,
+        error: "Failed to resolve paid bundle deliverable storage records."
+      });
+    }
+
+    const childById = new Map();
+    const childBySlug = new Map();
+    for (const row of childResourceRows || []) {
+      if (row?.id) childById.set(String(row.id).trim(), row);
+      if (row?.slug) childBySlug.set(String(row.slug).trim(), row);
+    }
+
+    // Default bucket follows bundleRecord.file_url if explicitly pointing to a valid Storage bucket,
+    // otherwise defaults to the private `paid-resources` bucket.
+    const parsedBundleStorage = parseProtectedStorageUrl(bundleRecord.file_url);
+    const defaultBundleBucket = parsedBundleStorage.bucket || "paid-resources";
+
     const signedFiles = [];
     for (const item of BUNDLE_ITEMS) {
-      let fileUrl = null;
-      if (supabaseServer.storage?.from) {
-        const { data: sData } = await supabaseServer.storage
-          .from("resources")
-          .createSignedUrl(item.storagePath, 3600);
-        fileUrl = sData?.signedUrl || null;
-      }
-      if (!fileUrl) {
-        const token = generateAssetAccessToken(item.id, cleanPaymentId || authenticatedUser?.id || "bundle-authorized");
-        if (!token) {
+      const childRow = childById.get(item.id) || childBySlug.get(item.slug) || null;
+      const rawChildFileUrl = childRow?.file_url ? String(childRow.file_url).trim() : null;
+
+      let targetBucket = defaultBundleBucket;
+      let targetPath = item.storagePath;
+
+      if (rawChildFileUrl) {
+        const parsedChild = parseProtectedStorageUrl(rawChildFileUrl);
+        if (!parsedChild.isStorage || !parsedChild.bucket || !parsedChild.objectPath) {
           return res.status(503).json({
             success: false,
             authorized: false,
-            error: "Asset delivery service is temporarily unconfigured."
+            error: "Paid bundle deliverable storage location is invalid or unconfigured for signed delivery."
           });
         }
-        fileUrl = `/api/payments/download-paid-asset?token=${token}`;
+        targetBucket = parsedChild.bucket;
+        targetPath = parsedChild.objectPath;
+      }
+
+      const { data: sData, error: signErr } = await supabaseServer.storage
+        .from(targetBucket)
+        .createSignedUrl(targetPath, 3600);
+
+      if (signErr || !sData?.signedUrl) {
+        return res.status(503).json({
+          success: false,
+          authorized: false,
+          error: "Failed to generate signed download URL for paid bundle asset."
+        });
       }
 
       signedFiles.push({
@@ -3681,7 +4628,7 @@ async function handleBundleFilesRequest(req, res) {
         format: item.format,
         fileSize: item.fileSize,
         filename: item.filename,
-        downloadUrl: fileUrl
+        downloadUrl: sData.signedUrl
       });
     }
 
@@ -3703,72 +4650,174 @@ router.post("/get-bundle-files", paymentRateLimiter, handleBundleFilesRequest);
 /**
  * GET /api/payments/download-paid-asset
  *
- * Secure server-side download streamer for verified paid assets.
- * Requires a cryptographically signed, unexpired HMAC token generated by the server.
- * Rejects missing, invalid, expired, or tampered tokens with 403 Forbidden.
+ * Race-safe server-side download streamer for verified paid local-compatibility assets.
+ * Security model (A-1 / A-2 / B-1):
+ * - Consumes a short-lived (1-hour) HMAC-signed resource-scoped bearer capability token
+ *   minted after authoritative verification in `POST /api/payments/get-resource-download-url`.
+ * - Rejects missing, duplicate, malformed, expired, unsupported-schema, or tampered tokens (403).
+ * - Rejects caller-supplied identity/metadata or cross-resource/cross-file query overrides (403).
+ * - Opens the exact allowlisted file ONCE with `O_RDONLY | O_NOFOLLOW`, validates `fstat`
+ *   regular-file status and confined identity, and streams directly from that validated `fd`.
  */
 router.get("/download-paid-asset", paymentRateLimiter, async (req, res) => {
   try {
-    const { token } = req.query;
-    const payload = verifyAssetAccessToken(token);
+    const rawToken = req.query.token;
+    const payload = typeof rawToken === "string" ? verifyAssetAccessToken(rawToken) : null;
     if (!payload || !payload.resourceId) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
       return res.status(403).json({
         success: false,
+        code: "INVALID_DOWNLOAD_TOKEN",
         error: "Forbidden: Invalid, expired, or tampered download token. Please generate a fresh access link."
       });
     }
 
-    const { resourceId } = payload;
-    const cleanId = String(resourceId).trim();
-    const matched = BUNDLE_ITEMS.find((b) => b.id === cleanId || b.slug === cleanId ||
-      (b.slug === "the-ad-budget-breat-even-calculate" && cleanId === "the-ad-budget-break-even-calculator")) ||
-      (cleanId === BUNDLE_RESOURCE_ID || cleanId === BUNDLE_SLUG ? { filename: "meta-ads-campaign-planner-bundle.zip" } : null);
+    const cleanId = String(payload.resourceId).trim();
 
-    const filename = matched?.filename || "meta-ads-campaign-planner-workbook.pdf";
-    const candidateDirs = [
-      path.join(process.cwd(), "server", "protected_downloads"),
-      path.join(process.cwd(), "protected_downloads"),
-      path.join(__dirname, "..", "server", "protected_downloads"),
-      path.join(__dirname, "server", "protected_downloads"),
-      path.join(__dirname, "protected_downloads"),
-      path.join(__dirname, "..", "protected_downloads")
-    ];
+    // Reject explicit query-parameter cross-resource override attempts against a valid token (A-1 / C6-2)
+    if (
+      req.query.resourceId !== undefined &&
+      (typeof req.query.resourceId !== "string" || req.query.resourceId.trim() !== cleanId)
+    ) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      return res.status(403).json({
+        success: false,
+        code: "TOKEN_RESOURCE_MISMATCH",
+        error: "Forbidden: Download token is not authorized for the requested resource."
+      });
+    }
 
-    let filePath = null;
-    for (const cDir of candidateDirs) {
-      const candidatePath = path.join(cDir, filename);
-      if (fs.existsSync(candidatePath)) {
-        filePath = candidatePath;
-        break;
+    // Reject caller-supplied identity/payment metadata overrides on the bearer capability endpoint (A-1)
+    for (const metaParam of ["paymentId", "orderId", "userId", "email", "authId"]) {
+      if (req.query[metaParam] !== undefined) {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+        return res.status(403).json({
+          success: false,
+          code: "TOKEN_METADATA_OVERRIDE_REJECTED",
+          error: "Forbidden: Caller-supplied identity or payment metadata is not accepted on download links."
+        });
       }
     }
 
-    if (!filePath || !fs.existsSync(filePath)) {
-      return res.status(404).json({ success: false, error: "Asset file temporarily unavailable." });
+    // Strict exact allowlist lookup — NEVER fall back to a default/unrelated product file (C6-2)
+    const filename = resolveAllowlistedProtectedFilename(cleanId);
+    if (!filename) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      return res.status(404).json({
+        success: false,
+        code: "UNMAPPED_PROTECTED_ASSET",
+        error: "Requested protected asset is not mapped for local download delivery."
+      });
     }
 
-    res.setHeader("Cache-Control", "private, no-cache, no-store, must-revalidate, max-age=0");
-    res.setHeader("Pragma", "no-cache");
-    res.setHeader("Expires", "0");
+    // Verify cryptographically bound filename on v2 tokens (A-1)
+    if (payload.filename !== undefined && payload.filename !== filename) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      return res.status(403).json({
+        success: false,
+        code: "TOKEN_FILE_MISMATCH",
+        error: "Forbidden: Download token file binding does not match authorized asset."
+      });
+    }
 
-    const ext = path.extname(filename).toLowerCase();
-    const mimeType = ext === ".pdf"
-      ? "application/pdf"
-      : ext === ".xlsx"
-      ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-      : ext === ".zip"
-      ? "application/zip"
-      : "application/octet-stream";
+    const requestedFileParam = req.query.file ?? req.query.filename;
+    if (
+      requestedFileParam !== undefined &&
+      (typeof requestedFileParam !== "string" || requestedFileParam.trim() !== filename)
+    ) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      return res.status(403).json({
+        success: false,
+        code: "TOKEN_FILE_MISMATCH",
+        error: "Forbidden: Download token is not authorized for the requested file."
+      });
+    }
 
-    res.setHeader("Content-Type", mimeType);
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    // Single-open O_NOFOLLOW + fstat-verified descriptor (B-1) — NEVER reopen by pathname
+    const openedAsset = openConfinedProtectedAssetFd(filename);
+    if (!openedAsset.ok || typeof openedAsset.fd !== "number") {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      return res.status(404).json({
+        success: false,
+        code: "PROTECTED_ASSET_UNAVAILABLE",
+        error: "Asset file temporarily unavailable."
+      });
+    }
 
-    const stream = fs.createReadStream(filePath);
-    return stream.pipe(res);
-  } catch (err) {
-    console.error("[Download Paid Asset] Stream error:", err);
-    return res.status(500).json({ success: false, error: "Failed to download asset." });
+    let fdTransferredToStream = false;
+    try {
+      // Deterministic test-only race injection hook strictly after fd validation & before stream read
+      const activeTestHooks = process.env.NODE_ENV === "test" ? testProtectedAssetHooks : null;
+      if (activeTestHooks && typeof activeTestHooks.onBeforeStream === "function") {
+        activeTestHooks.onBeforeStream({
+          filePath: openedAsset.filePath,
+          baseDir: openedAsset.baseDir,
+          filename,
+          fd: openedAsset.fd
+        });
+      }
+
+      res.setHeader("Cache-Control", "private, no-cache, no-store, must-revalidate, max-age=0");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+
+      const ext = path.extname(filename).toLowerCase();
+      const mimeType = ext === ".pdf"
+        ? "application/pdf"
+        : ext === ".xlsx"
+        ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        : ext === ".zip"
+        ? "application/zip"
+        : "application/octet-stream";
+
+      res.setHeader("Content-Type", mimeType);
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      if (typeof openedAsset.size === "number" && Number.isFinite(openedAsset.size) && openedAsset.size >= 0) {
+        res.setHeader("Content-Length", String(openedAsset.size));
+      }
+
+      const stream = fs.createReadStream("", {
+        fd: openedAsset.fd,
+        autoClose: true
+      });
+      fdTransferredToStream = true;
+
+      stream.on("error", () => {
+        console.error("[Download Paid Asset] Stream read failed.");
+        stream.destroy();
+        if (!res.headersSent) {
+          res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+          res.status(500).json({ success: false, error: "Failed to download asset." });
+        } else if (!res.writableEnded) {
+          res.destroy();
+        }
+      });
+
+      res.on("close", () => {
+        if (!stream.destroyed) {
+          stream.destroy();
+        }
+      });
+
+      return stream.pipe(res);
+    } catch {
+      if (!fdTransferredToStream) {
+        closeFdSafe(openedAsset.fd);
+      }
+      console.error("[Download Paid Asset] Failed to initialize asset download stream.");
+      if (!res.headersSent) {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+        return res.status(500).json({ success: false, error: "Failed to download asset." });
+      }
+      return undefined;
+    }
+  } catch {
+    console.error("[Download Paid Asset] Unexpected handler failure.");
+    if (!res.headersSent) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      return res.status(500).json({ success: false, error: "Failed to download asset." });
+    }
+    return undefined;
   }
 });
 
@@ -3908,7 +4957,7 @@ export function evaluateInvoiceAccessAuthorization({
   if (user) {
     const userId = user.id;
     const userEmail = (user.email || "").toLowerCase().trim();
-    const isEmailConfirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
+    const userEmailConfirmed = isEmailConfirmed(user);
 
     const recordUserId = paymentRecord?.user_id || bookingRecord?.user_id || resourceRecord?.user_id || null;
     const recordCustomerEmail = (
@@ -3931,7 +4980,7 @@ export function evaluateInvoiceAccessAuthorization({
     }
 
     if (recordCustomerEmail && userEmail && recordCustomerEmail === userEmail) {
-      if (isEmailConfirmed) {
+      if (userEmailConfirmed) {
         return { isAuthorized: true };
       }
       return {

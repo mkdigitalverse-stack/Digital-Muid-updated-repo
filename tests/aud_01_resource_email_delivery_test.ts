@@ -90,7 +90,8 @@ function createMockDb() {
         status: "published",
         access_type: "paid",
         price: 299,
-        currency: "INR"
+        currency: "INR",
+        file_url: "supabase://paid-resources/paid/meta-ads-campaign-planner-bundle.zip"
       },
       {
         id: STANDALONE_UUID,
@@ -99,7 +100,8 @@ function createMockDb() {
         status: "published",
         access_type: "paid",
         price: 499,
-        currency: "INR"
+        currency: "INR",
+        file_url: "supabase://paid-resources/paid/standalone-growth-kit.pdf"
       },
       {
         id: CHILD_BUNDLE_ITEM_UUID,
@@ -108,7 +110,8 @@ function createMockDb() {
         status: "published",
         access_type: "paid",
         price: 499,
-        currency: "INR"
+        currency: "INR",
+        file_url: "supabase://paid-resources/paid/ad-budget-break-even-calculator.xlsx"
       }
     ],
     profiles: [

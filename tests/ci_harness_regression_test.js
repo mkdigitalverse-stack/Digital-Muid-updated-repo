@@ -37,6 +37,14 @@ const MANIFEST_TXT = fs.readFileSync(
   path.resolve("supabase/tests/ci_migration_manifest.txt"),
   "utf8"
 );
+const P03_INTEGRATION_SQL = fs.readFileSync(
+  path.resolve("supabase/tests/p0_3_postgres_integration_test.sql"),
+  "utf8"
+);
+const P03_CONCURRENCY_JS = fs.readFileSync(
+  path.resolve("supabase/tests/p0_3_postgres_concurrency_test.mjs"),
+  "utf8"
+);
 
 let passed = 0;
 function test(name, fn) {
@@ -376,6 +384,31 @@ test("Every parameterized SQL call in v4_3_postgres_concurrency_test.mjs matches
 
 test("CI workflow uses Node.js 22 LTS compatible with @supabase/supabase-js >=22.0.0", () => {
   assert.match(WORKFLOW_YML, /node-version:\s*'22'/);
+});
+
+test("P0-3 PostgreSQL integration & multi-connection concurrency suites are wired into CI with strict safety guards", () => {
+  assert.match(WORKFLOW_YML, /replay all 29 migrations chronologically/);
+  assert.match(WORKFLOW_YML, /supabase\/tests\/p0_3_postgres_integration_test\.sql/);
+  assert.match(WORKFLOW_YML, /node supabase\/tests\/p0_3_postgres_concurrency_test\.mjs/);
+
+  const p03SelfCatchHits = findSelfCatchingExceptionBlocks(P03_INTEGRATION_SQL);
+  assert.deepStrictEqual(p03SelfCatchHits, [], "P0-3 integration SQL must not contain self-catching exception blocks");
+  assert.match(P03_INTEGRATION_SQL, /admin@digitalmuid\.com/);
+  assert.match(P03_INTEGRATION_SQL, /%70rotected_downloads/);
+  assert.match(P03_INTEGRATION_SQL, /Bounded LIMIT 50 prune/);
+
+  assert.match(P03_CONCURRENCY_JS, /\["127\.0\.0\.1", "localhost", "::1"\]\.includes\(host\)/);
+  assert.match(P03_CONCURRENCY_JS, /ver_num >= 170000[\s\S]*ver_num < 180000/);
+  assert.match(P03_CONCURRENCY_JS, /pg_stat_activity/);
+  assert.match(P03_CONCURRENCY_JS, /wait_event_type === "Lock"/);
+  assert.match(P03_CONCURRENCY_JS, /function assertParamBindingMatch\(/);
+
+  const p03ParamMismatches = findSqlParamCountMismatches(P03_CONCURRENCY_JS);
+  assert.deepStrictEqual(
+    p03ParamMismatches,
+    [],
+    `SQL placeholder vs parameter mismatch in p0_3_postgres_concurrency_test.mjs: ${JSON.stringify(p03ParamMismatches)}`
+  );
 });
 
 console.log(`=== SUMMARY: ${passed} PASSED, ${process.exitCode ? 1 : 0} FAILED ===`);

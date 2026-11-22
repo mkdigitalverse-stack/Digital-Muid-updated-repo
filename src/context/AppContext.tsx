@@ -30,6 +30,7 @@ import {
   getYouTubeThumbnail,
   slugify
 } from '../services';
+import { isAuthoritativePaidResource } from '../constants/authoritativePaidResources';
 import {
   Article,
   Video,
@@ -3256,12 +3257,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('[Supabase Lead Magnet] CRM lead insertion notice:', err);
       });
 
-      // 5. Increment free-resource download count via rate-limited server endpoint (never for paid resources)
+      // 5. Increment free-resource download count via rate-limited server endpoint (never for paid resources).
+      // Unknown or unhydrated resource IDs remain safely rejected server-side by POST /api/resources/:id/record-download.
+      const isAuthoritativePaidTarget =
+        isAuthoritativePaidResource(resourceId) ||
+        Boolean(targetResource && (isAuthoritativePaidResource(targetResource.id) || isAuthoritativePaidResource(targetResource.slug)));
       const isFreeLeadResource =
-        !targetResource ||
-        (targetResource.accessType !== 'paid' &&
-          targetResource.access_type !== 'paid' &&
-          Number(targetResource.price || 0) === 0);
+        !isAuthoritativePaidTarget &&
+        (!targetResource ||
+          (targetResource.accessType !== 'paid' &&
+            targetResource.access_type !== 'paid' &&
+            Number(targetResource.price || 0) === 0));
       if (isFreeLeadResource) {
         resourceService.incrementDownloadCount(resourceId).catch(err => {
           console.warn('[Resources] Download count increment notice:', err);
@@ -3340,7 +3346,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     orderId?: string
   ): Promise<{ success: boolean; error?: string }> => {
     try {
-      const isPaid = (resource.accessType === 'paid' || resource.access_type === 'paid') && (resource.price || 0) > 0;
+      const isAuthoritativePaid =
+        isAuthoritativePaidResource(resource.id) || isAuthoritativePaidResource(resource.slug);
+      const isPaid =
+        isAuthoritativePaid ||
+        ((resource.accessType === 'paid' || resource.access_type === 'paid') && (resource.price || 0) > 0);
       if (isPaid && (!paymentId || !orderId)) {
         console.warn('[AppContext] Cannot purchase paid resource without verified server payment credentials');
         return { success: false, error: 'Verified payment credentials are required to acquire this resource.' };
@@ -3398,8 +3408,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         prev.map(r => r.id === resource.id ? { ...r, downloadCount: (r.downloadCount || 0) + 1 } : r)
       );
 
-      // Paid purchases must NEVER call the public free-download counter endpoint (P0-3)
-      if (!isPaid) {
+      // Paid or non-zero-price purchases must NEVER call the public free-download counter endpoint (P0-3 / E-9)
+      const isStrictlyFreePurchase =
+        !isPaid &&
+        resource.accessType !== 'paid' &&
+        resource.access_type !== 'paid' &&
+        Number(resource.price || 0) === 0;
+      if (isStrictlyFreePurchase) {
         resourceService.incrementDownloadCount(resource.id).catch(err => {
           console.warn('[Resources] Free download count increment notice:', err);
         });

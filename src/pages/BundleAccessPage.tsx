@@ -1,6 +1,13 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { resourceService } from '../services/resourceService';
+import {
+  resourceService,
+  safeParseResponseBody,
+  isExpiredSignedStorageResponse,
+  extractSafeDownloadFilename,
+  redactSensitiveText,
+  DownloadFailureCategory
+} from '../services/resourceService';
 import {
   paymentService,
   saveStoredGuestResourceToken,
@@ -20,7 +27,7 @@ import {
   FileSpreadsheet,
   Layers,
   ArrowRight,
-  ExternalLink,
+  RefreshCw,
   Sparkles,
   CreditCard
 } from 'lucide-react';
@@ -92,6 +99,8 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
   const [bundleFiles, setBundleFiles] = useState<BundleFileItem[]>([]);
   const [activeDownloadingId, setActiveDownloadingId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [accessErrorCategory, setAccessErrorCategory] = useState<DownloadFailureCategory | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   // Checkout modal state for unauthorized visitors
   const [showCheckoutModal, setShowCheckoutModal] = useState<boolean>(false);
@@ -123,14 +132,11 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
     (r) => r.id === BUNDLE_CANONICAL_ID || r.slug === 'meta-ads-campaign-planner-bundle'
   );
 
-  const verifyAndLoadBundle = async (overrideParams?: {
+  const getBundleAccessCredentials = (overrideParams?: {
     orderId?: string | null;
     paymentId?: string | null;
     resourceAccessToken?: string | null;
   }) => {
-    setIsLoading(true);
-    setErrorMessage(null);
-
     const effectiveOrderId = overrideParams?.orderId ?? urlParams.orderId;
     const effectivePaymentId = overrideParams?.paymentId ?? urlParams.paymentId;
     const recoveredToken =
@@ -138,6 +144,21 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
       sessionTokenRef.current ||
       getStoredGuestResourceToken(BUNDLE_CANONICAL_ID, effectiveOrderId, effectivePaymentId) ||
       undefined;
+    return { effectiveOrderId, effectivePaymentId, recoveredToken };
+  };
+
+  const verifyAndLoadBundle = async (overrideParams?: {
+    orderId?: string | null;
+    paymentId?: string | null;
+    resourceAccessToken?: string | null;
+  }) => {
+    setIsLoading(true);
+    setErrorMessage(null);
+    setAccessErrorCategory(null);
+    setDownloadError(null);
+
+    const { effectiveOrderId, effectivePaymentId, recoveredToken } =
+      getBundleAccessCredentials(overrideParams);
 
     try {
       const res = await resourceService.fetchBundleFiles(BUNDLE_CANONICAL_ID, {
@@ -146,8 +167,10 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
         resourceAccessToken: recoveredToken
       });
 
-      if (res.success && res.authorized && res.files) {
+      if (res.success && res.authorized && Array.isArray(res.files)) {
         setIsAuthorized(true);
+        setAccessErrorCategory(null);
+        setErrorMessage(null);
         setBundleFiles(res.files);
 
         // Track conversion once per verified purchase transaction
@@ -172,14 +195,29 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
           }
           conversionTrackedRef.current = true;
         }
-      } else {
+      } else if (res.errorCategory === 'entitlement_denied') {
+        setAccessErrorCategory(null);
         setIsAuthorized(false);
         setBundleFiles([]);
+      } else {
+        // NEVER display a payment-required paywall for HTTP 429, HTTP 503, network failures, or transient errors
+        setIsAuthorized(null);
+        setAccessErrorCategory(res.errorCategory || 'server_error');
+        setErrorMessage(
+          res.error ||
+            'Unable to verify bundle access right now due to a temporary issue. Please try again.'
+        );
       }
     } catch (err: any) {
-      console.error('[BundleAccessPage] Error checking access:', err);
-      setIsAuthorized(false);
-      setErrorMessage(err?.message || 'Failed to verify bundle access permissions.');
+      console.error(
+        '[BundleAccessPage] Error checking access:',
+        redactSensitiveText(err?.message || 'Network error')
+      );
+      setIsAuthorized(null);
+      setAccessErrorCategory('network_error');
+      setErrorMessage(
+        'Network error while verifying your bundle access. Please check your connection and try again.'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -243,54 +281,167 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
   }, [urlParams.checkout, isAuthorized, isLoading, userProfile, currentUser]);
 
   const handleDownloadFile = async (file: BundleFileItem) => {
-    if (!file.downloadUrl) {
-      notify('Download URL not ready. Refreshing access...', 'error');
-      await verifyAndLoadBundle();
-      return;
-    }
-
     setActiveDownloadingId(file.id);
-    try {
-      analytics.trackPaidResourceDownload({
-        resourceId: file.id,
-        resourceTitle: file.title,
-        orderId: urlParams.orderId || undefined
+    setDownloadError(null);
+
+    const { effectiveOrderId, effectivePaymentId, recoveredToken } = getBundleAccessCredentials();
+
+    const fetchFreshFileUrl = async (): Promise<{
+      ok: boolean;
+      downloadUrl?: string;
+      filename?: string;
+      error?: string;
+      errorCategory?: DownloadFailureCategory;
+    }> => {
+      const freshRes = await resourceService.fetchBundleFiles(BUNDLE_CANONICAL_ID, {
+        orderId: effectiveOrderId || undefined,
+        paymentId: effectivePaymentId || undefined,
+        resourceAccessToken: recoveredToken
       });
 
-      // Attempt blob download for seamless direct save, fallback to anchor
-      try {
-        const resp = await fetch(file.downloadUrl, { mode: 'cors' });
+      if (freshRes.success && freshRes.authorized && Array.isArray(freshRes.files)) {
+        setBundleFiles(freshRes.files);
+        const matched = freshRes.files.find((f) => f.id === file.id || f.slug === file.slug);
+        if (!matched?.downloadUrl) {
+          return {
+            ok: false,
+            errorCategory: 'server_error',
+            error: 'A fresh download link for this deliverable could not be generated. Please try again.'
+          };
+        }
+        return {
+          ok: true,
+          downloadUrl: matched.downloadUrl,
+          filename: matched.filename || file.filename
+        };
+      }
+
+      if (freshRes.errorCategory === 'entitlement_denied') {
+        setIsAuthorized(false);
+        setAccessErrorCategory(null);
+        setBundleFiles([]);
+      }
+
+      return {
+        ok: false,
+        errorCategory: freshRes.errorCategory || 'download_failed',
+        error:
+          freshRes.error ||
+          'Unable to generate a fresh download link right now. Please try again.'
+      };
+    };
+
+    try {
+      // Always obtain a fresh authorized download URL when the user initiates a download
+      // rather than relying indefinitely on signed URLs fetched at page mount.
+      const initialFresh = await fetchFreshFileUrl();
+      if (!initialFresh.ok || !initialFresh.downloadUrl) {
+        const msg =
+          initialFresh.error ||
+          'Unable to prepare your download link right now. Please try again.';
+        setDownloadError(msg);
+        notify(msg, 'error');
+        return;
+      }
+
+      let targetUrl = initialFresh.downloadUrl;
+      let targetFilename = initialFresh.filename || file.filename || `${file.slug}.pdf`;
+      const MAX_EXPIRED_RETRIES = 1;
+      let expiredRetryCount = 0;
+
+      while (true) {
+        let resp: Response;
+        try {
+          resp = await fetch(targetUrl, { mode: 'cors' });
+        } catch (networkErr: any) {
+          console.error(
+            '[BundleAccessPage] File download network error:',
+            redactSensitiveText(networkErr?.message || 'Network error')
+          );
+          const msg =
+            'Network error while downloading this file. Please check your connection and try again.';
+          setDownloadError(msg);
+          notify(msg, 'error');
+          return;
+        }
+
         if (resp.ok) {
+          const contentType = resp.headers.get('content-type') || '';
+          if (contentType.includes('text/html')) {
+            const msg =
+              'Received an unexpected response instead of the file. Please try downloading again.';
+            setDownloadError(msg);
+            notify(msg, 'error');
+            return;
+          }
+
           const blob = await resp.blob();
           const blobUrl = URL.createObjectURL(blob);
+          const resolvedFilename = extractSafeDownloadFilename(
+            resp.headers.get('content-disposition'),
+            null,
+            targetFilename
+          );
+
           const link = document.createElement('a');
           link.href = blobUrl;
-          link.download = file.filename || `${file.slug}.pdf`;
+          link.download = resolvedFilename;
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
           setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+
+          analytics.trackPaidResourceDownload({
+            resourceId: file.id,
+            resourceTitle: file.title,
+            orderId: effectiveOrderId || undefined
+          });
           notify(`Downloaded: ${file.title}`, 'success');
           return;
         }
-      } catch {
-        // Fallback to direct link download
+
+        const { json: errBody, text: errText } = await safeParseResponseBody(resp);
+        const isExpired = isExpiredSignedStorageResponse(resp.status, errBody, errText);
+
+        if (isExpired && expiredRetryCount < MAX_EXPIRED_RETRIES) {
+          expiredRetryCount += 1;
+          const refreshed = await fetchFreshFileUrl();
+          if (!refreshed.ok || !refreshed.downloadUrl) {
+            const msg =
+              refreshed.error ||
+              'Your download link expired and could not be refreshed automatically. Please try again.';
+            setDownloadError(msg);
+            notify(msg, 'error');
+            return;
+          }
+          targetUrl = refreshed.downloadUrl;
+          targetFilename = refreshed.filename || targetFilename;
+          continue;
+        }
+
+        let failureMessage = 'Unable to download this file right now. Please try again.';
+        if (resp.status === 429) {
+          failureMessage = 'Too many download requests. Please wait a moment and try again.';
+        } else if (resp.status >= 500) {
+          failureMessage =
+            'The file storage service is temporarily unavailable. Your purchase is unaffected—please try again shortly.';
+        } else if (isExpired) {
+          failureMessage =
+            'Your temporary download link expired. Please click Download Asset again to request a fresh link.';
+        }
+
+        setDownloadError(failureMessage);
+        notify(failureMessage, 'error');
+        return;
       }
-
-      // Secure browser download using verified short-lived signed URL
-      const link = document.createElement('a');
-      link.href = file.downloadUrl;
-      link.setAttribute('download', file.filename || `${file.slug}.pdf`);
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      notify(`Initiated download: ${file.title}`, 'success');
-    } catch (err) {
-      console.error('[BundleAccessPage] Download initiation failed:', err);
-      notify('Failed to trigger file download. Please try again.', 'error');
+    } catch (err: any) {
+      console.error(
+        '[BundleAccessPage] Download failed:',
+        redactSensitiveText(err?.message || 'Unexpected download error')
+      );
+      const msg = 'Unable to complete the file download. Please try again.';
+      setDownloadError(msg);
+      notify(msg, 'error');
     } finally {
       setActiveDownloadingId(null);
     }
@@ -463,9 +614,22 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
               resourceAccessToken: recoveredGuestToken
             });
 
-            if (freshFiles.success && freshFiles.files) {
+            if (freshFiles.success && freshFiles.authorized && Array.isArray(freshFiles.files)) {
               setIsAuthorized(true);
+              setAccessErrorCategory(null);
+              setErrorMessage(null);
               setBundleFiles(freshFiles.files);
+            } else if (
+              freshFiles.errorCategory === 'rate_limited' ||
+              freshFiles.errorCategory === 'server_error' ||
+              freshFiles.errorCategory === 'network_error'
+            ) {
+              setIsAuthorized(null);
+              setAccessErrorCategory(freshFiles.errorCategory);
+              setErrorMessage(
+                freshFiles.error ||
+                  'Your payment is verified, but we hit a temporary issue loading the files. Please click Retry.'
+              );
             }
           } catch (vErr: any) {
             console.error('[Bundle Payment Verification Error]:', vErr);
@@ -530,10 +694,15 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
               Official Executive Bundle · 4 Digital Assets
             </div>
 
-            {isAuthorized ? (
+            {isAuthorized === true ? (
               <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-full text-xs font-semibold text-emerald-800">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                 Access Authorized & Verified
+              </div>
+            ) : accessErrorCategory ? (
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-50 border border-amber-200 rounded-full text-xs font-semibold text-amber-800">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                Temporary Verification Issue
               </div>
             ) : (
               <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-100 border border-slate-200 rounded-full text-xs font-semibold text-slate-700">
@@ -553,8 +722,42 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
           </p>
         </div>
 
-        {/* UNAUTHORIZED STATE: Clear Payment-Required Notice & Instant Checkout */}
-        {!isAuthorized && (
+        {/* TRANSIENT ERROR STATE: Rate limit (429), Server Error (503), or Network Failure — NEVER show Payment Required */}
+        {accessErrorCategory && isAuthorized !== true && (
+          <div className="bg-white rounded-2xl border border-amber-200 shadow-sm p-6 sm:p-8 space-y-4">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-700 shrink-0">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div className="space-y-1.5">
+                <h2 className="text-lg font-bold text-slate-900">
+                  {accessErrorCategory === 'rate_limited'
+                    ? 'Too Many Requests — Please Wait a Moment'
+                    : accessErrorCategory === 'network_error'
+                    ? 'Connection Issue While Verifying Access'
+                    : 'Download Service Temporarily Unavailable'}
+                </h2>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  {errorMessage ||
+                    'We could not reach the download authorization service right now. If you already purchased this bundle, you do not need to pay again.'}
+                </p>
+              </div>
+            </div>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => verifyAndLoadBundle()}
+                className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-semibold shadow-xs transition-colors cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Retry Verification</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* UNAUTHORIZED STATE: Clear Payment-Required Notice & Instant Checkout (Entitlement Denial Only) */}
+        {isAuthorized === false && !accessErrorCategory && (
           <div className="bg-white rounded-2xl border border-amber-200 shadow-sm overflow-hidden">
             <div className="bg-gradient-to-r from-amber-50 to-orange-50/50 p-6 sm:p-8 border-b border-amber-100">
               <div className="flex items-start gap-4">
@@ -642,7 +845,7 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
         )}
 
         {/* AUTHORIZED STATE: Website-Controlled Secure 4-Deliverable Download Center */}
-        {isAuthorized && (
+        {isAuthorized === true && (
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
@@ -650,9 +853,16 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
                 Authorized Deliverables (4 Assets Included)
               </h2>
               <span className="text-xs font-medium text-slate-500">
-                Time-limited signed download tokens active
+                Fresh signed download links issued on demand
               </span>
             </div>
+
+            {downloadError && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                <span>{downloadError}</span>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 gap-4">
               {bundleFiles.map((file, idx) => (
@@ -687,7 +897,7 @@ export const BundleAccessPage: React.FC<BundleAccessPageProps> = ({ navigate }) 
                   <div className="w-full sm:w-auto shrink-0">
                     <button
                       onClick={() => handleDownloadFile(file)}
-                      disabled={activeDownloadingId === file.id || !file.downloadUrl}
+                      disabled={activeDownloadingId === file.id}
                       className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
                     >
                       {activeDownloadingId === file.id ? (

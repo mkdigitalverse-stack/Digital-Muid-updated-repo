@@ -38,7 +38,9 @@ export const authService = {
       }
     }
 
-    const isConfirmed = Boolean(user.email_confirmed_at || (user as { confirmed_at?: string | null }).confirmed_at);
+    const isConfirmed = Boolean(
+      user.email_confirmed_at && String(user.email_confirmed_at).trim().length > 0
+    );
     if (!isConfirmed) {
       return false;
     }

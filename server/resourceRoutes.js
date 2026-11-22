@@ -4,7 +4,44 @@ import { getSupabaseServerClient, isValidUUID } from "./supabaseServer.js";
 
 const DEFAULT_WINDOW_SECONDS = 900; // 15 minutes
 const DEFAULT_MAX_HITS = 10; // 10 increments per (resource_id, client_hash) per 15-min window
-const MIN_HMAC_SECRET_LENGTH = 32;
+const MIN_HMAC_SECRET_BYTES = 32;
+
+const EXACT_PLACEHOLDER_SECRETS = new Set([
+  "undefined",
+  "null",
+  "none",
+  "changeme",
+  "change_me",
+  "replace_me",
+  "placeholder",
+  "secret",
+  "generate_at_least_32_bytes_random_hex_secret_here"
+]);
+
+function isPlaceholderOrMalformedSecret(candidate) {
+  if (!candidate || typeof candidate !== "string") return true;
+  // Reject internal whitespace or ASCII control characters
+  if (/[\s\x00-\x1f\x7f]/.test(candidate)) return true;
+
+  const lower = candidate.toLowerCase();
+  if (EXACT_PLACEHOLDER_SECRETS.has(lower)) return true;
+  if (
+    lower.startsWith("generate_at_least_32_bytes") ||
+    lower.startsWith("your_") ||
+    lower.startsWith("my_") ||
+    lower.includes("placeholder") ||
+    lower.includes("replace_me") ||
+    lower.includes("change_me") ||
+    lower.includes("secret_here") ||
+    lower.includes("example_secret")
+  ) {
+    return true;
+  }
+
+  // Reject trivial zero/low-entropy repeated patterns (e.g. "0".repeat(64), "ab".repeat(32))
+  if (new Set(candidate).size < 4) return true;
+  return false;
+}
 
 /**
  * Resolves and strictly validates Express reverse-proxy hop configuration.
@@ -56,8 +93,16 @@ export function resolveTrustProxyConfig(env = process.env, isProduction = false)
 
 /**
  * Returns the validated dedicated HMAC secret for free-download rate-limit keys.
- * Fails closed (returns null) if unset or shorter than 32 characters.
- * NEVER falls back to another secret or hardcoded string.
+ * Fails closed (returns null) if unset, placeholder, malformed, invalid hex,
+ * or shorter than 32 decoded bytes (256 bits).
+ * NEVER falls back to another secret or hardcoded string, and NEVER logs secret values.
+ *
+ * Supported formats:
+ * - Hexadecimal (`<hex>`, `hex:<hex>`, or `0x<hex>`): requires valid even-length hex
+ *   with decoded byte length >= 32 (i.e. >= 64 hex characters).
+ * - Base64 / Base64URL (`base64:<val>` or `base64url:<val>`): requires valid alphabet
+ *   with decoded byte length >= 32.
+ * - Raw high-entropy UTF-8 string: requires >= 32 UTF-8 bytes and >= 32 characters.
  *
  * @param {NodeJS.ProcessEnv} [env=process.env]
  * @returns {string|null}
@@ -65,8 +110,58 @@ export function resolveTrustProxyConfig(env = process.env, isProduction = false)
 export function getDownloadRateLimitHmacSecret(env = process.env) {
   const secret = env?.DOWNLOAD_RATE_LIMIT_HMAC_SECRET;
   if (typeof secret !== "string") return null;
+
   const trimmed = secret.trim();
-  if (trimmed.length < MIN_HMAC_SECRET_LENGTH) return null;
+  if (isPlaceholderOrMalformedSecret(trimmed)) return null;
+
+  // 1. Explicit hexadecimal prefixes: `hex:...` or `0x...`
+  if (/^(?:hex:|0x)/i.test(trimmed)) {
+    const hexBody = trimmed.replace(/^(?:hex:|0x)/i, "");
+    if (!hexBody || hexBody.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(hexBody)) {
+      return null;
+    }
+    if (isPlaceholderOrMalformedSecret(hexBody)) return null;
+    const decoded = Buffer.from(hexBody, "hex");
+    if (decoded.length < MIN_HMAC_SECRET_BYTES) return null;
+    return trimmed;
+  }
+
+  // 2. Explicit base64 / base64url prefixes
+  if (/^base64url:/i.test(trimmed)) {
+    const body = trimmed.slice("base64url:".length);
+    if (!body || !/^[A-Za-z0-9_-]+$/.test(body) || body.length % 4 === 1) {
+      return null;
+    }
+    if (isPlaceholderOrMalformedSecret(body)) return null;
+    const decoded = Buffer.from(body, "base64url");
+    if (decoded.length < MIN_HMAC_SECRET_BYTES) return null;
+    return trimmed;
+  }
+
+  if (/^base64:/i.test(trimmed)) {
+    const body = trimmed.slice("base64:".length);
+    if (!body || body.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(body)) {
+      return null;
+    }
+    if (isPlaceholderOrMalformedSecret(body)) return null;
+    const decoded = Buffer.from(body, "base64");
+    if (decoded.length < MIN_HMAC_SECRET_BYTES) return null;
+    return trimmed;
+  }
+
+  // 3. Unprefixed pure hexadecimal string: validate decoded byte length (>= 32 bytes / 64 hex chars)
+  if (/^[0-9a-fA-F]+$/.test(trimmed)) {
+    if (trimmed.length % 2 !== 0) return null;
+    const decoded = Buffer.from(trimmed, "hex");
+    if (decoded.length < MIN_HMAC_SECRET_BYTES) return null;
+    return trimmed;
+  }
+
+  // 4. General raw UTF-8 secret: require at least 32 bytes AND 32 characters
+  if (trimmed.length < MIN_HMAC_SECRET_BYTES || Buffer.byteLength(trimmed, "utf8") < MIN_HMAC_SECRET_BYTES) {
+    return null;
+  }
+
   return trimmed;
 }
 

@@ -153,30 +153,113 @@ CREATE POLICY "Admin All Resources"
 -- ==============================================================================
 -- 4. PROTECTED RESOURCE URL CLASSIFIER (USED BY public_resources VIEW)
 --    Redacts Supabase Storage URLs, protected/paid paths, server download
---    endpoints, and known paid product identifiers while preserving legitimate
---    free static public downloads (/downloads/*.pdf, /downloads/*.xlsx).
+--    endpoints, path traversal, control characters, and known paid product
+--    identifiers — including single/multi-layer percent-encoded variants —
+--    while preserving legitimate free static public downloads
+--    (/downloads/*.pdf, /downloads/*.xlsx, and safe encoded spaces/UTF-8).
 -- ==============================================================================
 CREATE OR REPLACE FUNCTION public.is_protected_resource_url(p_url TEXT)
 RETURNS BOOLEAN
-LANGUAGE sql
+LANGUAGE plpgsql
 IMMUTABLE
 STRICT
 SECURITY INVOKER
 SET search_path = pg_catalog, pg_temp
 AS $$
-  SELECT
-    CASE
-      WHEN pg_catalog.btrim(p_url) = '' THEN FALSE
-      WHEN pg_catalog.btrim(p_url) ~* '^supabase://' THEN TRUE
-      WHEN pg_catalog.btrim(p_url) ~* '/storage/v1/object/' THEN TRUE
-      WHEN pg_catalog.btrim(p_url) ~* '(^|/)protected_downloads(/|$)' THEN TRUE
-      WHEN pg_catalog.btrim(p_url) ~* '(^|/)paid-resources(/|$)' THEN TRUE
-      WHEN pg_catalog.btrim(p_url) ~* '(^|/)paid(/|$)' THEN TRUE
-      WHEN pg_catalog.btrim(p_url) ~* '(^|/)private(/|$)' THEN TRUE
-      WHEN pg_catalog.btrim(p_url) ~* '/api/payments/download-paid-asset' THEN TRUE
-      WHEN pg_catalog.btrim(p_url) ~* '(meta-ads-campaign-planner-workbook|the-ad-budget-break-even-calculator|the-ad-budget-breat-even-calculate|10-high-converting-meta-ads-copy-frameworks|pre-launch-tracking-audit-checklist|meta-ads-campaign-planner-bundle)' THEN TRUE
-      ELSE FALSE
-    END;
+DECLARE
+  v_cand TEXT;
+  v_decoded TEXT;
+  v_round INTEGER;
+  v_len INTEGER;
+  v_pos INTEGER;
+  v_ch TEXT;
+  v_hex TEXT;
+  v_byte INTEGER;
+BEGIN
+  v_cand := pg_catalog.btrim(p_url);
+  IF v_cand = '' THEN
+    RETURN FALSE;
+  END IF;
+
+  -- Bounded iterative decoding (up to 3 rounds) to neutralize percent-encoded
+  -- evasion (e.g. /%70rotected_downloads/, /%2570aid/, /storage/v1/object%2f)
+  -- without breaking legitimate free URLs (/downloads/My%20Free%20Guide.pdf).
+  FOR v_round IN 1..3 LOOP
+    -- Raw/decoded control characters, backslashes, or traversal segments fail closed
+    IF v_cand ~ '[\x00-\x1f\x7f\\]'
+       OR v_cand ~* '%(?:[01][0-9a-f]|7f|5c)'
+       OR v_cand ~ '(^|/)\.\.(/|$)' THEN
+      RETURN TRUE;
+    END IF;
+
+    IF v_cand ~* '^supabase://'
+       OR v_cand ~* '/storage/v1/object/'
+       OR v_cand ~* '(^|/)protected_downloads(/|$)'
+       OR v_cand ~* '(^|/)paid-resources(/|$)'
+       OR v_cand ~* '(^|/)paid(/|$)'
+       OR v_cand ~* '(^|/)private(/|$)'
+       OR v_cand ~* '/api/payments/download-paid-asset'
+       OR v_cand ~* '(meta-ads-campaign-planner-workbook|the-ad-budget-break-even-calculator|the-ad-budget-breat-even-calculate|10-high-converting-meta-ads-copy-frameworks|pre-launch-tracking-audit-checklist|meta-ads-campaign-planner-bundle)' THEN
+      RETURN TRUE;
+    END IF;
+
+    -- Stop decoding if no ASCII percent-encoded sequences remain
+    IF v_cand !~ '%[0-7][0-9A-Fa-f]' THEN
+      EXIT;
+    END IF;
+
+    v_decoded := '';
+    v_len := pg_catalog.length(v_cand);
+    v_pos := 1;
+
+    WHILE v_pos <= v_len LOOP
+      v_ch := pg_catalog.substr(v_cand, v_pos, 1);
+      IF v_ch = '%' AND v_pos + 2 <= v_len THEN
+        v_hex := pg_catalog.substr(v_cand, v_pos + 1, 2);
+        IF v_hex ~ '^[0-9A-Fa-f]{2}$' THEN
+          v_byte := pg_catalog.get_byte(pg_catalog.decode(v_hex, 'hex'), 0);
+          IF v_byte < 32 OR v_byte = 127 THEN
+            RETURN TRUE;
+          ELSIF v_byte <= 126 THEN
+            v_decoded := v_decoded || pg_catalog.chr(v_byte);
+            v_pos := v_pos + 3;
+            CONTINUE;
+          ELSE
+            -- Preserve valid non-ASCII UTF-8 percent-encoded bytes (>= 0x80) verbatim
+            v_decoded := v_decoded || '%' || v_hex;
+            v_pos := v_pos + 3;
+            CONTINUE;
+          END IF;
+        END IF;
+      END IF;
+      v_decoded := v_decoded || v_ch;
+      v_pos := v_pos + 1;
+    END LOOP;
+
+    IF v_decoded = v_cand THEN
+      EXIT;
+    END IF;
+    v_cand := v_decoded;
+  END LOOP;
+
+  -- Final evaluation after decoding; also fail closed if unresolved ASCII
+  -- percent-encoding persists after 3 decode rounds (blocks 4x+ nested evasion).
+  IF v_cand ~ '[\x00-\x1f\x7f\\]'
+     OR v_cand ~ '%[0-7][0-9A-Fa-f]'
+     OR v_cand ~ '(^|/)\.\.(/|$)'
+     OR v_cand ~* '^supabase://'
+     OR v_cand ~* '/storage/v1/object/'
+     OR v_cand ~* '(^|/)protected_downloads(/|$)'
+     OR v_cand ~* '(^|/)paid-resources(/|$)'
+     OR v_cand ~* '(^|/)paid(/|$)'
+     OR v_cand ~* '(^|/)private(/|$)'
+     OR v_cand ~* '/api/payments/download-paid-asset'
+     OR v_cand ~* '(meta-ads-campaign-planner-workbook|the-ad-budget-break-even-calculator|the-ad-budget-breat-even-calculate|10-high-converting-meta-ads-copy-frameworks|pre-launch-tracking-audit-checklist|meta-ads-campaign-planner-bundle)' THEN
+    RETURN TRUE;
+  END IF;
+
+  RETURN FALSE;
+END;
 $$;
 
 ALTER FUNCTION public.is_protected_resource_url(TEXT) OWNER TO postgres;
@@ -276,6 +359,14 @@ CREATE TABLE IF NOT EXISTS public.resource_download_rate_limits (
 CREATE INDEX IF NOT EXISTS idx_resource_download_rate_limits_window
   ON public.resource_download_rate_limits (window_started_at);
 
+-- IMPORTANT MANAGED SUPABASE ROLE DEPENDENCY (E-7):
+--   `FORCE ROW LEVEL SECURITY` with zero RLS policies blocks even the table owner
+--   UNLESS the owner role (`postgres`) holds `rolbypassrls = true` or `rolsuper = true`.
+--   On standard PostgreSQL 17, `postgres` is a superuser. On managed Supabase,
+--   `postgres` is non-superuser and relies on `rolbypassrls = true`, which MUST NOT
+--   be assumed without runtime verification. The fail-closed DO block below inspects
+--   `pg_catalog.pg_roles` for `postgres` and aborts the migration transaction if
+--   neither `rolsuper` nor `rolbypassrls` is true, preventing silent RPC breakage.
 ALTER TABLE public.resource_download_rate_limits OWNER TO postgres;
 ALTER TABLE public.resource_download_rate_limits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.resource_download_rate_limits FORCE ROW LEVEL SECURITY;
@@ -283,7 +374,7 @@ ALTER TABLE public.resource_download_rate_limits FORCE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.resource_download_rate_limits FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.resource_download_rate_limits TO service_role, postgres;
 
--- Fail-closed schema, constraint, index, RLS, policy, and privilege verification
+-- Fail-closed schema, constraint, index, RLS, policy, role BYPASSRLS, and privilege verification
 DO $$
 DECLARE
   v_relid OID;
@@ -295,6 +386,8 @@ DECLARE
   v_pk_exists BOOLEAN;
   v_idx_exists BOOLEAN;
   v_policy_count INTEGER;
+  v_pg_super BOOLEAN;
+  v_pg_bypassrls BOOLEAN;
 BEGIN
   SELECT c.oid, c.relkind, c.relrowsecurity, c.relforcerowsecurity
     INTO v_relid, v_relkind, v_rls, v_force_rls
@@ -386,6 +479,19 @@ BEGIN
     RAISE EXCEPTION USING
       ERRCODE = 'P0001',
       MESSAGE = 'P0-3A FAIL-CLOSED ABORT: anon or authenticated retains direct privileges on public.resource_download_rate_limits.';
+  END IF;
+
+  -- Verify `postgres` role can bypass FORCE ROW LEVEL SECURITY inside SECURITY DEFINER RPC
+  -- rather than assuming managed Supabase role attributes without evidence.
+  SELECT r.rolsuper, r.rolbypassrls
+    INTO v_pg_super, v_pg_bypassrls
+  FROM pg_catalog.pg_roles r
+  WHERE r.rolname = 'postgres';
+
+  IF NOT (COALESCE(v_pg_super, FALSE) OR COALESCE(v_pg_bypassrls, FALSE)) THEN
+    RAISE EXCEPTION USING
+      ERRCODE = 'P0001',
+      MESSAGE = 'P0-3A FAIL-CLOSED ABORT: Role "postgres" lacks both rolsuper and rolbypassrls; SECURITY DEFINER record_free_resource_download() cannot write to FORCE-RLS table public.resource_download_rate_limits with zero policies. Reconcile role attributes or add a dedicated owner policy before applying.';
   END IF;
 END $$;
 
@@ -552,9 +658,21 @@ BEGIN
         MESSAGE = 'P0_3_UPDATE_AFFECTED_ZERO_ROWS';
     END IF;
 
-    -- Bounded opportunistic pruning of expired rate-limit windows (> 24 hours old)
-    DELETE FROM public.resource_download_rate_limits
-    WHERE window_started_at < (v_now - INTERVAL '24 hours');
+    -- Bounded, indexed opportunistic pruning of expired rate-limit windows (> 24 hours old).
+    -- Uses idx_resource_download_rate_limits_window with LIMIT 50 + FOR UPDATE SKIP LOCKED
+    -- so concurrent free downloads never perform unbounded full-table sweeps or contend on locks (E-7).
+    DELETE FROM public.resource_download_rate_limits rl
+    USING (
+      SELECT resource_id, client_hash, window_started_at
+      FROM public.resource_download_rate_limits
+      WHERE window_started_at < (v_now - INTERVAL '24 hours')
+      ORDER BY window_started_at ASC
+      LIMIT 50
+      FOR UPDATE SKIP LOCKED
+    ) expired
+    WHERE rl.resource_id = expired.resource_id
+      AND rl.client_hash = expired.client_hash
+      AND rl.window_started_at = expired.window_started_at;
 
     RETURN pg_catalog.jsonb_build_object(
       'allowed', TRUE,

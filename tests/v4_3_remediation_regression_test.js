@@ -193,6 +193,20 @@ function createStatefulMockDb() {
     from(table) {
       return makeQueryBuilder(table);
     },
+    storage: {
+      from(bucket) {
+        return {
+          async createSignedUrl(storagePath, expiresIn) {
+            return {
+              data: {
+                signedUrl: `https://v43-mock-storage.example.test/storage/v1/object/sign/${bucket}/${storagePath}?token=mock_sig_${expiresIn}`
+              },
+              error: null
+            };
+          }
+        };
+      }
+    },
     async rpc(fnName, params) {
       state.rpcCalls.push({ fnName, params });
       if (fnName === "get_next_invoice_number") {

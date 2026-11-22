@@ -36,15 +36,21 @@ DECLARE
     '99100000-0000-4000-8000-000000000001'::uuid,
     '99100000-0000-4000-8000-000000000002'::uuid,
     '99100000-0000-4000-8000-000000000003'::uuid,
-    '99100000-0000-4000-8000-000000000004'::uuid
+    '99100000-0000-4000-8000-000000000004'::uuid,
+    '99100000-0000-4000-8000-000000000005'::uuid
   ];
 BEGIN
   IF EXISTS (SELECT 1 FROM public.resources WHERE id = ANY (v_fixture_resource_ids) OR slug LIKE 'p03-synth-%') THEN
     RAISE EXCEPTION 'P0-3 TEST COLLISION: Synthetic resource fixture already exists. Aborting cleanly.';
   END IF;
 
-  IF EXISTS (SELECT 1 FROM auth.users WHERE id = ANY (v_fixture_user_ids) OR email LIKE 'p03.synth.%@example.test') THEN
-    RAISE EXCEPTION 'P0-3 TEST COLLISION: Synthetic auth.users fixture already exists. Aborting cleanly.';
+  IF EXISTS (
+    SELECT 1 FROM auth.users
+    WHERE id = ANY (v_fixture_user_ids)
+       OR email LIKE 'p03.synth.%@example.test'
+       OR pg_catalog.lower(email) = 'admin@digitalmuid.com'
+  ) THEN
+    RAISE EXCEPTION 'P0-3 TEST COLLISION: Synthetic auth.users fixture or allowlisted test email already exists. Aborting cleanly.';
   END IF;
 END $$;
 
@@ -56,7 +62,9 @@ VALUES
   ('99100000-0000-4000-8000-000000000001', 'p03.synth.student@example.test', NOW(), '{}'::jsonb, '{"role":"admin"}'::jsonb),
   ('99100000-0000-4000-8000-000000000002', 'p03.synth.unconfirmed.admin@example.test', NULL, '{"role":"admin"}'::jsonb, '{}'::jsonb),
   ('99100000-0000-4000-8000-000000000003', 'p03.synth.confirmed.admin@example.test', NOW(), '{"role":"admin"}'::jsonb, '{}'::jsonb),
-  ('99100000-0000-4000-8000-000000000004', 'p03.synth.unconfirmed.email@example.test', NULL, '{}'::jsonb, '{}'::jsonb);
+  ('99100000-0000-4000-8000-000000000004', 'p03.synth.unconfirmed.email@example.test', NULL, '{}'::jsonb, '{}'::jsonb),
+  -- Synthetic UUID bound to allowlisted email (starts unconfirmed; promoted to confirmed inside rollback-only test)
+  ('99100000-0000-4000-8000-000000000005', 'admin@digitalmuid.com', NULL, '{}'::jsonb, '{}'::jsonb);
 
 INSERT INTO public.resources (
   id, title, slug, description, resource_type, category,
@@ -157,6 +165,18 @@ BEGIN
 
   SELECT COUNT(*) INTO v_hidden_cnt FROM public.public_resources WHERE id IN ('99000000-0000-4000-8000-000000000004', '99000000-0000-4000-8000-000000000005');
   ASSERT v_hidden_cnt = 0, 'Draft and archived rows must be invisible in public_resources';
+
+  -- Percent-encoded protected URL evasion tests (E-7) vs safe legitimate free downloads
+  ASSERT NOT public.is_protected_resource_url('/downloads/p03-synthetic-free.pdf'), 'Free PDF path must remain public';
+  ASSERT NOT public.is_protected_resource_url('/downloads/p03-synthetic-sheet.xlsx'), 'Free XLSX path must remain public';
+  ASSERT NOT public.is_protected_resource_url('/downloads/My%20Free%20Guide.pdf'), 'Free PDF with encoded spaces must remain public';
+  ASSERT NOT public.is_protected_resource_url('/downloads/100%25-Guide.pdf'), 'Free PDF with encoded percent must remain public';
+  ASSERT public.is_protected_resource_url('/%70rotected_downloads/p03-secret.pdf'), 'Single percent-encoded protected_downloads must be redacted';
+  ASSERT public.is_protected_resource_url('/%2570rotected_downloads/p03-secret.pdf'), 'Double percent-encoded protected_downloads must be redacted';
+  ASSERT public.is_protected_resource_url('/%25252570aid/playbook.pdf'), 'Unresolved multi-encoded paid path must fail closed (redacted)';
+  ASSERT public.is_protected_resource_url('/storage/v1/object%2fpublic%2fpaid-resources%2fa.pdf'), 'Encoded storage path must be redacted';
+  ASSERT public.is_protected_resource_url('supabase%3A%2F%2Fpaid-resources/secret.pdf'), 'Encoded supabase:// scheme must be redacted';
+  ASSERT public.is_protected_resource_url('/downloads/..%2fprotected_downloads/secret.pdf'), 'Encoded traversal path must be redacted';
 END $$;
 
 RESET ROLE;
@@ -222,6 +242,39 @@ BEGIN
 
   UPDATE public.resources SET title = 'P03 CMS Updated' WHERE id = v_cms_id;
   DELETE FROM public.resources WHERE id = v_cms_id;
+END $$;
+
+-- 3E. Email-allowlisted UNCONFIRMED admin (admin@digitalmuid.com, email_confirmed_at IS NULL, no app_metadata.role): DENIED
+SELECT set_config('request.jwt.claim.sub', '99100000-0000-4000-8000-000000000005', true);
+
+DO $$
+DECLARE
+  v_base_cnt INTEGER;
+BEGIN
+  ASSERT NOT public.is_admin(), 'Unconfirmed email-allowlisted admin must NOT pass public.is_admin()';
+  SELECT COUNT(*) INTO v_base_cnt FROM public.resources WHERE slug LIKE 'p03-synth-%';
+  ASSERT v_base_cnt = 0, 'Unconfirmed email-allowlisted admin must see 0 rows in public.resources';
+END $$;
+
+RESET ROLE;
+
+-- Promote synthetic allowlisted admin user to confirmed inside this rollback-only transaction
+UPDATE auth.users
+SET email_confirmed_at = NOW()
+WHERE id = '99100000-0000-4000-8000-000000000005'::uuid;
+
+-- 3F. Email-allowlisted CONFIRMED admin (admin@digitalmuid.com, email_confirmed_at IS NOT NULL): ALLOWED
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.role', 'authenticated', true);
+SELECT set_config('request.jwt.claim.sub', '99100000-0000-4000-8000-000000000005', true);
+
+DO $$
+DECLARE
+  v_base_cnt INTEGER;
+BEGIN
+  ASSERT public.is_admin(), 'Confirmed email-allowlisted admin MUST pass public.is_admin()';
+  SELECT COUNT(*) INTO v_base_cnt FROM public.resources WHERE slug LIKE 'p03-synth-%';
+  ASSERT v_base_cnt = 7, 'Confirmed email-allowlisted admin must see all 7 synthetic fixtures in public.resources';
 END $$;
 
 RESET ROLE;
@@ -312,6 +365,44 @@ END $$;
 
 DROP TRIGGER trg_p03_zero_row_test ON public.resources;
 
+-- 4C. Bounded indexed rate-limit pruning verification (LIMIT 50 per allowed download — E-7)
+DO $$
+DECLARE
+  v_i INTEGER;
+  v_expired_before INTEGER;
+  v_expired_after INTEGER;
+  v_res JSONB;
+  v_cleanup_hash CONSTANT TEXT := repeat('c', 64);
+BEGIN
+  FOR v_i IN 1..65 LOOP
+    INSERT INTO public.resource_download_rate_limits (
+      resource_id, client_hash, window_started_at, hit_count, updated_at
+    )
+    VALUES (
+      '99000000-0000-4000-8000-000000000002'::uuid,
+      pg_catalog.lpad(pg_catalog.to_hex(v_i), 64, '0'),
+      NOW() - INTERVAL '48 hours' - (v_i * INTERVAL '1 minute'),
+      1,
+      NOW() - INTERVAL '48 hours'
+    );
+  END LOOP;
+
+  SELECT COUNT(*) INTO v_expired_before
+  FROM public.resource_download_rate_limits
+  WHERE resource_id = '99000000-0000-4000-8000-000000000002'::uuid
+    AND window_started_at < (NOW() - INTERVAL '24 hours');
+  ASSERT v_expired_before = 65, 'Expected 65 seeded expired rows before bounded prune';
+
+  v_res := public.record_free_resource_download('99000000-0000-4000-8000-000000000002'::uuid, v_cleanup_hash, 900, 10);
+  ASSERT (v_res ->> 'code') = 'OK' AND (v_res ->> 'incremented')::boolean = TRUE, 'Bounded prune trigger call must succeed';
+
+  SELECT COUNT(*) INTO v_expired_after
+  FROM public.resource_download_rate_limits
+  WHERE resource_id = '99000000-0000-4000-8000-000000000002'::uuid
+    AND window_started_at < (NOW() - INTERVAL '24 hours');
+  ASSERT v_expired_after = 15, 'Bounded LIMIT 50 prune must leave 15 of 65 expired rows (got ' || v_expired_after || ')';
+END $$;
+
 -- ==============================================================================
 -- 5. TEST-OWNED CLEANUP ONLY (ROLLBACK TRANSACTION FOR ZERO RESIDUE)
 -- ==============================================================================
@@ -342,7 +433,8 @@ WHERE id IN (
   '99100000-0000-4000-8000-000000000001'::uuid,
   '99100000-0000-4000-8000-000000000002'::uuid,
   '99100000-0000-4000-8000-000000000003'::uuid,
-  '99100000-0000-4000-8000-000000000004'::uuid
+  '99100000-0000-4000-8000-000000000004'::uuid,
+  '99100000-0000-4000-8000-000000000005'::uuid
 );
 
 ROLLBACK;

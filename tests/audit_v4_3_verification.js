@@ -272,12 +272,12 @@ runTest("SEC-04.1: Confirmed whitelisted admin emails are ALLOWED", () => {
   const confirmedAdmin2 = {
     id: "admin-uuid-2",
     email: "admin@digitalmuid.com",
-    confirmed_at: "2026-01-01T00:00:00Z"
+    email_confirmed_at: "2026-01-01T00:00:00Z"
   };
   assert.strictEqual(checkIsAdmin(confirmedAdmin2), true, "Confirmed admin@digitalmuid.com must be admin");
 });
 
-runTest("SEC-04.2: UNCONFIRMED whitelisted admin emails are DENIED", () => {
+runTest("SEC-04.2: UNCONFIRMED (or confirmed_at-only) whitelisted admin emails are DENIED", () => {
   const unconfirmedAdmin1 = {
     id: "attacker-unconfirmed-1",
     email: "mkdigitalverse@gmail.com",
@@ -291,6 +291,14 @@ runTest("SEC-04.2: UNCONFIRMED whitelisted admin emails are DENIED", () => {
     email: "admin@digitalmuid.com"
   };
   assert.strictEqual(checkIsAdmin(unconfirmedAdmin2), false, "Unconfirmed admin@digitalmuid.com must NOT be admin");
+
+  const phoneConfirmedOnlyAdmin = {
+    id: "attacker-confirmed-at-only",
+    email: "admin@digitalmuid.com",
+    email_confirmed_at: null,
+    confirmed_at: "2026-01-01T00:00:00Z"
+  };
+  assert.strictEqual(checkIsAdmin(phoneConfirmedOnlyAdmin), false, "confirmed_at-only admin without email_confirmed_at must NOT be admin");
 });
 
 runTest("SEC-04.3: Non-admin users are DENIED", () => {

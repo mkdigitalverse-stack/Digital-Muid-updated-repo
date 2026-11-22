@@ -2257,17 +2257,43 @@ async function main() {
       assert.strictEqual(anonOnUserOwned.allowed, false);
       assert.strictEqual(anonOnUserOwned.denied, true);
 
-      const wrongUserOnOwned = evaluateRecordOwnership(USER_1_ID, { id: USER_2_ID, app_metadata: {} });
+      const wrongUserOnOwned = evaluateRecordOwnership(USER_1_ID, {
+        id: USER_2_ID,
+        email_confirmed_at: "2026-01-01T00:00:00Z",
+        app_metadata: {}
+      });
       assert.strictEqual(wrongUserOnOwned.allowed, false);
       assert.strictEqual(wrongUserOnOwned.denied, true);
 
-      const ownerAllowed = evaluateRecordOwnership(USER_1_ID, { id: USER_1_ID, app_metadata: {} });
+      const unconfirmedOwnerDenied = evaluateRecordOwnership(USER_1_ID, {
+        id: USER_1_ID,
+        email_confirmed_at: null,
+        app_metadata: {}
+      });
+      assert.strictEqual(unconfirmedOwnerDenied.allowed, false);
+      assert.strictEqual(unconfirmedOwnerDenied.denied, true);
+
+      const phoneConfirmedOnlyOwnerDenied = evaluateRecordOwnership(USER_1_ID, {
+        id: USER_1_ID,
+        email_confirmed_at: null,
+        confirmed_at: "2026-01-01T00:00:00Z",
+        app_metadata: {}
+      });
+      assert.strictEqual(phoneConfirmedOnlyOwnerDenied.allowed, false);
+      assert.strictEqual(phoneConfirmedOnlyOwnerDenied.denied, true);
+
+      const ownerAllowed = evaluateRecordOwnership(USER_1_ID, {
+        id: USER_1_ID,
+        email_confirmed_at: "2026-01-01T00:00:00Z",
+        app_metadata: {}
+      });
       assert.strictEqual(ownerAllowed.allowed, true);
 
       const unconfirmedAdminDenied = evaluateRecordOwnership(USER_1_ID, {
         id: ADMIN_ID,
         email: "admin@digitalmuid.com",
         email_confirmed_at: null,
+        confirmed_at: "2026-01-01T00:00:00Z",
         app_metadata: { role: "admin" }
       });
       assert.strictEqual(unconfirmedAdminDenied.allowed, false);
