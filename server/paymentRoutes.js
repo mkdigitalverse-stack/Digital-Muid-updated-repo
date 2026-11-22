@@ -82,10 +82,9 @@ const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const RATE_LIMIT_MAX_REQUESTS = 30; // 30 requests
 
 export function getClientIp(req) {
-  return req.ip ||
-         (req.headers && req.headers["x-forwarded-for"] ? String(req.headers["x-forwarded-for"]).split(",")[0].trim() : null) ||
-         req.socket?.remoteAddress ||
-         "127.0.0.1";
+  // Strictly use Express-resolved req.ip (governed by TRUST_PROXY_HOPS) or socket address.
+  // Never parse raw req.headers["x-forwarded-for"] directly to prevent spoofing bypasses.
+  return req?.ip || req?.socket?.remoteAddress || "127.0.0.1";
 }
 
 export function paymentRateLimiter(req, res, next) {
@@ -1343,8 +1342,8 @@ router.post("/create-resource-order", async (req, res) => {
 
     const cleanResourceId = resourceId.trim();
 
-    // 1. Obtain database client
-    const dbClient = getSupabaseDbClient(authHeader) || getSupabaseServerClient();
+    // 1. Obtain privileged service-role database client ONLY (P0-3: public.resources is admin/service_role only)
+    const dbClient = getSupabaseServerClient();
     if (!dbClient) {
       return res.status(503).json({
         success: false,
@@ -1582,7 +1581,7 @@ router.post("/verify-resource-payment", async (req, res) => {
     const cleanOrderId = razorpay_order_id.trim();
     const cleanPaymentId = razorpay_payment_id.trim();
 
-    const dbClient = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    const dbClient = getSupabaseServerClient();
     if (!dbClient) {
       return res.status(503).json({
         success: false,
@@ -1957,7 +1956,7 @@ router.post("/recover-lead", async (req, res) => {
       });
     }
 
-    const dbClient = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    const dbClient = getSupabaseServerClient();
     if (!dbClient) {
       return res.status(503).json({
         success: false,
@@ -2558,7 +2557,7 @@ router.get("/verify-purchase-status", async (req, res) => {
     const cleanPaymentId = paymentId ? String(paymentId).trim() : null;
     const cleanOrderId = orderId ? String(orderId).trim() : null;
 
-    const supabaseServer = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    const supabaseServer = getSupabaseServerClient();
     if (!supabaseServer) {
       return res.status(503).json({ success: false, verified: false, error: "Database service unavailable." });
     }
@@ -2946,7 +2945,7 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
     const cleanPaymentId = paymentId ? String(paymentId).trim() : null;
     const cleanOrderId = orderId ? String(orderId).trim() : null;
 
-    const supabaseServer = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    const supabaseServer = getSupabaseServerClient();
     if (!supabaseServer) {
       return res.status(503).json({ success: false, error: "Database service unavailable." });
     }
@@ -3169,7 +3168,11 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
     }
 
     // 3. Check authenticated user ownership (unless explicit ownership mismatch occurred)
-    if (!isAuthorized && !ownershipDenied && authenticatedUser) {
+    // Require confirmed email on authenticated user session before granting paid asset access (P0-3 / SERVER-1).
+    const isConfirmedAuthenticatedUser = Boolean(
+      authenticatedUser && (authenticatedUser.email_confirmed_at || authenticatedUser.confirmed_at)
+    );
+    if (!isAuthorized && !ownershipDenied && isConfirmedAuthenticatedUser) {
       if (checkIsAdmin(authenticatedUser)) {
         isAuthorized = true;
       } else if (accessSpec.allAllowedIds.length > 0) {
@@ -3229,7 +3232,7 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
       });
     }
 
-    // Generate signed URL from private Supabase Storage
+    // Generate signed URL from private Supabase Storage (fail closed on signing errors)
     let finalDownloadUrl = null;
 
     // Check if item is in BUNDLE_ITEMS
@@ -3239,40 +3242,83 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
     );
     if (bundleItem) {
       if (supabaseServer.storage?.from) {
-        const { data: signedData } = await supabaseServer.storage
-          .from("resources")
+        const storageBucket = String(resourceRecord.file_url || "").startsWith("supabase://paid-resources/")
+          ? "paid-resources"
+          : "resources";
+        const { data: signedData, error: signErr } = await supabaseServer.storage
+          .from(storageBucket)
           .createSignedUrl(bundleItem.storagePath, 3600);
+        if (signErr) {
+          return res.status(503).json({
+            success: false,
+            error: "Failed to generate signed download URL for paid asset."
+          });
+        }
         if (signedData?.signedUrl) {
           finalDownloadUrl = signedData.signedUrl;
         }
       }
     } else {
-      let rawUrl = resourceRecord.file_url || resourceRecord.external_url || null;
-      if (rawUrl && (rawUrl.includes("/storage/v1/object/") || rawUrl.startsWith("supabase://resources/"))) {
+      const rawUrl = resourceRecord.file_url || resourceRecord.external_url || null;
+      const isStorageUrl = Boolean(
+        rawUrl &&
+        (
+          rawUrl.includes("/storage/v1/object/") ||
+          rawUrl.startsWith("supabase://paid-resources/") ||
+          rawUrl.startsWith("supabase://resources/")
+        )
+      );
+
+      if (isStorageUrl) {
+        let storageBucket = "resources";
         let objectPath = "";
-        if (rawUrl.startsWith("supabase://resources/")) {
+
+        if (rawUrl.startsWith("supabase://paid-resources/")) {
+          storageBucket = "paid-resources";
+          objectPath = rawUrl.replace("supabase://paid-resources/", "");
+        } else if (rawUrl.startsWith("supabase://resources/")) {
+          storageBucket = "resources";
           objectPath = rawUrl.replace("supabase://resources/", "");
         } else {
-          const match = rawUrl.match(/\/resources\/(.+)$/);
-          if (match && match[1]) {
-            objectPath = decodeURIComponent(match[1].split("?")[0]);
+          const match = rawUrl.match(/\/storage\/v1\/object\/(?:public|sign|authenticated)\/([^/]+)\/(.+)$/);
+          if (match && match[1] && match[2]) {
+            storageBucket = decodeURIComponent(match[1]);
+            objectPath = decodeURIComponent(match[2].split("?")[0]);
+          } else {
+            const legacyMatch = rawUrl.match(/\/resources\/(.+)$/);
+            if (legacyMatch && legacyMatch[1]) {
+              storageBucket = "resources";
+              objectPath = decodeURIComponent(legacyMatch[1].split("?")[0]);
+            }
           }
         }
-        if (objectPath && supabaseServer.storage?.from) {
-          const { data: signedData } = await supabaseServer.storage
-            .from("resources")
-            .createSignedUrl(objectPath, 3600);
-          if (signedData?.signedUrl) {
-            finalDownloadUrl = signedData.signedUrl;
-          }
+
+        if (!objectPath || !supabaseServer.storage?.from) {
+          return res.status(503).json({
+            success: false,
+            error: "Failed to generate signed download URL for paid asset."
+          });
         }
+
+        const { data: signedData, error: signErr } = await supabaseServer.storage
+          .from(storageBucket)
+          .createSignedUrl(objectPath, 3600);
+
+        if (signErr || !signedData?.signedUrl) {
+          return res.status(503).json({
+            success: false,
+            error: "Failed to generate signed download URL for paid asset."
+          });
+        }
+
+        finalDownloadUrl = signedData.signedUrl;
       } else {
         finalDownloadUrl = rawUrl;
       }
     }
 
-    // Fallback: If Supabase Storage signed URL is unavailable, generate an authoritative server download link
-    if (!finalDownloadUrl || finalDownloadUrl.startsWith("/downloads/")) {
+    // Fallback: For local protected disk assets only (non-Storage), mint an HMAC server download link
+    if (!finalDownloadUrl || finalDownloadUrl.startsWith("/downloads/") || finalDownloadUrl.startsWith("/protected_downloads/")) {
       const token = generateAssetAccessToken(resourceRecord.id, cleanPaymentId || authenticatedUser?.id || "authorized");
       if (!token) {
         return res.status(503).json({
@@ -3327,7 +3373,7 @@ async function handleBundleFilesRequest(req, res) {
       });
     }
 
-    const supabaseServer = getSupabaseServerClient() || getSupabaseDbClient(authHeader);
+    const supabaseServer = getSupabaseServerClient();
     if (!supabaseServer) {
       return res.status(503).json({ success: false, authorized: false, error: "Database service unavailable." });
     }

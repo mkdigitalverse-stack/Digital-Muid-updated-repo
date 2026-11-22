@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, RefreshCw, BookOpen } from 'lucide-react';
+import { isDynamicImportError, triggerGuardedModuleReload } from '../utils/lazyWithRetry';
 
 export interface ErrorBoundaryProps {
   children?: any;
@@ -37,6 +38,9 @@ export class ErrorBoundary extends BaseComponent<ErrorBoundaryProps, ErrorBounda
 
   componentDidCatch(error: Error, errorInfo: any) {
     console.error('[ErrorBoundary caught error]:', error, errorInfo);
+    if (isDynamicImportError(error)) {
+      triggerGuardedModuleReload(window.location.pathname);
+    }
   }
 
   componentDidUpdate(prevProps: ErrorBoundaryProps) {
@@ -46,6 +50,10 @@ export class ErrorBoundary extends BaseComponent<ErrorBoundaryProps, ErrorBounda
   }
 
   handleReset = () => {
+    if (isDynamicImportError(this.state.error)) {
+      window.location.reload();
+      return;
+    }
     this.setState({ hasError: false, error: null });
     if (this.props.onReset) {
       this.props.onReset();
@@ -66,6 +74,8 @@ export class ErrorBoundary extends BaseComponent<ErrorBoundaryProps, ErrorBounda
         return this.props.fallback;
       }
 
+      const isModuleLoadFailure = isDynamicImportError(this.state.error);
+
       return (
         <div
           id="error-boundary-recovery"
@@ -78,10 +88,12 @@ export class ErrorBoundary extends BaseComponent<ErrorBoundaryProps, ErrorBounda
 
             <div className="space-y-2">
               <h2 className="text-2xl sm:text-3xl font-display font-bold text-slate-900 tracking-tight">
-                Something went wrong
+                {isModuleLoadFailure ? 'Session Refresh Needed' : 'Something went wrong'}
               </h2>
               <p className="text-sm text-slate-600 font-interface leading-relaxed">
-                An unexpected interface error occurred while rendering this view. You can reload this section or return to the course directory.
+                {isModuleLoadFailure
+                  ? 'This page module could not be loaded because the application updated or the preview session refreshed. Reload the page to continue.'
+                  : 'An unexpected interface error occurred while rendering this view. You can reload this section or return to the course directory.'}
               </p>
             </div>
 
@@ -92,7 +104,7 @@ export class ErrorBoundary extends BaseComponent<ErrorBoundaryProps, ErrorBounda
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-sm transition-all cursor-pointer"
               >
                 <RefreshCw className="w-4 h-4" />
-                <span>Try Again</span>
+                <span>{isModuleLoadFailure ? 'Reload Page' : 'Try Again'}</span>
               </button>
 
               <button

@@ -203,6 +203,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
 CREATE TABLE IF NOT EXISTS auth.users (
   id UUID PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
+  email_confirmed_at TIMESTAMPTZ,
   raw_user_meta_data JSONB NOT NULL DEFAULT '{}'::jsonb,
   raw_app_meta_data JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

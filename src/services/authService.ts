@@ -38,6 +38,11 @@ export const authService = {
       }
     }
 
+    const isConfirmed = Boolean(user.email_confirmed_at || (user as { confirmed_at?: string | null }).confirmed_at);
+    if (!isConfirmed) {
+      return false;
+    }
+
     const email = user.email.trim().toLowerCase();
     const isEmailAdmin = AUTHORIZED_ADMIN_EMAILS.includes(email);
     const hasAdminAppRole = user.app_metadata?.role === 'admin';

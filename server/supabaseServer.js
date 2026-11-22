@@ -165,22 +165,24 @@ export async function verifySupabaseToken(token) {
 export function checkIsAdmin(user) {
   if (!user) return false;
 
+  // Mandatory email confirmation gate for ALL admin authorization paths (P0-3 / SEC-04)
+  // Aligns server-side checks with hardened PostgreSQL public.is_admin().
+  const isConfirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
+  if (!isConfirmed) return false;
+
   // 1. Independent server-trusted role check via app_metadata
   // (app_metadata can only be written by service_role, never by client users)
   if (user.app_metadata && typeof user.app_metadata === 'object' && user.app_metadata.role === 'admin') {
     return true;
   }
 
-  // 2. Email whitelist check: MUST be an independently verified/confirmed email (SEC-04 Compliance)
+  // 2. Email allowlist check (already verified confirmed above)
   const email = (user.email || '').toLowerCase().trim();
   if (!email) return false;
 
   const adminEmails = ['mkdigitalverse@gmail.com', 'admin@digitalmuid.com'];
   if (adminEmails.includes(email)) {
-    const isConfirmed = Boolean(user.email_confirmed_at || user.confirmed_at);
-    if (isConfirmed) {
-      return true;
-    }
+    return true;
   }
 
   return false;

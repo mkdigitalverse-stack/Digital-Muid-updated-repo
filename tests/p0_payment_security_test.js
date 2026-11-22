@@ -2264,7 +2264,21 @@ async function main() {
       const ownerAllowed = evaluateRecordOwnership(USER_1_ID, { id: USER_1_ID, app_metadata: {} });
       assert.strictEqual(ownerAllowed.allowed, true);
 
-      const adminAllowed = evaluateRecordOwnership(USER_1_ID, { id: ADMIN_ID, email: "admin@digitalmuid.com", app_metadata: { role: "admin" } });
+      const unconfirmedAdminDenied = evaluateRecordOwnership(USER_1_ID, {
+        id: ADMIN_ID,
+        email: "admin@digitalmuid.com",
+        email_confirmed_at: null,
+        app_metadata: { role: "admin" }
+      });
+      assert.strictEqual(unconfirmedAdminDenied.allowed, false);
+      assert.strictEqual(unconfirmedAdminDenied.denied, true);
+
+      const adminAllowed = evaluateRecordOwnership(USER_1_ID, {
+        id: ADMIN_ID,
+        email: "admin@digitalmuid.com",
+        email_confirmed_at: "2026-01-01T00:00:00Z",
+        app_metadata: { role: "admin" }
+      });
       assert.strictEqual(adminAllowed.allowed, true);
     });
 

@@ -16,6 +16,11 @@ import paymentRoutes, {
 import webEnquiryRoutes from "./server/webEnquiryRoutes.js";
 import growthAuditRoutes from "./server/growthAuditRoutes.js";
 import authRoutes from "./server/authRoutes.js";
+import {
+  createResourceRoutes,
+  resolveTrustProxyConfig,
+  isDownloadRateLimitSecretConfigured
+} from "./server/resourceRoutes.js";
 import { seoRedirectMiddleware } from "./server/seoRedirects.js";
 import { injectSeoIntoHtml } from "./server/htmlSeoInjector.js";
 import {
@@ -298,10 +303,12 @@ export interface CreateAppOptions {
 export async function createApp(options: CreateAppOptions = {}) {
   const app = express();
 
-  // Configure reverse proxy trust for Cloud Run / Nginx / Load Balancer (SEC-05 Compliance)
-  app.set("trust proxy", 1);
-
   const isProduction = options.isProduction ?? isProductionEnvironment();
+
+  // Configure reverse proxy trust explicitly via TRUST_PROXY_HOPS (P0-3 / SEC-05).
+  // Never guesses a hop count (defaults to false / 0 hops when unset).
+  const trustProxyConfig = resolveTrustProxyConfig(process.env, isProduction);
+  app.set("trust proxy", trustProxyConfig.expressValue);
 
   // 0. Mount Development Safety Gate BEFORE any write endpoints, webhooks, or API handlers
   app.use(developmentSafetyMiddleware);
@@ -349,12 +356,17 @@ export async function createApp(options: CreateAppOptions = {}) {
         assetTokenSecretConfigured,
         resourceTokenSecretConfigured,
         invoiceTokenSecretConfigured,
+        downloadRateLimitSecretConfigured: isDownloadRateLimitSecretConfigured(),
+        trustProxyHopsConfigured: resolveTrustProxyConfig(process.env, isProduction).configured,
       },
     });
   });
 
   // 5. Payment Gateway APIs
   app.use("/api/payments", paymentRoutes);
+
+  // 5.5. Resource Catalog & Persistent Free-Download Counter APIs (P0-3)
+  app.use("/api/resources", createResourceRoutes({ isProduction }));
 
   // 6. Web Project Enquiries CRM APIs
   app.use("/api/web-enquiries", webEnquiryRoutes);
@@ -416,6 +428,13 @@ export async function createApp(options: CreateAppOptions = {}) {
       next();
     });
 
+    const isModuleOrAssetPath = (reqPath: string): boolean => {
+      if (reqPath.startsWith("/src/") || reqPath.startsWith("/assets/") || reqPath.startsWith("/node_modules/")) {
+        return true;
+      }
+      return /\.(?:mjs|cjs|js|jsx|ts|tsx|css|map|json|wasm|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|eot|pdf|xlsx|zip)$/i.test(reqPath);
+    };
+
     app.get("*", async (req, res, next) => {
       if (req.path.startsWith("/api") || req.path.includes(".")) {
         return next();
@@ -440,6 +459,18 @@ export async function createApp(options: CreateAppOptions = {}) {
         next(e);
       }
     });
+
+    // Guard: missing module/asset requests in dev must return plain 404, never HTML text/html
+    app.use((req, res, next) => {
+      if (isModuleOrAssetPath(req.path)) {
+        res.status(404).set({
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store, no-cache, must-revalidate",
+        }).send("Not Found");
+        return;
+      }
+      next();
+    });
   } else {
     const distPath = options.distDir
       ? options.distDir
@@ -450,6 +481,13 @@ export async function createApp(options: CreateAppOptions = {}) {
               : path.join(__dirname, "..", "dist")));
     const indexPath = path.join(distPath, "index.html");
 
+    const isModuleOrAssetPath = (reqPath: string): boolean => {
+      if (reqPath.startsWith("/src/") || reqPath.startsWith("/assets/") || reqPath.startsWith("/node_modules/")) {
+        return true;
+      }
+      return /\.(?:mjs|cjs|js|jsx|ts|tsx|css|map|json|wasm|svg|png|jpe?g|webp|gif|ico|woff2?|ttf|eot|pdf|xlsx|zip)$/i.test(reqPath);
+    };
+
     app.use(express.static(distPath, { index: false, redirect: false }));
 
     // Guard: nonexistent XML files must return genuine HTTP 404, never fall through to HTML SPA
@@ -458,6 +496,12 @@ export async function createApp(options: CreateAppOptions = {}) {
         res.status(404);
         res.setHeader("Content-Type", "application/xml; charset=utf-8");
         return res.send(`<?xml version="1.0" encoding="UTF-8"?><error><status>404</status><message>XML resource not found</message></error>`);
+      }
+      if (isModuleOrAssetPath(req.path)) {
+        res.status(404);
+        res.setHeader("Content-Type", "text/plain; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        return res.send("Asset not found");
       }
       next();
     });
@@ -486,6 +530,7 @@ export async function createApp(options: CreateAppOptions = {}) {
         }
 
         res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
         res.send(html);
       } catch (_err) {
         if (fs.existsSync(indexPath)) {

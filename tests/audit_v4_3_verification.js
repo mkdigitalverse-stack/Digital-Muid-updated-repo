@@ -305,23 +305,39 @@ runTest("SEC-04.3: Non-admin users are DENIED", () => {
   assert.strictEqual(checkIsAdmin({}), false, "Empty user must NOT be admin");
 });
 
-runTest("SEC-04.4: App metadata admin role is ALLOWED", () => {
-  const appAdmin = {
+runTest("SEC-04.4: App metadata admin role requires confirmed email (P0-3 hardened)", () => {
+  const confirmedAppAdmin = {
     id: "app-admin-uuid",
     email: "ops@domain.internal",
+    email_confirmed_at: "2026-01-01T00:00:00Z",
     app_metadata: { role: "admin" }
   };
-  assert.strictEqual(checkIsAdmin(appAdmin), true, "app_metadata.role === 'admin' must be admin");
+  assert.strictEqual(checkIsAdmin(confirmedAppAdmin), true, "Confirmed app_metadata.role === 'admin' must be admin");
+
+  const unconfirmedAppAdmin = {
+    id: "unconfirmed-app-admin-uuid",
+    email: "ops-unconfirmed@domain.internal",
+    email_confirmed_at: null,
+    app_metadata: { role: "admin" }
+  };
+  assert.strictEqual(checkIsAdmin(unconfirmedAppAdmin), false, "Unconfirmed app_metadata.role === 'admin' must be DENIED");
 });
 
 // ------------------------------------------------------------------------------
 // 5. SEC-05: Rate Limiting & Reverse Proxy Trust
 // ------------------------------------------------------------------------------
-runTest("SEC-05.1: server.ts sets trust proxy 1", () => {
+runTest("SEC-05.1: server.ts configures trust proxy explicitly via resolveTrustProxyConfig (no hardcoded 1)", () => {
   const serverPath = path.resolve("server.ts");
   const code = fs.readFileSync(serverPath, "utf8");
 
-  assert.ok(code.includes('app.set("trust proxy", 1)'), 'server.ts must configure app.set("trust proxy", 1)');
+  assert.ok(
+    code.includes('resolveTrustProxyConfig') && code.includes('app.set("trust proxy", trustProxyConfig.expressValue)'),
+    'server.ts must configure trust proxy explicitly via resolveTrustProxyConfig'
+  );
+  assert.ok(
+    !code.includes('app.set("trust proxy", 1)'),
+    'server.ts must NOT hardcode app.set("trust proxy", 1)'
+  );
 });
 
 runTest("SEC-05.2: Rate limiter allows up to 30 requests and blocks request #31 with 429", () => {
@@ -378,14 +394,23 @@ runTest("SEC-05.2: Rate limiter allows up to 30 requests and blocks request #31 
   resetPaymentRateLimits();
 });
 
-runTest("SEC-05.3: Reverse proxy X-Forwarded-For client IP extraction", () => {
-  const reqWithProxy = {
+runTest("SEC-05.3: getClientIp ignores raw spoofed X-Forwarded-For and uses Express req.ip / socket IP", () => {
+  const reqWithExpressIp = {
+    ip: "203.0.113.195",
     headers: {
-      "x-forwarded-for": "203.0.113.195, 10.0.0.1"
-    }
+      "x-forwarded-for": "198.51.100.77, 10.0.0.1"
+    },
+    socket: { remoteAddress: "10.0.0.1" }
   };
-  const extracted = getClientIp(reqWithProxy);
-  assert.strictEqual(extracted, "203.0.113.195", "Must extract real client IP from X-Forwarded-For");
+  assert.strictEqual(getClientIp(reqWithExpressIp), "203.0.113.195", "Must use Express-resolved req.ip");
+
+  const reqWithSpoofedHeaderOnly = {
+    headers: {
+      "x-forwarded-for": "198.51.100.77"
+    },
+    socket: { remoteAddress: "127.0.0.1" }
+  };
+  assert.strictEqual(getClientIp(reqWithSpoofedHeaderOnly), "127.0.0.1", "Must ignore raw X-Forwarded-For header when req.ip is absent");
 });
 
 // ------------------------------------------------------------------------------

@@ -2966,7 +2966,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refreshResources = useCallback(async () => {
     try {
       const { data: { session } } = isSupabaseConfigured() ? await supabase.auth.getSession() : { data: { session: null } };
-      const isAdmin = Boolean(session && session.user);
+      const isAdmin = session?.user ? await authService.checkIsAdmin(session.user) : false;
 
       if (isAdmin) {
         const res = await resourceService.fetchAllResources();
@@ -3256,10 +3256,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('[Supabase Lead Magnet] CRM lead insertion notice:', err);
       });
 
-      // 5. Increment resource download count in Supabase
-      resourceService.incrementDownloadCount(resourceId).catch(err => {
-        console.warn('[Supabase Resources] Download count increment notice:', err);
-      });
+      // 5. Increment free-resource download count via rate-limited server endpoint (never for paid resources)
+      const isFreeLeadResource =
+        !targetResource ||
+        (targetResource.accessType !== 'paid' &&
+          targetResource.access_type !== 'paid' &&
+          Number(targetResource.price || 0) === 0);
+      if (isFreeLeadResource) {
+        resourceService.incrementDownloadCount(resourceId).catch(err => {
+          console.warn('[Resources] Download count increment notice:', err);
+        });
+      }
 
       notify('Enquiry received! Your resource is unlocked.', 'success');
       return { success: true, leadId: newLead.id };
@@ -3386,15 +3393,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch {}
       }
 
-      // Increment resource download count
+      // Increment resource download count in UI state
       setResources(prev =>
         prev.map(r => r.id === resource.id ? { ...r, downloadCount: (r.downloadCount || 0) + 1 } : r)
       );
 
-      // If Supabase is configured, record lead/purchase notice
-      resourceService.incrementDownloadCount(resource.id).catch(err => {
-        console.warn('[Supabase Resources] Download count increment notice:', err);
-      });
+      // Paid purchases must NEVER call the public free-download counter endpoint (P0-3)
+      if (!isPaid) {
+        resourceService.incrementDownloadCount(resource.id).catch(err => {
+          console.warn('[Resources] Free download count increment notice:', err);
+        });
+      }
 
       notify(isPaid ? `Access unlocked for ${resource.title || resource.name}!` : 'Resource ready for download.', 'success');
       return { success: true };

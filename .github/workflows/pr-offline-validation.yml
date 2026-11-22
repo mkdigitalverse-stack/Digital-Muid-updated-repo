@@ -37,11 +37,12 @@ jobs:
       - name: Production build (Vite + esbuild CJS server + static SEO pages)
         run: npm run build
 
-      - name: Run P0 hotfix regression suites (P0-1 & P0-2)
+      - name: Run P0 hotfix regression suites (P0-1, P0-2 & P0-3)
         run: |
           set -euo pipefail
           npx --no-install tsx tests/p0_server_pipeline_integration_test.ts
           node tests/p0_invoice_uuid_lookup_test.js
+          npx --no-install tsx tests/p0_3_security_and_compatibility_test.ts
 
       - name: Run security, authorization & billing offline suites
         run: |

@@ -283,8 +283,8 @@ export const mapResourceToDbPayload = (r: Partial<Resource>): Record<string, any
 
 export const resourceService = {
   /**
-   * Fetches published resources from public.resources (ordered by published_at DESC).
-   * Accessible by public visitors.
+   * Fetches published resources from public.public_resources view (ordered by published_at DESC).
+   * Accessible by guests and authenticated students with paid asset URLs redacted server-side.
    */
   async fetchPublishedResources(): Promise<{ data: Resource[] | null; error: any }> {
     if (!isSupabaseConfigured()) {
@@ -293,7 +293,7 @@ export const resourceService = {
 
     try {
       const { data, error } = await supabase
-        .from('resources')
+        .from('public_resources')
         .select('*')
         .eq('status', 'published')
         .order('is_featured', { ascending: false })
@@ -303,7 +303,7 @@ export const resourceService = {
         if (error.code !== 'PGRST205') {
           console.error('[Supabase Resources] fetchPublishedResources error:', error);
         } else {
-          console.debug('[Supabase Resources] Notice: public.resources table is not in schema cache (PGRST205), relying on local fallback.');
+          console.debug('[Supabase Resources] Notice: public.public_resources view is not in schema cache (PGRST205), relying on local fallback.');
         }
         return { data: null, error };
       }
@@ -356,7 +356,8 @@ export const resourceService = {
   },
 
   /**
-   * Fetches a single resource by unique slug.
+   * Fetches a single published resource by unique slug from public.public_resources.
+   * Paid asset URLs remain redacted; authorized downloads are served via server endpoints.
    */
   async fetchResourceBySlug(slug: string): Promise<{ data: Resource | null; error: any }> {
     if (!isSupabaseConfigured() || !slug) {
@@ -365,7 +366,7 @@ export const resourceService = {
 
     try {
       const { data, error } = await supabase
-        .from('resources')
+        .from('public_resources')
         .select('*')
         .eq('slug', slug.trim())
         .maybeSingle();
@@ -374,7 +375,7 @@ export const resourceService = {
         if (error.code !== 'PGRST205') {
           console.error('[Supabase Resources] fetchResourceBySlug error:', error);
         } else {
-          console.debug('[Supabase Resources] Notice: public.resources table is not in schema cache (PGRST205).');
+          console.debug('[Supabase Resources] Notice: public.public_resources view is not in schema cache (PGRST205).');
         }
         return { data: null, error };
       }
@@ -704,42 +705,39 @@ export const resourceService = {
   },
 
   /**
-   * Increments the download_count counter for a resource.
+   * Records a free-resource download via the rate-limited server endpoint.
+   * Never calls a client-side RPC or writes directly to public.resources.
    */
-  async incrementDownloadCount(id: string): Promise<{ success: boolean; error: any }> {
-    if (!isSupabaseConfigured() || !id) {
+  async incrementDownloadCount(id: string): Promise<{ success: boolean; error: any; downloadCount?: number }> {
+    const cleanId = String(id || '').trim();
+    if (!cleanId) {
       return { success: false, error: null };
     }
 
     try {
-      // 1. Try atomic database RPC function first
-      const { error: rpcErr } = await supabase.rpc('increment_resource_downloads', { resource_id: id });
-      if (!rpcErr) {
-        return { success: true, error: null };
-      }
-
-      // 2. Fallback to direct read-modify-write if RPC function not created
-      const { data, error: selectErr } = await supabase
-        .from('resources')
-        .select('download_count')
-        .eq('id', id)
-        .maybeSingle();
-
-      if (!selectErr && data) {
-        const nextCount = (data.download_count || 0) + 1;
-        const { error: updateErr } = await supabase
-          .from('resources')
-          .update({ download_count: nextCount })
-          .eq('id', id);
-
-        if (!updateErr) {
-          return { success: true, error: null };
+      const response = await fetch(`/api/resources/${encodeURIComponent(cleanId)}/record-download`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
         }
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || !payload?.success || payload?.incremented !== true) {
+        return {
+          success: false,
+          error: payload?.error || `Request failed with status ${response.status}`
+        };
       }
 
-      return { success: false, error: selectErr || rpcErr };
+      return {
+        success: true,
+        error: null,
+        downloadCount: typeof payload.downloadCount === 'number' ? payload.downloadCount : undefined
+      };
     } catch (err: any) {
-      console.warn('[Supabase Resources] incrementDownloadCount error notice:', err);
+      console.warn('[Resources] Free download counter endpoint error notice:', err);
       return { success: false, error: err };
     }
   },
