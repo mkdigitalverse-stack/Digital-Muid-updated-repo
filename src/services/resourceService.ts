@@ -281,6 +281,112 @@ export const mapResourceToDbPayload = (r: Partial<Resource>): Record<string, any
   return payload;
 };
 
+/**
+ * Returns true if a URL or storage reference targets the public `resources` Storage bucket
+ * or the public `/downloads/` static fallback path.
+ * Never silently rewrites or converts URLs.
+ */
+export const isPublicResourcesStorageUrl = (rawUrl?: string | null): boolean => {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return false;
+
+  if (/^supabase:\/\/resources(?:\/|$)/i.test(trimmed)) return true;
+  if (/^\/downloads(?:\/|$)/i.test(trimmed)) return true;
+  if (/^https?:\/\/[^/]+\/downloads(?:\/|$)/i.test(trimmed)) return true;
+  if (/\/storage\/v1\/object\/(?:public|authenticated|sign)\/resources(?:\/|$)/i.test(trimmed)) return true;
+  if (/\/storage\/v1\/object\/resources(?:\/|$)/i.test(trimmed)) return true;
+
+  return false;
+};
+
+/**
+ * Returns true strictly for canonical private paid-asset references:
+ * `supabase://paid-resources/<relative-path>` with no traversal or control characters.
+ */
+export const isCanonicalPrivatePaidReference = (rawUrl?: string | null): boolean => {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  const trimmed = rawUrl.trim();
+  const prefix = 'supabase://paid-resources/';
+  if (!trimmed.startsWith(prefix)) return false;
+  const relativePath = trimmed.slice(prefix.length);
+  if (!relativePath || relativePath.startsWith('/')) return false;
+  if (
+    relativePath.includes('..') ||
+    relativePath.includes('\\') ||
+    /[\x00-\x1f\x7f\s]/.test(relativePath)
+  ) {
+    return false;
+  }
+  return true;
+};
+
+/**
+ * Determines whether a resource payload represents a paid resource.
+ */
+export const isPaidResourceInput = (resource: Partial<Resource>): boolean => {
+  if (!resource) return false;
+  if (isAuthoritativePaidResource(resource.id) || isAuthoritativePaidResource(resource.slug)) {
+    return true;
+  }
+  const rawAccessType = (resource.accessType || resource.access_type || '').toLowerCase();
+  if (rawAccessType === 'paid') return true;
+  if (typeof resource.price === 'number' && resource.price > 0) return true;
+  return false;
+};
+
+/**
+ * Validates that a newly created or updated paid resource does not persist a public
+ * `resources` Storage bucket URL or `/downloads/` fallback path.
+ * Does NOT silently rewrite public URLs into private references.
+ */
+export const validatePaidResourcePersistence = (
+  resource: Partial<Resource>
+): { valid: boolean; error?: { code: string; message: string } } => {
+  if (!isPaidResourceInput(resource)) {
+    return { valid: true };
+  }
+
+  const candidateUrl = (resource.fileUrl ?? resource.downloadUrl ?? '').trim();
+  if (!candidateUrl) {
+    return { valid: true };
+  }
+
+  if (isPublicResourcesStorageUrl(candidateUrl)) {
+    return {
+      valid: false,
+      error: {
+        code: 'PAID_PUBLIC_URL_FORBIDDEN',
+        message:
+          'Paid resources cannot be saved with a public resources bucket or /downloads/ URL. Upload the file using the secure private paid-asset uploader.'
+      }
+    };
+  }
+
+  return { valid: true };
+};
+
+/**
+ * Resolves the Content-Type header to send to the private paid-asset upload endpoint.
+ * Preserves explicit non-empty file.type values (so spoofed MIME types are rejected server-side)
+ * and infers canonical MIME only when browsers report an empty string (common for .xlsx).
+ */
+export const resolvePaidUploadContentType = (file: { name?: string; type?: string }): string => {
+  const rawType = typeof file?.type === 'string' ? file.type.split(';')[0].trim().toLowerCase() : '';
+  if (rawType) {
+    if (rawType === 'application/x-zip-compressed') return 'application/zip';
+    return rawType;
+  }
+
+  const lowerName = typeof file?.name === 'string' ? file.name.trim().toLowerCase() : '';
+  if (lowerName.endsWith('.pdf')) return 'application/pdf';
+  if (lowerName.endsWith('.xlsx')) {
+    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  }
+  if (lowerName.endsWith('.zip')) return 'application/zip';
+  return 'application/octet-stream';
+};
+
 export const resourceService = {
   /**
    * Fetches published resources from public.public_resources view (ordered by published_at DESC).
@@ -398,6 +504,11 @@ export const resourceService = {
    * Validates required fields before executing database write.
    */
   async insertResource(resource: Partial<Resource>): Promise<{ data: Resource | null; error: any }> {
+    const paidValidation = validatePaidResourcePersistence(resource);
+    if (!paidValidation.valid) {
+      return { data: null, error: paidValidation.error };
+    }
+
     if (!isSupabaseConfigured()) {
       return { data: null, error: { message: 'Database is not connected. Configure VITE_SUPABASE_URL.' } };
     }
@@ -519,7 +630,16 @@ export const resourceService = {
    * Updates an existing resource record in public.resources.
    */
   async updateResource(id: string, updates: Partial<Resource>): Promise<{ data: Resource | null; error: any }> {
-    if (!isSupabaseConfigured() || !id) {
+    if (!id) {
+      return { data: null, error: { message: 'Invalid ID or Supabase unconfigured' } };
+    }
+
+    const paidValidation = validatePaidResourcePersistence({ ...updates, id });
+    if (!paidValidation.valid) {
+      return { data: null, error: paidValidation.error };
+    }
+
+    if (!isSupabaseConfigured()) {
       return { data: null, error: { message: 'Invalid ID or Supabase unconfigured' } };
     }
 
@@ -707,6 +827,102 @@ export const resourceService = {
   },
 
   /**
+   * Securely uploads a PAID digital asset through the authenticated admin-only server endpoint
+   * (`POST /api/resources/admin/upload-paid-asset`) into the private `paid-resources` bucket.
+   *
+   * Security guarantees (Step 3B):
+   * - Never touches the public `resources` Storage bucket.
+   * - Never calls `getPublicUrl()`.
+   * - Never falls back to `/downloads/` or any public URL.
+   * - Accepts only canonical `supabase://paid-resources/<path>` references from the server.
+   */
+  async uploadPaidResourceFile(
+    file: File,
+    options?: { accessToken?: string; endpointUrl?: string }
+  ): Promise<{ url: string | null; error: any; code?: string }> {
+    if (!file || !file.name) {
+      return {
+        url: null,
+        code: 'INVALID_FILE',
+        error: { code: 'INVALID_FILE', message: 'A valid file is required for private paid upload.' }
+      };
+    }
+
+    try {
+      let accessToken = options?.accessToken?.trim() || '';
+      if (!accessToken && isSupabaseConfigured()) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        accessToken = sessionData?.session?.access_token?.trim() || '';
+      }
+
+      if (!accessToken) {
+        return {
+          url: null,
+          code: 'AUTH_REQUIRED',
+          error: {
+            code: 'AUTH_REQUIRED',
+            message: 'Confirmed administrator authentication is required to upload paid assets.'
+          }
+        };
+      }
+
+      const contentType = resolvePaidUploadContentType(file);
+      const endpointUrl = options?.endpointUrl || '/api/resources/admin/upload-paid-asset';
+
+      const response = await fetch(endpointUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': contentType,
+          'X-Upload-Filename': encodeURIComponent(file.name)
+        },
+        body: file
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || !payload || payload.success !== true) {
+        const errCode = payload?.code || `HTTP_${response.status}`;
+        const errMsg =
+          payload?.error ||
+          `Private paid-asset upload failed (HTTP ${response.status}).`;
+        return {
+          url: null,
+          code: errCode,
+          error: {
+            code: errCode,
+            status: response.status,
+            message: errMsg
+          }
+        };
+      }
+
+      const reference = typeof payload.reference === 'string' ? payload.reference.trim() : '';
+      if (!isCanonicalPrivatePaidReference(reference)) {
+        return {
+          url: null,
+          code: 'INVALID_PRIVATE_REFERENCE',
+          error: {
+            code: 'INVALID_PRIVATE_REFERENCE',
+            message: 'Server did not return a valid private paid-resources storage reference.'
+          }
+        };
+      }
+
+      return { url: reference, error: null };
+    } catch (err: any) {
+      return {
+        url: null,
+        code: 'PRIVATE_UPLOAD_NETWORK_ERROR',
+        error: {
+          code: 'PRIVATE_UPLOAD_NETWORK_ERROR',
+          message: err?.message || 'Network error while uploading paid asset to private storage.'
+        }
+      };
+    }
+  },
+
+  /**
    * Records a free-resource download via the rate-limited server endpoint.
    * Never calls a client-side RPC or writes directly to public.resources.
    */
@@ -781,6 +997,7 @@ export const resourceService = {
 
     let externalUrl = isPaid ? null : (resource.externalUrl?.trim() || null);
     let rawFileUrl = isPaid ? null : ((resource.fileUrl || resource.downloadUrl)?.trim() || null);
+    let paidAssetAccessToken: string | null = null;
 
     // Strict Server-Side Purchase Verification:
     // Client-side isAuthorized flags are NEVER accepted as proof of purchase.
@@ -788,6 +1005,7 @@ export const resourceService = {
     const requestAuthorizedPaidDownloadUrl = async (): Promise<{
       ok: boolean;
       downloadUrl?: string | null;
+      assetAccessToken?: string | null;
       isBundle?: boolean;
       bundleUrl?: string;
       error?: string;
@@ -851,6 +1069,10 @@ export const resourceService = {
         }
 
         const authorizedUrl = (verifyData.downloadUrl || verifyData.fileUrl)?.trim() || null;
+        const authorizedAssetToken =
+          typeof verifyData.assetAccessToken === 'string' && verifyData.assetAccessToken.trim()
+            ? verifyData.assetAccessToken.trim()
+            : null;
         if (!authorizedUrl) {
           return {
             ok: false,
@@ -862,7 +1084,8 @@ export const resourceService = {
 
         return {
           ok: true,
-          downloadUrl: authorizedUrl
+          downloadUrl: authorizedUrl,
+          assetAccessToken: authorizedAssetToken
         };
       } catch (fetchErr: any) {
         console.error(
@@ -896,6 +1119,7 @@ export const resourceService = {
         };
       }
       rawFileUrl = authResult.downloadUrl || null;
+      paidAssetAccessToken = authResult.assetAccessToken || null;
       externalUrl = null;
     }
 
@@ -1065,6 +1289,7 @@ export const resourceService = {
                   };
                 }
                 rawFileUrl = refreshed.downloadUrl;
+                paidAssetAccessToken = refreshed.assetAccessToken || null;
                 continue;
               }
 
@@ -1168,7 +1393,7 @@ export const resourceService = {
         }
 
         // -------------------------------------------------------------
-        // 3. Static Server Asset (/downloads/...) or Protected Local Asset (/api/payments/download-paid-asset?token=...)
+        // 3. Static Server Asset (/downloads/...) or Protected Local Asset (/api/payments/download-paid-asset)
         // -------------------------------------------------------------
         if (
           rawFileUrl &&
@@ -1177,10 +1402,16 @@ export const resourceService = {
           const isProtectedLocalEndpoint = rawFileUrl.startsWith('/api/payments/download-paid-asset');
           deliveryMethod = isProtectedLocalEndpoint ? 'Protected Local Asset' : 'Static Asset';
           const cleanPath = rawFileUrl.startsWith('/') ? rawFileUrl : `/${rawFileUrl}`;
-          resolvedUrl = cleanPath;
+          const localFetchReq = isProtectedLocalEndpoint
+            ? buildProtectedLocalAssetRequest(cleanPath, paidAssetAccessToken)
+            : { url: cleanPath };
+          resolvedUrl = localFetchReq.url;
 
           try {
-            const resp = await fetch(cleanPath);
+            const resp = await fetch(
+              localFetchReq.url,
+              localFetchReq.headers ? { headers: localFetchReq.headers } : undefined
+            );
             const contentType = resp.headers.get('content-type') || '';
             // Confirm file exists and is not SPA index.html fallback
             if (resp.ok && !contentType.includes('text/html')) {
@@ -1235,11 +1466,12 @@ export const resourceService = {
                 };
               }
               rawFileUrl = refreshed.downloadUrl;
+              paidAssetAccessToken = refreshed.assetAccessToken || null;
               continue;
             }
 
             errorCode = isExpiredToken ? 'INVALID_DOWNLOAD_TOKEN' : 'STATIC_ASSET_NOT_FOUND';
-            errorMessage = `Asset at ${redactSensitiveUrl(cleanPath)} returned ${resp.status} with content-type: ${contentType || 'unknown'}`;
+            errorMessage = `Asset at ${redactSensitiveUrl(localFetchReq.url)} returned ${resp.status} with content-type: ${contentType || 'unknown'}`;
 
             if (isPaid) {
               this.logDeliveryDiagnostic({
@@ -1762,6 +1994,41 @@ export function isExpiredAssetTokenResponse(status: number, parsedBody: any): bo
     status === 403 &&
     Boolean(parsedBody && typeof parsedBody === 'object' && parsedBody.code === 'INVALID_DOWNLOAD_TOKEN')
   );
+}
+
+/**
+ * Builds a header-only fetch target for `/api/payments/download-paid-asset` (Finding 3).
+ * Never transmits an asset download token in the URL query string: prefers `assetAccessToken`
+ * from the JSON authorization payload and strips any query-string token parameters defensively.
+ */
+export function buildProtectedLocalAssetRequest(
+  rawPath: string,
+  assetAccessToken?: string | null
+): { url: string; headers?: Record<string, string> } {
+  let token = typeof assetAccessToken === 'string' && assetAccessToken.trim()
+    ? assetAccessToken.trim()
+    : null;
+
+  try {
+    const parsed = new URL(rawPath, 'https://digitalmuid.local');
+    for (const key of ['token', 'access_token', 'assetAccessToken']) {
+      const fromQuery = parsed.searchParams.get(key);
+      if (!token && fromQuery && fromQuery.trim()) {
+        token = fromQuery.trim();
+      }
+      parsed.searchParams.delete(key);
+    }
+    const remaining = parsed.searchParams.toString();
+    const cleanUrl = remaining ? `${parsed.pathname}?${remaining}` : parsed.pathname;
+    return token
+      ? { url: cleanUrl, headers: { Authorization: `Bearer ${token}` } }
+      : { url: cleanUrl };
+  } catch {
+    const baseOnly = rawPath.split('?')[0].split('#')[0] || '/api/payments/download-paid-asset';
+    return token
+      ? { url: baseOnly, headers: { Authorization: `Bearer ${token}` } }
+      : { url: baseOnly };
+  }
 }
 
 /**

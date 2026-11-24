@@ -27,7 +27,196 @@ import {
 } from 'lucide-react';
 import { Resource, ResourceType } from '../types';
 import { slugify } from '../services/articleService';
-import { resourceService } from '../services/resourceService';
+import {
+  resourceService,
+  isPublicResourcesStorageUrl,
+  isCanonicalPrivatePaidReference
+} from '../services/resourceService';
+import { isAuthoritativePaidResource } from '../constants/authoritativePaidResources';
+
+export interface ResourceModalFileUploadResult {
+  success: boolean;
+  nextFileUrl: string;
+  fileType?: string;
+  fileSize?: string;
+  notice: string;
+  noticeType: 'success' | 'error' | 'info';
+}
+
+/**
+ * Handles file upload routing for ResourceEditorModal.
+ * - Paid resources upload EXCLUSIVELY via `resourceService.uploadPaidResourceFile`
+ *   (POST /api/resources/admin/upload-paid-asset -> private `paid-resources` bucket).
+ *   Never touches the public `resources` bucket, never calls `getPublicUrl()`, and
+ *   NEVER falls back to `/downloads/${file.name}` on failure.
+ * - Free resources retain the existing `resourceService.uploadResourceFile(file, 'downloads')` flow.
+ */
+export async function executeResourceModalFileUpload(params: {
+  file: File;
+  isPaidResource: boolean;
+  currentFileUrl: string;
+  uploadPaid?: (file: File) => Promise<{ url: string | null; error: any; code?: string }>;
+  uploadFree?: (file: File, folder?: string) => Promise<{ url: string | null; error: any }>;
+}): Promise<ResourceModalFileUploadResult> {
+  const { file, isPaidResource, currentFileUrl } = params;
+  const ext = file.name.split('.').pop()?.toUpperCase() || 'FILE';
+  const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+
+  if (isPaidResource) {
+    try {
+      const uploader = params.uploadPaid || resourceService.uploadPaidResourceFile.bind(resourceService);
+      const { url, error } = await uploader(file);
+      if (url && !error && isCanonicalPrivatePaidReference(url)) {
+        return {
+          success: true,
+          nextFileUrl: url,
+          fileType: `${ext} Document`,
+          fileSize: `${sizeMb} MB`,
+          notice: `Private paid asset uploaded: ${file.name} (${sizeMb} MB)`,
+          noticeType: 'success'
+        };
+      }
+
+      const errMsg =
+        error?.message ||
+        'Private paid-asset upload failed. Paid assets cannot fall back to public storage.';
+      return {
+        success: false,
+        nextFileUrl: currentFileUrl,
+        notice: errMsg,
+        noticeType: 'error'
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        nextFileUrl: currentFileUrl,
+        notice:
+          err?.message ||
+          'Private paid-asset upload failed. Paid assets cannot fall back to public storage.',
+        noticeType: 'error'
+      };
+    }
+  }
+
+  // Free resource upload path (existing workflow preserved intact)
+  try {
+    const uploader = params.uploadFree || resourceService.uploadResourceFile.bind(resourceService);
+    const { url, error } = await uploader(file, 'downloads');
+    if (url && !error) {
+      return {
+        success: true,
+        nextFileUrl: url,
+        fileType: `${ext} Document`,
+        fileSize: `${sizeMb} MB`,
+        notice: `File uploaded: ${file.name} (${sizeMb} MB)`,
+        noticeType: 'success'
+      };
+    }
+
+    console.warn('[Upload Notice] Supabase storage upload warning:', error);
+    return {
+      success: true,
+      nextFileUrl: currentFileUrl || `/downloads/${file.name}`,
+      fileType: `${ext} Document`,
+      fileSize: `${sizeMb} MB`,
+      notice: `File attached: ${file.name} (${sizeMb} MB)`,
+      noticeType: 'success'
+    };
+  } catch (err: any) {
+    console.warn('[Upload Error]', err);
+    return {
+      success: false,
+      nextFileUrl: currentFileUrl,
+      notice: `Upload notice: ${err?.message || 'File registered'}`,
+      noticeType: 'info'
+    };
+  }
+}
+
+export interface ResourceModalSaveValidationResult {
+  ok: boolean;
+  payload?: Partial<Resource>;
+  code?: string;
+  error?: string;
+  preservedLegacyFileUrl?: boolean;
+}
+
+/**
+ * Validates and prepares a ResourceEditorModal save payload.
+ * - Rejects newly created or modified paid resources referencing public `resources`
+ *   bucket URLs or `/downloads/` paths without silently rewriting them.
+ * - Preserves unchanged legacy paid resource URLs during metadata-only edits by
+ *   omitting `fileUrl`/`downloadUrl` from the partial update payload.
+ */
+export function prepareResourceModalSavePayload(params: {
+  payload: Partial<Resource>;
+  isEditing: boolean;
+  wasInitiallyPaid: boolean;
+  isPaidResource: boolean;
+  initialFileUrl: string;
+  currentFileUrl: string;
+  targetStatus: 'draft' | 'published';
+  price: number | '';
+}): ResourceModalSaveValidationResult {
+  const {
+    payload,
+    isEditing,
+    wasInitiallyPaid,
+    isPaidResource,
+    initialFileUrl,
+    currentFileUrl,
+    targetStatus,
+    price
+  } = params;
+
+  if (!payload.title || !payload.title.trim()) {
+    return {
+      ok: false,
+      code: 'TITLE_REQUIRED',
+      error: 'Please provide a title for the resource.'
+    };
+  }
+
+  if (targetStatus === 'published' && isPaidResource && (typeof price !== 'number' || price <= 0)) {
+    return {
+      ok: false,
+      code: 'INVALID_PAID_PRICE',
+      error: 'Please set a valid price (greater than ₹0) for paid resources before publishing.'
+    };
+  }
+
+  const trimmedInitial = (initialFileUrl || '').trim();
+  const trimmedCurrent = (currentFileUrl || '').trim();
+  const isUnchangedLegacyPaidUrl = Boolean(
+    isEditing &&
+      wasInitiallyPaid &&
+      isPaidResource &&
+      trimmedInitial &&
+      trimmedCurrent === trimmedInitial &&
+      isPublicResourcesStorageUrl(trimmedInitial)
+  );
+
+  if (isPaidResource && !isUnchangedLegacyPaidUrl && isPublicResourcesStorageUrl(trimmedCurrent)) {
+    return {
+      ok: false,
+      code: 'PAID_PUBLIC_URL_FORBIDDEN',
+      error:
+        'Paid resources cannot be saved with a public resources bucket or /downloads/ URL. Upload the file using the secure private paid-asset uploader.'
+    };
+  }
+
+  const finalPayload: Partial<Resource> = { ...payload };
+  if (isUnchangedLegacyPaidUrl) {
+    delete finalPayload.fileUrl;
+    delete finalPayload.downloadUrl;
+  }
+
+  return {
+    ok: true,
+    payload: finalPayload,
+    preservedLegacyFileUrl: isUnchangedLegacyPaidUrl
+  };
+}
 
 interface ResourceEditorModalProps {
   isOpen: boolean;
@@ -108,6 +297,28 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
   const [uploadNoticeType, setUploadNoticeType] = useState<'success' | 'error' | 'info'>('info');
   const [thumbNotice, setThumbNotice] = useState<string | null>(null);
   const [thumbNoticeType, setThumbNoticeType] = useState<'success' | 'error' | 'info'>('info');
+  const [saveValidationError, setSaveValidationError] = useState<string | null>(null);
+
+  // Paid & legacy URL derivation
+  const isPaidResource =
+    accessType === 'paid' ||
+    isAuthoritativePaidResource(initialResource?.id) ||
+    isAuthoritativePaidResource(slug || initialResource?.slug);
+  const initialFileUrl = (initialResource?.fileUrl || initialResource?.downloadUrl || '').trim();
+  const wasInitiallyPaid = Boolean(
+    initialResource &&
+      ((initialResource.accessType || initialResource.access_type) === 'paid' ||
+        isAuthoritativePaidResource(initialResource.id) ||
+        isAuthoritativePaidResource(initialResource.slug))
+  );
+  const isUnchangedLegacyPaidUrl = Boolean(
+    isEditing &&
+      wasInitiallyPaid &&
+      isPaidResource &&
+      initialFileUrl &&
+      fileUrl.trim() === initialFileUrl &&
+      isPublicResourcesStorageUrl(initialFileUrl)
+  );
 
   // UI / Preview
   const [showLivePreview, setShowLivePreview] = useState(true);
@@ -171,6 +382,7 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
       }
       setUploadNotice(null);
       setThumbNotice(null);
+      setSaveValidationError(null);
     }
   }, [isOpen, initialResource]);
 
@@ -212,35 +424,28 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
     e.target.value = '';
 
     setIsUploadingFile(true);
-    setUploadNotice('Uploading file to Supabase storage...');
+    setSaveValidationError(null);
+    setUploadNotice(
+      isPaidResource
+        ? 'Uploading paid asset to private storage...'
+        : 'Uploading file to Supabase storage...'
+    );
     setUploadNoticeType('info');
 
     try {
-      // Auto-populate format & size
-      const ext = file.name.split('.').pop()?.toUpperCase() || 'FILE';
-      setFileType(`${ext} Document`);
-      const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
-      setFileSize(`${sizeMb} MB`);
+      const result = await executeResourceModalFileUpload({
+        file,
+        isPaidResource,
+        currentFileUrl: fileUrl
+      });
 
-      const { url, error } = await resourceService.uploadResourceFile(file, 'downloads');
-      if (url && !error) {
-        setFileUrl(url);
-        setUploadNotice(`File uploaded: ${file.name} (${sizeMb} MB)`);
-        setUploadNoticeType('success');
-      } else {
-        console.warn('[Upload Notice] Supabase storage upload warning:', error);
-        // If fileUrl not already set, preserve file name
-        if (!fileUrl) {
-          setFileUrl(`/downloads/${file.name}`);
-        }
-        const errMsg = error?.message || 'Upload complete (local reference)';
-        setUploadNotice(`File attached: ${file.name} (${sizeMb} MB)`);
-        setUploadNoticeType('success');
+      if (result.fileType) setFileType(result.fileType);
+      if (result.fileSize) setFileSize(result.fileSize);
+      if (result.nextFileUrl !== fileUrl) {
+        setFileUrl(result.nextFileUrl);
       }
-    } catch (err: any) {
-      console.warn('[Upload Error]', err);
-      setUploadNotice(`Upload notice: ${err.message || 'File registered'}`);
-      setUploadNoticeType('info');
+      setUploadNotice(result.notice);
+      setUploadNoticeType(result.noticeType);
     } finally {
       setIsUploadingFile(false);
     }
@@ -317,31 +522,45 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
       publishedAt: publishedAt || undefined,
       seoTitle: seoTitle.trim() || undefined,
       seoDescription: seoDescription.trim() || undefined,
-      accessType,
-      access_type: accessType,
-      price: accessType === 'paid' ? (typeof price === 'number' ? Math.max(0, price) : 0) : 0,
+      accessType: isPaidResource ? 'paid' : accessType,
+      access_type: isPaidResource ? 'paid' : accessType,
+      price: isPaidResource ? (typeof price === 'number' ? Math.max(0, price) : 0) : 0,
       currency: 'INR'
     };
   };
 
-  const handleSaveDraft = async () => {
-    if (!title.trim()) {
-      alert('Please provide a title for the resource.');
+  const handleSaveWithTargetStatus = async (targetStatus: 'draft' | 'published') => {
+    setSaveValidationError(null);
+    const validation = prepareResourceModalSavePayload({
+      payload: buildPayload(),
+      isEditing,
+      wasInitiallyPaid,
+      isPaidResource,
+      initialFileUrl,
+      currentFileUrl: fileUrl,
+      targetStatus,
+      price
+    });
+
+    if (!validation.ok || !validation.payload) {
+      const msg = validation.error || 'Please resolve validation errors before saving.';
+      setSaveValidationError(msg);
+      if (validation.code === 'PAID_PUBLIC_URL_FORBIDDEN') {
+        setUploadNotice(msg);
+        setUploadNoticeType('error');
+      }
       return;
     }
-    await onSave(buildPayload(), 'draft');
+
+    await onSave(validation.payload, targetStatus);
+  };
+
+  const handleSaveDraft = async () => {
+    await handleSaveWithTargetStatus('draft');
   };
 
   const handlePublish = async () => {
-    if (!title.trim()) {
-      alert('Please provide a title for the resource.');
-      return;
-    }
-    if (accessType === 'paid' && (typeof price !== 'number' || price <= 0)) {
-      alert('Please set a valid price (greater than ₹0) for paid resources before publishing.');
-      return;
-    }
-    await onSave(buildPayload(), 'published');
+    await handleSaveWithTargetStatus('published');
   };
 
   const handleUnpublishAction = async () => {
@@ -638,8 +857,15 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
                           <input
                             type="text"
                             value={fileUrl}
-                            onChange={(e) => setFileUrl(e.target.value)}
-                            placeholder="https://... or /downloads/guide.pdf"
+                            onChange={(e) => {
+                              setFileUrl(e.target.value);
+                              setSaveValidationError(null);
+                            }}
+                            placeholder={
+                              isPaidResource
+                                ? 'supabase://paid-resources/paid/your-asset.pdf'
+                                : 'https://... or /downloads/guide.pdf'
+                            }
                             className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white text-xs focus:outline-none focus:border-amber-500"
                           />
                         </div>
@@ -648,7 +874,11 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
                           ref={fileInputRef}
                           onChange={handleFileUpload}
                           className="hidden"
-                          accept=".pdf,.xlsx,.csv,.docx,.zip,.json,.pptx"
+                          accept={
+                            isPaidResource
+                              ? '.pdf,.xlsx,.zip'
+                              : '.pdf,.xlsx,.csv,.docx,.zip,.json,.pptx'
+                          }
                         />
                         <button
                           type="button"
@@ -661,15 +891,51 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
                           ) : (
                             <Upload className="w-3.5 h-3.5 text-amber-400" />
                           )}
-                          <span>{isUploadingFile ? 'Uploading...' : 'Upload File'}</span>
+                          <span>
+                            {isUploadingFile
+                              ? 'Uploading...'
+                              : isPaidResource
+                                ? 'Upload Private File'
+                                : 'Upload File'}
+                          </span>
                         </button>
                       </div>
+                      {isPaidResource && (
+                        <p className="text-[10px] text-slate-400 mt-1.5">
+                          Paid assets upload through the admin-only server endpoint to private storage (
+                          <span className="font-mono text-amber-300">supabase://paid-resources/...</span>
+                          ; PDF, XLSX, or ZIP up to 50 MB). Public bucket URLs are blocked.
+                        </p>
+                      )}
+                      {isUnchangedLegacyPaidUrl && (
+                        <p className="text-[11px] text-amber-300 mt-1.5 flex items-start gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                          <span>
+                            This existing paid resource still references a legacy storage URL. Metadata edits preserve the legacy reference untouched; upload a new private file to migrate it.
+                          </span>
+                        </p>
+                      )}
                     </div>
 
                     {uploadNotice && (
-                      <p className="text-[11px] text-emerald-400 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" />
-                        {uploadNotice}
+                      <p
+                        role={uploadNoticeType === 'error' ? 'alert' : 'status'}
+                        className={`text-[11px] flex items-start gap-1.5 font-medium ${
+                          uploadNoticeType === 'error'
+                            ? 'text-rose-400'
+                            : uploadNoticeType === 'success'
+                              ? 'text-emerald-400'
+                              : 'text-blue-400'
+                        }`}
+                      >
+                        {uploadNoticeType === 'error' ? (
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        ) : uploadNoticeType === 'success' ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        ) : (
+                          <Loader2 className="w-3.5 h-3.5 shrink-0 mt-0.5 animate-spin" />
+                        )}
+                        <span>{uploadNotice}</span>
                       </p>
                     )}
                   </div>
@@ -1074,6 +1340,17 @@ export const ResourceEditorModal: React.FC<ResourceEditorModalProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Save Validation Error Banner */}
+        {saveValidationError && (
+          <div
+            role="alert"
+            className="mx-6 mb-2 px-4 py-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2 shrink-0"
+          >
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{saveValidationError}</span>
+          </div>
+        )}
 
         {/* Footer Actions */}
         <div className="px-6 py-4 border-t border-slate-800 bg-slate-950/80 flex flex-wrap items-center justify-between gap-3 shrink-0">

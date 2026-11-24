@@ -211,13 +211,19 @@ export function isAssetTokenSecretConfigured() {
   return Boolean(getAssetHmacSecret());
 }
 
-export const ASSET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour (3,600 seconds)
-export const ASSET_TOKEN_MAX_TTL_MS = ASSET_TOKEN_TTL_MS; // Strict 1-hour maximum future lifetime (no silent extension)
+export const PAID_DOWNLOAD_SIGNED_URL_TTL_SECONDS = 900; // 15 minutes (900 seconds)
+export const ASSET_TOKEN_TTL_MS = PAID_DOWNLOAD_SIGNED_URL_TTL_SECONDS * 1000; // 15 minutes (900 seconds)
+export const ASSET_TOKEN_MAX_TTL_MS = ASSET_TOKEN_TTL_MS; // Strict 900-second maximum future lifetime (no silent extension)
 const ASSET_TOKEN_MAX_LENGTH = 4096;
 const HMAC_SHA256_DIGEST_BYTES = 32;
 const ASSET_TOKEN_BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+// Transitional compatibility (Finding 3):
+// Newly issued v2 tokens contain ONLY { v: 2, resourceId, filename?, expiresAt } (zero authId or identity fields).
+// Pre-cutover v2/v1 tokens containing `authId` remain accepted strictly during their natural <=900s (15-min)
+// lifetime without weakening signature/TTL validation, and `authId` is ALWAYS omitted from verification results.
 const ALLOWED_ASSET_TOKEN_V2_KEYS = new Set(["v", "resourceId", "authId", "filename", "expiresAt"]);
 const ALLOWED_ASSET_TOKEN_V1_KEYS = new Set(["resourceId", "authId", "expiresAt"]);
+const MAX_LEGACY_AUTH_ID_LENGTH = 128;
 const UTF8_FATAL_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 /**
@@ -251,19 +257,38 @@ function decodeStrictBase64Url(input, expectedByteLength = null) {
 }
 
 /**
- * Generates a short-lived (1-hour) HMAC-SHA256 resource-scoped bearer capability token
+ * Extracts a strict Bearer asset token exclusively from the HTTP `Authorization` header.
+ * Rejects missing, non-Bearer, multi-value, whitespace-containing, or malformed headers.
+ *
+ * @param {import('express').Request} req
+ * @returns {string|null}
+ */
+export function extractBearerAssetToken(req) {
+  const rawAuth = req?.headers?.authorization;
+  if (typeof rawAuth !== "string") {
+    return null;
+  }
+  const match = rawAuth.trim().match(/^Bearer\s+([^\s,]+)$/i);
+  if (!match || !match[1]) {
+    return null;
+  }
+  return match[1];
+}
+
+/**
+ * Generates a short-lived (15-minute / 900-second) HMAC-SHA256 resource-scoped bearer capability token
  * for `GET /api/payments/download-paid-asset` (analogous to a signed Storage URL).
  *
- * Security model (A-1 / Finding 5):
+ * Security model (A-1 / Finding 3 / Finding 5):
  * - Minted ONLY after full server-side payment/purchase/ownership/guest-token verification
  *   in `POST /api/payments/get-resource-download-url`.
  * - Signed exclusively with mandatory high-entropy `ASSET_TOKEN_HMAC_SECRET`.
- * - Cryptographically binds `resourceId`, `expiresAt` (<= 3,600s), and (for allowlisted local
+ * - Cryptographically binds `resourceId`, `expiresAt` (<= 900s), and (for allowlisted local
  *   assets) exact `filename`.
- * - `authId` is an opaque issuance reference tag only (NOT a caller identity proof).
- * - Does NOT embed unvalidated `paymentId`/`orderId`/`userId`/`email` metadata.
+ * - Contains ZERO identity or transaction metadata: NEVER embeds `authId`, `paymentId`,
+ *   `orderId`, `userId`, or `email`.
  */
-export function generateAssetAccessToken(resourceId, authId) {
+export function generateAssetAccessToken(resourceId, _ignoredLegacyAuthId = undefined) {
   const secret = getAssetHmacSecret();
   if (!secret) {
     console.error("[Security Guard] Cannot issue asset download token: ASSET_TOKEN_HMAC_SECRET is missing or invalid.");
@@ -275,13 +300,11 @@ export function generateAssetAccessToken(resourceId, authId) {
   }
 
   const cleanResourceId = resourceId.trim();
-  const cleanAuthId = typeof authId === "string" && authId.trim() ? authId.trim() : "guest";
   const allowlistedFilename = resolveAllowlistedProtectedFilename(cleanResourceId);
 
   const payload = {
     v: 2,
     resourceId: cleanResourceId,
-    authId: cleanAuthId,
     ...(allowlistedFilename ? { filename: allowlistedFilename } : {}),
     expiresAt: Date.now() + ASSET_TOKEN_TTL_MS
   };
@@ -292,7 +315,7 @@ export function generateAssetAccessToken(resourceId, authId) {
 }
 
 /**
- * Strictly parses and verifies a signed asset capability token (A-1 / A-2 / Finding 5).
+ * Strictly parses and verifies a signed asset capability token (A-1 / A-2 / Finding 3 / Finding 5).
  *
  * Cryptographic & schema policy:
  * - `ASSET_TOKEN_HMAC_SECRET` is mandatory; missing/weak/placeholder secret fails closed immediately.
@@ -301,9 +324,11 @@ export function generateAssetAccessToken(resourceId, authId) {
  *   and match the 32-byte HMAC-SHA256 digest via `crypto.timingSafeEqual`.
  * - Payload must strictly decode from canonical base64url and valid UTF-8 (fatal decoding).
  * - Supported payload schemas (both signed exclusively by `ASSET_TOKEN_HMAC_SECRET`):
- *   - v2 (`v: 2`, `resourceId`, `authId`, optional allowlisted `filename`, `expiresAt`).
- *   - Legacy v1 (`v` omitted, `resourceId`, optional `authId`, `expiresAt`, NO `filename`).
+ *   - v2 (`v: 2`, `resourceId`, optional allowlisted `filename`, `expiresAt`; transitional pre-cutover
+ *     `authId` is tolerated strictly for <= 900s if valid non-empty string, and omitted from results).
+ *   - Legacy v1 (`v` omitted, `resourceId`, optional transitional `authId`, `expiresAt`, NO `filename`).
  * - Enforces both expiration (`now <= expiresAt`) and maximum lifetime (`expiresAt <= now + ASSET_TOKEN_MAX_TTL_MS`).
+ * - Never exposes `authId` or any caller/payment identity fields in returned verification results.
  *
  * Fails closed (returns `null`, never throws) on any malformed, tampered, expired,
  * over-TTL, or unsupported token.
@@ -381,12 +406,14 @@ export function verifyAssetAccessToken(token) {
     return null;
   }
 
-  if (isV2) {
-    if (typeof payload.authId !== "string" || payload.authId.trim().length === 0) {
-      return null;
-    }
-  } else if (payload.authId !== undefined) {
-    if (typeof payload.authId !== "string" || payload.authId.trim().length === 0) {
+  // Transitional validation for in-flight pre-cutover v2/v1 tokens containing `authId` (max 900s).
+  // Strictly validated if present; NEVER emitted in new tokens and NEVER returned in results.
+  if (payload.authId !== undefined) {
+    if (
+      typeof payload.authId !== "string" ||
+      payload.authId.trim().length === 0 ||
+      payload.authId.length > MAX_LEGACY_AUTH_ID_LENGTH
+    ) {
       return null;
     }
   }
@@ -419,7 +446,6 @@ export function verifyAssetAccessToken(token) {
     v: isV2 ? 2 : 1,
     ...(isLegacyV1 ? { legacy: true } : {}),
     resourceId: payload.resourceId.trim(),
-    ...(payload.authId !== undefined ? { authId: payload.authId.trim() } : {}),
     ...(payload.filename !== undefined ? { filename: payload.filename.trim() } : {}),
     expiresAt: payload.expiresAt
   };
@@ -2607,29 +2633,47 @@ function closeFdSafe(fd) {
 }
 
 /**
- * Race-safe, single-open protected asset descriptor opener (B-1).
+ * Single-open protected asset descriptor opener (B-1 / Finding 4).
  *
  * Guarantees:
  * - Rejects traversal, nested paths, backslashes, NUL/control characters.
  * - Requires platform `O_NOFOLLOW` support; fails closed if unavailable.
- * - Resolves the approved base directory via `realpathSync`, opens the flat child file ONCE
- *   with `O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK`.
- * - Verifies via `fstatSync(fd)` that the opened descriptor is a regular file and confirms
- *   `(dev, ino)` consistency against the confined directory entry and canonical realpath.
+ * - Inspects the original configured `protected_downloads` base path with `lstatSync()` BEFORE
+ *   `realpathSync()`, immediately rejecting the base path if it is itself a symbolic link or not
+ *   a directory (and verifying `(dev, ino)` consistency after canonicalization).
+ * - Opens the flat child file ONCE with `O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK`.
+ * - Verifies via `fstatSync(fd)` that the opened descriptor is a regular file (rejecting
+ *   directories, FIFOs, sockets, and devices without blocking) and confirms `(dev, ino)` and
+ *   non-symlink consistency for the configured base directory, canonical base directory, and
+ *   child directory entry.
  * - Closes `fd` on every failure path so callers never leak descriptors.
+ *
+ * Residual limitation & operational mitigation (Finding 4):
+ * - Standard Node.js `fs` does not expose POSIX `openat(dirfd, ...)` or Linux
+ *   `openat2(RESOLVE_NO_SYMLINKS | RESOLVE_BENEATH)`. Post-open `lstatSync`/`realpathSync`/
+ *   `fstatSync` identity checks detect persistent and differing-inode A-B-A parent-directory
+ *   replacements, but cannot completely eliminate the kernel-level parent-directory TOCTOU window
+ *   during `fs.openSync()`.
+ * - Operational mitigation: deploy the protected directory (and its parent) as root-owned and
+ *   non-writable by the application process, with directory permissions `0555` and approved files
+ *   `0444`, where compatible with deployment requirements.
  */
 export function openConfinedProtectedAssetFd(filename, customCandidateDirs = null) {
   if (!filename || typeof filename !== "string") {
     return { ok: false, reason: "invalid_filename" };
   }
+  if (/[\x00-\x1f\x7f]/.test(filename)) {
+    return { ok: false, reason: "traversal_or_invalid_filename" };
+  }
   const cleanName = filename.trim();
   if (
     !cleanName ||
+    cleanName === "." ||
+    cleanName === ".." ||
     cleanName !== path.basename(cleanName) ||
     cleanName.includes("..") ||
     cleanName.includes("/") ||
-    cleanName.includes("\\") ||
-    /[\x00-\x1f\x7f]/.test(cleanName)
+    cleanName.includes("\\")
   ) {
     return { ok: false, reason: "traversal_or_invalid_filename" };
   }
@@ -2660,23 +2704,66 @@ export function openConfinedProtectedAssetFd(filename, customCandidateDirs = nul
         ];
 
   for (const rawDir of candidateDirs) {
+    if (typeof rawDir !== "string" || !rawDir.trim()) {
+      continue;
+    }
+
+    // `path.resolve` strips trailing slashes (for non-root paths) so `lstatSync` inspects
+    // the configured directory entry itself rather than following a symlinked directory target.
     const resolvedBaseDir = path.resolve(rawDir);
+    if (resolvedBaseDir === path.parse(resolvedBaseDir).root) {
+      return { ok: false, reason: "base_dir_not_a_directory" };
+    }
+
+    // 0. Inspect the ORIGINAL configured base directory via `lstatSync` BEFORE `realpathSync` (Finding 4)
+    let configuredBaseStat;
+    try {
+      configuredBaseStat = fs.lstatSync(resolvedBaseDir);
+    } catch (baseStatErr) {
+      if (baseStatErr?.code === "ENOENT" || baseStatErr?.code === "ENOTDIR") {
+        continue;
+      }
+      return { ok: false, reason: "base_dir_stat_failed" };
+    }
+
+    if (configuredBaseStat.isSymbolicLink()) {
+      return { ok: false, reason: "base_dir_symlink_rejected" };
+    }
+    if (!configuredBaseStat.isDirectory()) {
+      return { ok: false, reason: "base_dir_not_a_directory" };
+    }
+
     let realBaseDir;
     let realBaseDirStat;
     try {
       realBaseDir = fs.realpathSync(resolvedBaseDir);
       realBaseDirStat = fs.lstatSync(realBaseDir);
-      if (!realBaseDirStat.isDirectory() || realBaseDirStat.isSymbolicLink()) {
-        continue;
-      }
     } catch {
-      continue;
+      return { ok: false, reason: "base_dir_stat_failed" };
+    }
+
+    if (
+      !realBaseDirStat.isDirectory() ||
+      realBaseDirStat.isSymbolicLink() ||
+      realBaseDirStat.dev !== configuredBaseStat.dev ||
+      realBaseDirStat.ino !== configuredBaseStat.ino
+    ) {
+      return { ok: false, reason: "directory_changed" };
     }
 
     const candidatePath = path.resolve(realBaseDir, cleanName);
     // 1. Strict lexical confinement with trailing path.sep boundary and zero nested segments
     if (!candidatePath.startsWith(realBaseDir + path.sep) || path.dirname(candidatePath) !== realBaseDir) {
       return { ok: false, reason: "lexical_traversal_rejected" };
+    }
+
+    // Deterministic test-only race injection hook strictly before openSync (NODE_ENV === "test" only)
+    if (activeTestHooks && typeof activeTestHooks.onBeforeOpen === "function") {
+      try {
+        activeTestHooks.onBeforeOpen({ candidatePath, resolvedBaseDir, realBaseDir, filename: cleanName });
+      } catch {
+        return { ok: false, reason: "hook_failed" };
+      }
     }
 
     // 2. Single atomic open with O_NOFOLLOW (kernel rejects final-component symlink with ELOOP)
@@ -2696,17 +2783,17 @@ export function openConfinedProtectedAssetFd(filename, customCandidateDirs = nul
       return { ok: false, reason: "open_failed" };
     }
 
-    // Deterministic test-only race injection hook immediately after openSync
+    // Deterministic test-only race injection hook immediately after openSync (NODE_ENV === "test" only)
     if (activeTestHooks && typeof activeTestHooks.onAfterOpen === "function") {
       try {
-        activeTestHooks.onAfterOpen({ candidatePath, realBaseDir, filename: cleanName, fd });
+        activeTestHooks.onAfterOpen({ candidatePath, resolvedBaseDir, realBaseDir, filename: cleanName, fd });
       } catch {
         closeFdSafe(fd);
         return { ok: false, reason: "hook_failed" };
       }
     }
 
-    // 3. Validate the ALREADY-OPENED descriptor via fstatSync + directory/entry identity consistency
+    // 3. Validate the ALREADY-OPENED descriptor via fstatSync + configured/canonical directory & entry identity checks
     try {
       const fdStat = fs.fstatSync(fd);
       if (!fdStat.isFile()) {
@@ -2714,8 +2801,21 @@ export function openConfinedProtectedAssetFd(filename, customCandidateDirs = nul
         return { ok: false, reason: "not_a_regular_file" };
       }
 
+      const postConfiguredBaseStat = fs.lstatSync(resolvedBaseDir);
+      if (
+        postConfiguredBaseStat.isSymbolicLink() ||
+        !postConfiguredBaseStat.isDirectory() ||
+        postConfiguredBaseStat.dev !== configuredBaseStat.dev ||
+        postConfiguredBaseStat.ino !== configuredBaseStat.ino
+      ) {
+        closeFdSafe(fd);
+        return { ok: false, reason: "directory_changed" };
+      }
+
+      const postRealBaseDir = fs.realpathSync(resolvedBaseDir);
       const postDirStat = fs.lstatSync(realBaseDir);
       if (
+        postRealBaseDir !== realBaseDir ||
         !postDirStat.isDirectory() ||
         postDirStat.isSymbolicLink() ||
         postDirStat.dev !== realBaseDirStat.dev ||
@@ -3887,6 +3987,11 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
       });
     }
 
+    // Paid download authorization response hardening headers (Finding 3)
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+
     // Fail closed immediately on inconsistent/unverified pricing configurations
     // (e.g., published access_type='free' with price > 0, or paid with invalid price) (C6-1).
     if (accessSpec.pricing?.accessType === "unverified" && accessSpec.allAllowedIds.length === 0) {
@@ -4144,6 +4249,7 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
     // Generate signed URL from private Supabase Storage (fail closed HTTP 503 on any signing error or missing signed URL;
     // NEVER return a raw external_url or unmapped local path for a paid resource — E-3 / C6-2)
     let finalDownloadUrl = null;
+    let issuedAssetAccessToken = null;
     const rawPaidFileUrl = resourceRecord.file_url ? String(resourceRecord.file_url).trim() : null;
     const parsedStorage = parseProtectedStorageUrl(rawPaidFileUrl);
 
@@ -4165,7 +4271,7 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
       }
       const { data: signedData, error: signErr } = await supabaseServer.storage
         .from(parsedStorage.bucket)
-        .createSignedUrl(parsedStorage.objectPath, 3600);
+        .createSignedUrl(parsedStorage.objectPath, PAID_DOWNLOAD_SIGNED_URL_TTL_SECONDS);
       if (signErr || !signedData?.signedUrl) {
         return res.status(503).json({
           success: false,
@@ -4183,7 +4289,7 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
       }
       const { data: signedData, error: signErr } = await supabaseServer.storage
         .from("paid-resources")
-        .createSignedUrl(bundleItem.storagePath, 3600);
+        .createSignedUrl(bundleItem.storagePath, PAID_DOWNLOAD_SIGNED_URL_TTL_SECONDS);
       if (signErr || !signedData?.signedUrl) {
         return res.status(503).json({
           success: false,
@@ -4206,17 +4312,16 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
           error: "Paid asset storage location is not configured for signed delivery."
         });
       }
-      const token = generateAssetAccessToken(
-        resourceRecord.id,
-        cleanPaymentId || authenticatedUser?.id || "authorized"
-      );
+      const token = generateAssetAccessToken(resourceRecord.id);
       if (!token) {
         return res.status(503).json({
           success: false,
           error: "Asset delivery service is temporarily unconfigured. Please contact support."
         });
       }
-      finalDownloadUrl = `/api/payments/download-paid-asset?token=${token}`;
+      // Header-only transport (Finding 3): never embed the asset token in downloadUrl query string
+      finalDownloadUrl = "/api/payments/download-paid-asset";
+      issuedAssetAccessToken = token;
     } else {
       // Missing storage location, arbitrary /downloads/ or /protected_downloads/ path,
       // unmapped standalone local path, traversal attempt, or raw non-Storage external URL:
@@ -4230,6 +4335,7 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
     return res.json({
       success: true,
       downloadUrl: finalDownloadUrl,
+      ...(issuedAssetAccessToken ? { assetAccessToken: issuedAssetAccessToken } : {}),
       externalUrl: null, // Never leak external URLs for paid assets
       fileUrl: finalDownloadUrl,
       resourceTitle: resourceRecord.title,
@@ -4251,6 +4357,11 @@ router.post("/get-resource-download-url", paymentRateLimiter, async (req, res) =
  */
 async function handleBundleFilesRequest(req, res) {
   try {
+    // Paid bundle download authorization response hardening headers (Finding 3)
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+
     const authHeader = req.headers.authorization;
     let authenticatedUser = null;
     if (authHeader) {
@@ -4610,7 +4721,7 @@ async function handleBundleFilesRequest(req, res) {
 
       const { data: sData, error: signErr } = await supabaseServer.storage
         .from(targetBucket)
-        .createSignedUrl(targetPath, 3600);
+        .createSignedUrl(targetPath, PAID_DOWNLOAD_SIGNED_URL_TTL_SECONDS);
 
       if (signErr || !sData?.signedUrl) {
         return res.status(503).json({
@@ -4651,18 +4762,39 @@ router.post("/get-bundle-files", paymentRateLimiter, handleBundleFilesRequest);
  * GET /api/payments/download-paid-asset
  *
  * Race-safe server-side download streamer for verified paid local-compatibility assets.
- * Security model (A-1 / A-2 / B-1):
- * - Consumes a short-lived (1-hour) HMAC-signed resource-scoped bearer capability token
+ * Security model (A-1 / A-2 / B-1 / Finding 3):
+ * - Consumes a short-lived (15-minute / 900-second) HMAC-signed resource-scoped bearer capability token
  *   minted after authoritative verification in `POST /api/payments/get-resource-download-url`.
+ * - Enforces header-only transport via `Authorization: Bearer <token>` and strictly rejects any
+ *   query-string token (`?token=`, `?access_token=`, `?assetAccessToken=`) with HTTP 403.
+ * - Emits `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`, and strict no-store caching
+ *   headers on all responses (both file streams and error responses).
  * - Rejects missing, duplicate, malformed, expired, unsupported-schema, or tampered tokens (403).
  * - Rejects caller-supplied identity/metadata or cross-resource/cross-file query overrides (403).
  * - Opens the exact allowlisted file ONCE with `O_RDONLY | O_NOFOLLOW`, validates `fstat`
  *   regular-file status and confined identity, and streams directly from that validated `fd`.
  */
 router.get("/download-paid-asset", paymentRateLimiter, async (req, res) => {
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+
   try {
-    const rawToken = req.query.token;
-    const payload = typeof rawToken === "string" ? verifyAssetAccessToken(rawToken) : null;
+    // Strictly forbid query-string token transport (Finding 3: header-only Authorization: Bearer)
+    if (
+      req.query.token !== undefined ||
+      req.query.access_token !== undefined ||
+      req.query.assetAccessToken !== undefined
+    ) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+      return res.status(403).json({
+        success: false,
+        code: "QUERY_TOKEN_FORBIDDEN",
+        error: "Forbidden: Asset download tokens must be sent in the Authorization header, not in URL query parameters."
+      });
+    }
+
+    const rawToken = extractBearerAssetToken(req);
+    const payload = rawToken ? verifyAssetAccessToken(rawToken) : null;
     if (!payload || !payload.resourceId) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
       return res.status(403).json({

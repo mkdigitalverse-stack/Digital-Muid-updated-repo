@@ -1,10 +1,263 @@
 import express from "express";
 import crypto from "crypto";
-import { getSupabaseServerClient, isValidUUID } from "./supabaseServer.js";
+import path from "path";
+import {
+  getSupabaseServerClient,
+  isValidUUID,
+  verifySupabaseToken,
+  isEmailConfirmed,
+  checkIsAdmin
+} from "./supabaseServer.js";
 
 const DEFAULT_WINDOW_SECONDS = 900; // 15 minutes
 const DEFAULT_MAX_HITS = 10; // 10 increments per (resource_id, client_hash) per 15-min window
 const MIN_HMAC_SECRET_BYTES = 32;
+
+export const PAID_RESOURCES_BUCKET = "paid-resources";
+export const PAID_UPLOAD_MAX_BYTES = 50 * 1024 * 1024; // 50 MiB (aligned with paid-resources bucket limit)
+export const PAID_UPLOAD_MAX_FILENAME_LENGTH = 180;
+
+export const ALLOWED_PAID_UPLOAD_TYPES = Object.freeze({
+  ".pdf": Object.freeze({
+    canonicalMime: "application/pdf",
+    acceptedMimes: Object.freeze(["application/pdf"])
+  }),
+  ".xlsx": Object.freeze({
+    canonicalMime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    acceptedMimes: Object.freeze([
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    ])
+  }),
+  ".zip": Object.freeze({
+    canonicalMime: "application/zip",
+    acceptedMimes: Object.freeze(["application/zip", "application/x-zip-compressed"])
+  })
+});
+
+const FORBIDDEN_BUCKET_QUERY_KEYS = ["bucket", "storageBucket", "targetBucket", "storage_bucket"];
+const FORBIDDEN_BUCKET_HEADER_KEYS = ["x-storage-bucket", "x-upload-bucket", "x-bucket"];
+const FORBIDDEN_PATH_QUERY_KEYS = ["path", "storagePath", "folder", "storage_path"];
+const FORBIDDEN_PATH_HEADER_KEYS = ["x-storage-path", "x-upload-folder", "x-upload-path"];
+
+/**
+ * Validates and sanitizes an uploaded paid-asset filename.
+ * Rejects path traversal, path separators, encoded traversal sequences,
+ * control/NUL bytes, leading dots, overlong names, and disallowed extensions.
+ *
+ * @param {string} rawHeaderValue
+ * @returns {{ valid: boolean, cleanFilename?: string, ext?: string, code?: string, error?: string }}
+ */
+export function validatePaidUploadFilename(rawHeaderValue) {
+  if (typeof rawHeaderValue !== "string" || !rawHeaderValue.trim()) {
+    return {
+      valid: false,
+      code: "INVALID_FILENAME",
+      error: "A valid filename header (X-Upload-Filename) is required."
+    };
+  }
+
+  const rawTrimmed = rawHeaderValue.trim();
+  if (rawTrimmed.length > PAID_UPLOAD_MAX_FILENAME_LENGTH * 3) {
+    return {
+      valid: false,
+      code: "INVALID_FILENAME",
+      error: "Filename exceeds maximum allowed length."
+    };
+  }
+
+  // Reject raw percent-encoded traversal, path separators, or NUL bytes before decoding
+  if (/(?:%2e|%2f|%5c|%00)/i.test(rawTrimmed)) {
+    return {
+      valid: false,
+      code: "INVALID_FILENAME",
+      error: "Filename contains forbidden encoded path characters."
+    };
+  }
+
+  let decoded;
+  try {
+    decoded = decodeURIComponent(rawTrimmed).trim();
+  } catch {
+    return {
+      valid: false,
+      code: "INVALID_FILENAME",
+      error: "Filename encoding is malformed."
+    };
+  }
+
+  if (!decoded || decoded.length > PAID_UPLOAD_MAX_FILENAME_LENGTH) {
+    return {
+      valid: false,
+      code: "INVALID_FILENAME",
+      error: "Filename is empty or exceeds maximum allowed length."
+    };
+  }
+
+  // Reject control characters, NUL bytes, path separators, traversal sequences, or leading dots
+  if (
+    /[\x00-\x1f\x7f]/.test(decoded) ||
+    decoded.includes("/") ||
+    decoded.includes("\\") ||
+    decoded.includes("..") ||
+    decoded.startsWith(".")
+  ) {
+    return {
+      valid: false,
+      code: "INVALID_FILENAME",
+      error: "Filename contains forbidden path or control characters."
+    };
+  }
+
+  if (path.basename(decoded) !== decoded) {
+    return {
+      valid: false,
+      code: "INVALID_FILENAME",
+      error: "Filename must not contain directory segments."
+    };
+  }
+
+  const ext = path.extname(decoded).toLowerCase();
+  if (!ext || !Object.prototype.hasOwnProperty.call(ALLOWED_PAID_UPLOAD_TYPES, ext)) {
+    return {
+      valid: false,
+      code: "INVALID_FILE_TYPE",
+      error: "Only PDF (.pdf), Excel (.xlsx), and ZIP (.zip) files are allowed for paid assets."
+    };
+  }
+
+  const baseName = decoded.slice(0, -ext.length);
+  const safeBase = baseName
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/\.+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^[_-]+|[_-]+$/g, "")
+    .slice(0, 100);
+
+  if (!safeBase) {
+    return {
+      valid: false,
+      code: "INVALID_FILENAME",
+      error: "Filename must contain valid alphanumeric characters."
+    };
+  }
+
+  const cleanFilename = `${safeBase.toLowerCase()}${ext}`;
+  if (
+    path.basename(cleanFilename) !== cleanFilename ||
+    cleanFilename.includes("..") ||
+    /[\/\\]/.test(cleanFilename)
+  ) {
+    return {
+      valid: false,
+      code: "INVALID_FILENAME",
+      error: "Sanitized filename failed safety validation."
+    };
+  }
+
+  return {
+    valid: true,
+    cleanFilename,
+    ext
+  };
+}
+
+/**
+ * Validates that the HTTP Content-Type matches the allowed MIME type for the validated extension.
+ *
+ * @param {string|undefined} rawContentType
+ * @param {string} ext
+ * @returns {{ valid: boolean, canonicalMime?: string, code?: string, error?: string }}
+ */
+export function validatePaidUploadContentType(rawContentType, ext) {
+  const spec = ALLOWED_PAID_UPLOAD_TYPES[ext];
+  if (!spec) {
+    return {
+      valid: false,
+      code: "INVALID_FILE_TYPE",
+      error: "Unsupported paid-asset file extension."
+    };
+  }
+
+  if (typeof rawContentType !== "string" || !rawContentType.trim()) {
+    return {
+      valid: false,
+      code: "INVALID_FILE_TYPE",
+      error: "A valid Content-Type header matching the file type is required."
+    };
+  }
+
+  const normalizedMime = rawContentType.split(";")[0].trim().toLowerCase();
+  if (!spec.acceptedMimes.includes(normalizedMime)) {
+    return {
+      valid: false,
+      code: "INVALID_FILE_TYPE",
+      error: `Content-Type '${normalizedMime}' is not permitted for ${ext} paid assets.`
+    };
+  }
+
+  return {
+    valid: true,
+    canonicalMime: spec.canonicalMime
+  };
+}
+
+/**
+ * Validates binary magic bytes to prevent MIME/extension spoofing (e.g. HTML/JS renamed to .pdf).
+ *
+ * @param {Buffer} buffer
+ * @param {string} ext
+ * @returns {boolean}
+ */
+export function validatePaidUploadSignature(buffer, ext) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return false;
+
+  if (ext === ".pdf") {
+    return buffer.length >= 5 && buffer.subarray(0, 5).toString("ascii") === "%PDF-";
+  }
+
+  if (ext === ".xlsx") {
+    // OOXML .xlsx is a ZIP container starting with local file header PK\x03\x04
+    return (
+      buffer[0] === 0x50 &&
+      buffer[1] === 0x4b &&
+      buffer[2] === 0x03 &&
+      buffer[3] === 0x04
+    );
+  }
+
+  if (ext === ".zip") {
+    // Standard ZIP local file header (PK\x03\x04) or empty archive EOCD (PK\x05\x06)
+    return (
+      buffer[0] === 0x50 &&
+      buffer[1] === 0x4b &&
+      ((buffer[2] === 0x03 && buffer[3] === 0x04) ||
+        (buffer[2] === 0x05 && buffer[3] === 0x06))
+    );
+  }
+
+  return false;
+}
+
+/**
+ * Builds a strictly server-controlled destination path inside the private `paid-resources` bucket.
+ *
+ * @param {string} cleanFilename
+ * @returns {string}
+ */
+export function buildPaidStorageObjectPath(cleanFilename) {
+  const randomSuffix = crypto.randomBytes(6).toString("hex");
+  const objectPath = `paid/${Date.now()}_${randomSuffix}_${cleanFilename}`;
+  if (
+    !objectPath.startsWith("paid/") ||
+    objectPath.includes("..") ||
+    objectPath.includes("\\") ||
+    objectPath.includes("//") ||
+    /[\x00-\x1f\x7f\s]/.test(objectPath)
+  ) {
+    throw new Error("Generated storage path failed safety invariants.");
+  }
+  return objectPath;
+}
 
 const EXACT_PLACEHOLDER_SECRETS = new Set([
   "undefined",
@@ -211,9 +464,10 @@ export function computeDownloadClientHash(clientIp, secret) {
 }
 
 /**
- * Creates the `/api/resources` router with fail-closed persistent rate limiting.
+ * Creates the `/api/resources` router with fail-closed persistent rate limiting
+ * and confirmed-admin-only private paid-asset uploads.
  *
- * @param {{ isProduction?: boolean, windowSeconds?: number, maxHits?: number }} [options]
+ * @param {{ isProduction?: boolean, windowSeconds?: number, maxHits?: number, maxPaidUploadBytes?: number }} [options]
  */
 export function createResourceRoutes(options = {}) {
   const router = express.Router();
@@ -224,6 +478,298 @@ export function createResourceRoutes(options = {}) {
   const maxHits = Number.isInteger(options.maxHits)
     ? options.maxHits
     : DEFAULT_MAX_HITS;
+  const maxPaidUploadBytes =
+    Number.isInteger(options.maxPaidUploadBytes) && options.maxPaidUploadBytes > 0
+      ? Math.min(options.maxPaidUploadBytes, PAID_UPLOAD_MAX_BYTES)
+      : PAID_UPLOAD_MAX_BYTES;
+
+  /**
+   * Middleware 1 (Pre-body): Strictly authenticates a confirmed-email administrator
+   * BEFORE reading or buffering any binary upload payload.
+   */
+  const requireConfirmedAdminForPaidUpload = async (req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+
+    const authHeader = typeof req.headers?.authorization === "string"
+      ? req.headers.authorization.trim()
+      : "";
+    if (!authHeader || !/^Bearer\s+\S+$/i.test(authHeader)) {
+      return res.status(401).json({
+        success: false,
+        code: "AUTH_REQUIRED",
+        error: "Administrator authentication is required."
+      });
+    }
+
+    const supabaseServer = getSupabaseServerClient();
+    if (
+      !supabaseServer ||
+      !supabaseServer.storage ||
+      typeof supabaseServer.storage.from !== "function"
+    ) {
+      return res.status(503).json({
+        success: false,
+        code: "SERVICE_ROLE_UNAVAILABLE",
+        error: "Private paid-asset storage service is unavailable."
+      });
+    }
+
+    try {
+      const { user, error: authError } = await verifySupabaseToken(authHeader);
+      if (authError || !user) {
+        return res.status(401).json({
+          success: false,
+          code: "INVALID_SESSION",
+          error: "Invalid or expired administrator session."
+        });
+      }
+
+      if (!isEmailConfirmed(user) || !checkIsAdmin(user)) {
+        return res.status(403).json({
+          success: false,
+          code: "ADMIN_REQUIRED",
+          error: "Confirmed administrator privileges are required to upload paid assets."
+        });
+      }
+
+      req.verifiedAdminUser = user;
+      req.supabaseServer = supabaseServer;
+      return next();
+    } catch {
+      return res.status(503).json({
+        success: false,
+        code: "AUTH_VERIFICATION_FAILED",
+        error: "Unable to verify administrator session."
+      });
+    }
+  };
+
+  /**
+   * Middleware 2 (Pre-body): Rejects caller bucket/path selection, validates filename,
+   * validates MIME type against the extension allowlist, and enforces declared Content-Length.
+   */
+  const validatePaidUploadHeaders = (req, res, next) => {
+    for (const key of FORBIDDEN_BUCKET_QUERY_KEYS) {
+      if (req.query && req.query[key] !== undefined) {
+        return res.status(400).json({
+          success: false,
+          code: "ARBITRARY_BUCKET_FORBIDDEN",
+          error: "Callers may not specify a target storage bucket for paid assets."
+        });
+      }
+    }
+    for (const headerName of FORBIDDEN_BUCKET_HEADER_KEYS) {
+      if (req.headers && req.headers[headerName] !== undefined) {
+        return res.status(400).json({
+          success: false,
+          code: "ARBITRARY_BUCKET_FORBIDDEN",
+          error: "Callers may not specify a target storage bucket for paid assets."
+        });
+      }
+    }
+    for (const key of FORBIDDEN_PATH_QUERY_KEYS) {
+      if (req.query && req.query[key] !== undefined) {
+        return res.status(400).json({
+          success: false,
+          code: "ARBITRARY_PATH_FORBIDDEN",
+          error: "Callers may not specify an arbitrary storage path for paid assets."
+        });
+      }
+    }
+    for (const headerName of FORBIDDEN_PATH_HEADER_KEYS) {
+      if (req.headers && req.headers[headerName] !== undefined) {
+        return res.status(400).json({
+          success: false,
+          code: "ARBITRARY_PATH_FORBIDDEN",
+          error: "Callers may not specify an arbitrary storage path for paid assets."
+        });
+      }
+    }
+
+    const rawFilenameHeader = req.headers?.["x-upload-filename"];
+    const filenameHeaderStr = Array.isArray(rawFilenameHeader)
+      ? ""
+      : (rawFilenameHeader ?? "");
+    const filenameCheck = validatePaidUploadFilename(filenameHeaderStr);
+    if (!filenameCheck.valid) {
+      return res.status(400).json({
+        success: false,
+        code: filenameCheck.code || "INVALID_FILENAME",
+        error: filenameCheck.error
+      });
+    }
+
+    const contentTypeCheck = validatePaidUploadContentType(
+      req.headers?.["content-type"],
+      filenameCheck.ext
+    );
+    if (!contentTypeCheck.valid) {
+      return res.status(400).json({
+        success: false,
+        code: contentTypeCheck.code || "INVALID_FILE_TYPE",
+        error: contentTypeCheck.error
+      });
+    }
+
+    const rawContentLength = req.headers?.["content-length"];
+    if (rawContentLength !== undefined) {
+      const lengthStr = String(rawContentLength).trim();
+      if (!/^\d+$/.test(lengthStr)) {
+        return res.status(400).json({
+          success: false,
+          code: "INVALID_CONTENT_LENGTH",
+          error: "Invalid Content-Length header."
+        });
+      }
+      const declaredBytes = Number.parseInt(lengthStr, 10);
+      if (declaredBytes === 0) {
+        return res.status(400).json({
+          success: false,
+          code: "EMPTY_FILE",
+          error: "Uploaded file must not be empty."
+        });
+      }
+      if (declaredBytes > maxPaidUploadBytes) {
+        return res.status(413).json({
+          success: false,
+          code: "FILE_TOO_LARGE",
+          error: `Paid asset exceeds maximum allowed size of ${Math.floor(maxPaidUploadBytes / (1024 * 1024))} MB.`
+        });
+      }
+    }
+
+    req.paidUploadMeta = {
+      cleanFilename: filenameCheck.cleanFilename,
+      ext: filenameCheck.ext,
+      canonicalMime: contentTypeCheck.canonicalMime
+    };
+    return next();
+  };
+
+  /**
+   * Middleware 3: Raw binary body parser bounded by maxPaidUploadBytes + JSON error handler.
+   */
+  const rawPaidUploadParser = express.raw({
+    type: () => true,
+    limit: maxPaidUploadBytes
+  });
+
+  const handlePaidUploadBodyError = (err, _req, res, next) => {
+    if (!err) return next();
+    res.setHeader("Cache-Control", "no-store");
+    if (err.type === "entity.too.large" || err.status === 413 || err.statusCode === 413) {
+      return res.status(413).json({
+        success: false,
+        code: "FILE_TOO_LARGE",
+        error: `Paid asset exceeds maximum allowed size of ${Math.floor(maxPaidUploadBytes / (1024 * 1024))} MB.`
+      });
+    }
+    return res.status(400).json({
+      success: false,
+      code: "INVALID_UPLOAD_BODY",
+      error: "Failed to read uploaded file payload."
+    });
+  };
+
+  /**
+   * POST /api/resources/admin/upload-paid-asset
+   *
+   * Confirmed-admin-only private paid-asset upload endpoint (Step 3B).
+   * - Uploads exclusively to the private `paid-resources` Supabase Storage bucket.
+   * - NEVER calls `getPublicUrl()` and NEVER falls back to the public `resources` bucket.
+   * - Returns ONLY the canonical private reference format: `supabase://paid-resources/<path>`.
+   */
+  router.post(
+    "/admin/upload-paid-asset",
+    requireConfirmedAdminForPaidUpload,
+    validatePaidUploadHeaders,
+    rawPaidUploadParser,
+    handlePaidUploadBodyError,
+    async (req, res) => {
+      try {
+        const fileBuffer = req.body;
+        if (!Buffer.isBuffer(fileBuffer) || fileBuffer.length === 0) {
+          return res.status(400).json({
+            success: false,
+            code: "EMPTY_FILE",
+            error: "Uploaded file must not be empty."
+          });
+        }
+
+        if (fileBuffer.length > maxPaidUploadBytes) {
+          return res.status(413).json({
+            success: false,
+            code: "FILE_TOO_LARGE",
+            error: `Paid asset exceeds maximum allowed size of ${Math.floor(maxPaidUploadBytes / (1024 * 1024))} MB.`
+          });
+        }
+
+        const { cleanFilename, ext, canonicalMime } = req.paidUploadMeta;
+        if (!validatePaidUploadSignature(fileBuffer, ext)) {
+          return res.status(400).json({
+            success: false,
+            code: "INVALID_FILE_SIGNATURE",
+            error: `Uploaded file content does not match a valid ${ext} file signature.`
+          });
+        }
+
+        const objectPath = buildPaidStorageObjectPath(cleanFilename);
+        const supabaseServer = req.supabaseServer;
+
+        const { data, error } = await supabaseServer.storage
+          .from(PAID_RESOURCES_BUCKET)
+          .upload(objectPath, fileBuffer, {
+            contentType: canonicalMime,
+            cacheControl: "0",
+            upsert: false
+          });
+
+        if (
+          error ||
+          !data ||
+          typeof data.path !== "string" ||
+          !data.path.trim() ||
+          data.path.includes("..") ||
+          data.path.includes("\\") ||
+          /[\x00-\x1f\x7f\s]/.test(data.path)
+        ) {
+          const safeStatusCode = error?.statusCode || error?.code || "STORAGE_UPLOAD_FAILED";
+          console.error(`[Paid Asset Upload] Private storage upload failed (${safeStatusCode})`);
+          return res.status(503).json({
+            success: false,
+            code: "PRIVATE_STORAGE_UPLOAD_FAILED",
+            error: "Private paid-asset storage upload failed. Ensure the private paid-resources bucket is configured."
+          });
+        }
+
+        const normalizedUploadedPath = data.path.replace(/^\/+/, "");
+        if (!normalizedUploadedPath || normalizedUploadedPath.includes("..")) {
+          return res.status(503).json({
+            success: false,
+            code: "PRIVATE_STORAGE_UPLOAD_FAILED",
+            error: "Private paid-asset storage returned an invalid object reference."
+          });
+        }
+
+        const reference = `supabase://${PAID_RESOURCES_BUCKET}/${normalizedUploadedPath}`;
+        return res.status(201).json({
+          success: true,
+          reference,
+          storagePath: normalizedUploadedPath,
+          bucket: PAID_RESOURCES_BUCKET,
+          contentType: canonicalMime,
+          sizeBytes: fileBuffer.length
+        });
+      } catch {
+        console.error("[Paid Asset Upload] Unexpected fail-closed error during private upload.");
+        return res.status(503).json({
+          success: false,
+          code: "PRIVATE_STORAGE_UPLOAD_FAILED",
+          error: "Private paid-asset storage upload failed. Please try again later."
+        });
+      }
+    }
+  );
 
   /**
    * POST /api/resources/:id/record-download

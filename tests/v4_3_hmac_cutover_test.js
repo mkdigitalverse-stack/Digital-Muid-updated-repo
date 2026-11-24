@@ -345,7 +345,7 @@ runTest("2.1c Dedicated ASSET_TOKEN_HMAC_SECRET exclusivity (Razorpay fallback r
     assert.ok(assetTok);
     const decoded = verifyAssetAccessToken(assetTok);
     assert.strictEqual(decoded?.resourceId, "res_asset_01");
-    assert.strictEqual(decoded?.authId, "user_asset_01");
+    assert.strictEqual(decoded?.authId, undefined);
 
     // Legacy v1 payload signed by dedicated ASSET_TOKEN_HMAC_SECRET remains verifiable within max TTL
     const legacyPayload = Buffer.from(JSON.stringify({

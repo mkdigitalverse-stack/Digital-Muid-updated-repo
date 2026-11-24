@@ -2422,9 +2422,11 @@ async function main() {
         setMockSupabaseServerClient(mock.client);
 
         // 1. Direct GET /api/payments/download-paid-asset with valid HMAC token for unknown standalone resource -> 404 (NEVER meta-ads-campaign-planner-workbook.pdf)
-        const unknownTok = generateAssetAccessToken(UNKNOWN_STANDALONE_ID, "pay_c6_unknown");
+        const unknownTok = generateAssetAccessToken(UNKNOWN_STANDALONE_ID);
         assert.ok(unknownTok, "Expected valid HMAC token for test");
-        const rUnknown = await fetch(`${c6BaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(unknownTok!)}`);
+        const rUnknown = await fetch(`${c6BaseUrl}/api/payments/download-paid-asset`, {
+          headers: { Authorization: `Bearer ${unknownTok!}` }
+        });
         assert.strictEqual(rUnknown.status, 404, `Unknown resource ID must return 404, got ${rUnknown.status}`);
         const tUnknown = await rUnknown.text();
         const bUnknown = JSON.parse(tUnknown);
@@ -2434,8 +2436,10 @@ async function main() {
         assert.ok(!tUnknown.startsWith("%PDF-"), "Must NEVER stream fallback PDF bytes for unknown resource ID");
 
         // 2. Valid HMAC token for traversal payload as resourceId -> 404
-        const travTok = generateAssetAccessToken("../../etc/passwd", "pay_c6_trav");
-        const rTravTok = await fetch(`${c6BaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(travTok!)}`);
+        const travTok = generateAssetAccessToken("../../etc/passwd");
+        const rTravTok = await fetch(`${c6BaseUrl}/api/payments/download-paid-asset`, {
+          headers: { Authorization: `Bearer ${travTok!}` }
+        });
         assert.strictEqual(rTravTok.status, 404);
 
         // 3. Valid HMAC token for allowlisted workbook -> serves ONLY workbook PDF; query override for another resource/file -> 403
@@ -2446,9 +2450,13 @@ async function main() {
         });
         assert.strictEqual(wbResp.status, 200);
         const wbBody = await wbResp.json();
-        assert.ok(wbBody.downloadUrl.startsWith("/api/payments/download-paid-asset?token="));
+        assert.strictEqual(wbBody.downloadUrl, "/api/payments/download-paid-asset");
+        const wbAssetTok = String(wbBody.assetAccessToken || "");
+        assert.ok(wbAssetTok.length > 0, "Expected assetAccessToken in JSON authorization response");
 
-        const rWbFile = await fetch(`${c6BaseUrl}${wbBody.downloadUrl}`);
+        const rWbFile = await fetch(`${c6BaseUrl}${wbBody.downloadUrl}`, {
+          headers: { Authorization: `Bearer ${wbAssetTok}` }
+        });
         assert.strictEqual(rWbFile.status, 200);
         assert.strictEqual(
           rWbFile.headers.get("content-disposition"),
@@ -2459,17 +2467,23 @@ async function main() {
         assert.ok(wbBytes.equals(expectedWbBytes), "Allowlisted download must stream exact workbook bytes");
 
         // Cross-resource query tamper on valid workbook token -> 403
-        const rCrossResId = await fetch(`${c6BaseUrl}${wbBody.downloadUrl}&resourceId=${BUNDLE_ITEMS[1].id}`);
+        const rCrossResId = await fetch(`${c6BaseUrl}${wbBody.downloadUrl}?resourceId=${BUNDLE_ITEMS[1].id}`, {
+          headers: { Authorization: `Bearer ${wbAssetTok}` }
+        });
         assert.strictEqual(rCrossResId.status, 403);
         assert.strictEqual((await rCrossResId.json()).code, "TOKEN_RESOURCE_MISMATCH");
 
-        const rCrossFile = await fetch(`${c6BaseUrl}${wbBody.downloadUrl}&file=the-ad-budget-break-even-calculator.xlsx`);
+        const rCrossFile = await fetch(`${c6BaseUrl}${wbBody.downloadUrl}?file=the-ad-budget-break-even-calculator.xlsx`, {
+          headers: { Authorization: `Bearer ${wbAssetTok}` }
+        });
         assert.strictEqual(rCrossFile.status, 403);
         assert.strictEqual((await rCrossFile.json()).code, "TOKEN_FILE_MISMATCH");
 
         // Token for calculator streams ONLY calculator bytes (never workbook)
-        const calcTok = generateAssetAccessToken(BUNDLE_ITEMS[1].id, "pay_c6_calc");
-        const rCalcFile = await fetch(`${c6BaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(calcTok!)}`);
+        const calcTok = generateAssetAccessToken(BUNDLE_ITEMS[1].id);
+        const rCalcFile = await fetch(`${c6BaseUrl}/api/payments/download-paid-asset`, {
+          headers: { Authorization: `Bearer ${calcTok!}` }
+        });
         assert.strictEqual(rCalcFile.status, 200);
         assert.strictEqual(
           rCalcFile.headers.get("content-disposition"),
@@ -2852,36 +2866,41 @@ async function main() {
         assert.strictEqual(multibyteSig.length, validSig.length);
         assert.notStrictEqual(Buffer.byteLength(multibyteSig, "utf8"), Buffer.byteLength(validSig, "utf8"));
 
-        const malformedCases: Array<{ label: string; query: string }> = [
-          { label: "missing token", query: "" },
-          { label: "empty token", query: "?token=" },
-          { label: "duplicate token query params", query: `?token=${encodeURIComponent(validTok)}&token=${encodeURIComponent(validTok)}` },
-          { label: "single-segment token", query: `?token=${encodeURIComponent(validData)}` },
-          { label: "three-segment token", query: `?token=${encodeURIComponent(`${validData}.${validSig}.extra`)}` },
-          { label: "tampered signature", query: `?token=${encodeURIComponent(`${validData}.${validSig.slice(0, -1)}${validSig.endsWith("A") ? "B" : "A"}`)}` },
-          { label: "multibyte UTF-8 signature (no RangeError 500)", query: `?token=${encodeURIComponent(`${validData}.${multibyteSig}`)}` },
-          { label: "invalid base64url payload data", query: `?token=${encodeURIComponent(signRawToken("!!!not_base64url!!!", primarySecret))}` },
-          { label: "valid HMAC over non-JSON payload", query: `?token=${encodeURIComponent(signRawToken(Buffer.from("{not-json", "utf8").toString("base64url"), primarySecret))}` },
-          { label: "valid HMAC over null payload", query: `?token=${encodeURIComponent(signJsonPayload(null, primarySecret))}` },
-          { label: "valid HMAC over array payload", query: `?token=${encodeURIComponent(signJsonPayload([BUNDLE_ITEMS[0].id], primarySecret))}` },
-          { label: "valid HMAC over empty object", query: `?token=${encodeURIComponent(signJsonPayload({}, primarySecret))}` },
-          { label: "valid HMAC over missing resourceId", query: `?token=${encodeURIComponent(signJsonPayload({ v: 2, authId: "a", expiresAt: Date.now() + 60_000 }, primarySecret))}` },
-          { label: "valid HMAC over whitespace resourceId", query: `?token=${encodeURIComponent(signJsonPayload({ v: 2, resourceId: "   ", authId: "a", expiresAt: Date.now() + 60_000 }, primarySecret))}` },
-          { label: "valid HMAC over string expiresAt", query: `?token=${encodeURIComponent(signJsonPayload({ v: 2, resourceId: BUNDLE_ITEMS[0].id, authId: "a", expiresAt: String(Date.now() + 60_000) }, primarySecret))}` },
-          { label: "valid HMAC over zero expiresAt", query: `?token=${encodeURIComponent(signJsonPayload({ v: 2, resourceId: BUNDLE_ITEMS[0].id, authId: "a", expiresAt: 0 }, primarySecret))}` },
-          { label: "valid HMAC over expired token", query: `?token=${encodeURIComponent(signJsonPayload({ v: 2, resourceId: BUNDLE_ITEMS[0].id, authId: "a", expiresAt: Date.now() - 5_000 }, primarySecret))}` },
-          { label: "valid HMAC over unsupported version v:99", query: `?token=${encodeURIComponent(signJsonPayload({ v: 99, resourceId: BUNDLE_ITEMS[0].id, authId: "a", expiresAt: Date.now() + 60_000 }, primarySecret))}` },
-          { label: "valid HMAC over unsupported/unvalidated metadata field", query: `?token=${encodeURIComponent(signJsonPayload({ resourceId: BUNDLE_ITEMS[0].id, authId: "a", paymentId: "pay_unverified", expiresAt: Date.now() + 60_000 }, primarySecret))}` }
+        const malformedCases: Array<{ label: string; headers?: Record<string, string>; query?: string; expectedCode?: string }> = [
+          { label: "missing token", headers: {} },
+          { label: "empty bearer token", headers: { Authorization: "Bearer " } },
+          { label: "query-string token forbidden", query: `?token=${encodeURIComponent(validTok)}`, expectedCode: "QUERY_TOKEN_FORBIDDEN" },
+          { label: "duplicate bearer tokens", headers: { Authorization: `Bearer ${validTok}, Bearer ${validTok}` } },
+          { label: "single-segment token", headers: { Authorization: `Bearer ${validData}` } },
+          { label: "three-segment token", headers: { Authorization: `Bearer ${validData}.${validSig}.extra` } },
+          { label: "tampered signature", headers: { Authorization: `Bearer ${validData}.${validSig.slice(0, -1)}${validSig.endsWith("A") ? "B" : "A"}` } },
+          { label: "multibyte UTF-8 signature (no RangeError 500)", headers: { Authorization: `Bearer ${validData}.${multibyteSig}` } },
+          { label: "invalid base64url payload data", headers: { Authorization: `Bearer ${signRawToken("!!!not_base64url!!!", primarySecret)}` } },
+          { label: "valid HMAC over non-JSON payload", headers: { Authorization: `Bearer ${signRawToken(Buffer.from("{not-json", "utf8").toString("base64url"), primarySecret)}` } },
+          { label: "valid HMAC over null payload", headers: { Authorization: `Bearer ${signJsonPayload(null, primarySecret)}` } },
+          { label: "valid HMAC over array payload", headers: { Authorization: `Bearer ${signJsonPayload([BUNDLE_ITEMS[0].id], primarySecret)}` } },
+          { label: "valid HMAC over empty object", headers: { Authorization: `Bearer ${signJsonPayload({}, primarySecret)}` } },
+          { label: "valid HMAC over missing resourceId", headers: { Authorization: `Bearer ${signJsonPayload({ v: 2, expiresAt: Date.now() + 60_000 }, primarySecret)}` } },
+          { label: "valid HMAC over whitespace resourceId", headers: { Authorization: `Bearer ${signJsonPayload({ v: 2, resourceId: "   ", expiresAt: Date.now() + 60_000 }, primarySecret)}` } },
+          { label: "valid HMAC over string expiresAt", headers: { Authorization: `Bearer ${signJsonPayload({ v: 2, resourceId: BUNDLE_ITEMS[0].id, expiresAt: String(Date.now() + 60_000) }, primarySecret)}` } },
+          { label: "valid HMAC over zero expiresAt", headers: { Authorization: `Bearer ${signJsonPayload({ v: 2, resourceId: BUNDLE_ITEMS[0].id, expiresAt: 0 }, primarySecret)}` } },
+          { label: "valid HMAC over expired token", headers: { Authorization: `Bearer ${signJsonPayload({ v: 2, resourceId: BUNDLE_ITEMS[0].id, expiresAt: Date.now() - 5_000 }, primarySecret)}` } },
+          { label: "valid HMAC over unsupported version v:99", headers: { Authorization: `Bearer ${signJsonPayload({ v: 99, resourceId: BUNDLE_ITEMS[0].id, expiresAt: Date.now() + 60_000 }, primarySecret)}` } },
+          { label: "valid HMAC over unsupported/unvalidated metadata field", headers: { Authorization: `Bearer ${signJsonPayload({ resourceId: BUNDLE_ITEMS[0].id, paymentId: "pay_unverified", expiresAt: Date.now() + 60_000 }, primarySecret)}` } }
         ];
 
         for (const tc of malformedCases) {
           resetPaymentRateLimits();
-          const res = await fetch(`${secBaseUrl}/api/payments/download-paid-asset${tc.query}`);
+          const res = await fetch(`${secBaseUrl}/api/payments/download-paid-asset${tc.query || ""}`, {
+            headers: tc.headers
+          });
           assert.strictEqual(res.status, 403, `Expected HTTP 403 for ${tc.label}, got ${res.status}`);
           assert.ok(String(res.headers.get("cache-control") || "").includes("no-store"), `Missing no-store Cache-Control for ${tc.label}`);
+          assert.strictEqual(res.headers.get("referrer-policy"), "no-referrer", `Missing Referrer-Policy for ${tc.label}`);
+          assert.strictEqual(res.headers.get("x-content-type-options"), "nosniff", `Missing X-Content-Type-Options for ${tc.label}`);
           const body = await res.json();
           assert.strictEqual(body.success, false);
-          assert.strictEqual(body.code, "INVALID_DOWNLOAD_TOKEN");
+          assert.strictEqual(body.code, tc.expectedCode || "INVALID_DOWNLOAD_TOKEN");
         }
       });
 
@@ -2948,24 +2967,30 @@ async function main() {
         });
         assert.strictEqual(rMint.status, 200);
         const mintBody = await rMint.json();
-        assert.ok(mintBody.downloadUrl.startsWith("/api/payments/download-paid-asset?token="));
-        const issuedToken = new URL(mintBody.downloadUrl, "https://example.test").searchParams.get("token")!;
+        assert.strictEqual(mintBody.downloadUrl, "/api/payments/download-paid-asset");
+        const issuedToken = String(mintBody.assetAccessToken || "");
+        assert.ok(issuedToken.length > 0, "Expected assetAccessToken in JSON authorization response");
         const decodedIssued = verifyAssetAccessToken(issuedToken);
         assert.ok(decodedIssued);
         assert.strictEqual(decodedIssued!.v, 2);
         assert.strictEqual(decodedIssued!.resourceId, BUNDLE_ITEMS[0].id);
         assert.strictEqual(decodedIssued!.filename, "meta-ads-campaign-planner-workbook.pdf");
-        // Verify unused/unvalidated identity fields are NOT embedded
+        // Verify unused/unvalidated identity fields (including authId) are NOT embedded
+        assert.strictEqual((decodedIssued as any).authId, undefined);
         assert.strictEqual((decodedIssued as any).paymentId, undefined);
         assert.strictEqual((decodedIssued as any).orderId, undefined);
         assert.strictEqual((decodedIssued as any).userId, undefined);
         assert.strictEqual((decodedIssued as any).email, undefined);
 
-        // Download succeeds for guest without Authorization header
+        // Download succeeds for guest using Authorization: Bearer <assetAccessToken> header (no user JWT)
         const expectedPdf = fs.readFileSync(path.resolve("server/protected_downloads/meta-ads-campaign-planner-workbook.pdf"));
-        const rGuestDl = await fetch(`${secBaseUrl}${mintBody.downloadUrl}`);
+        const rGuestDl = await fetch(`${secBaseUrl}${mintBody.downloadUrl}`, {
+          headers: { Authorization: `Bearer ${issuedToken}` }
+        });
         assert.strictEqual(rGuestDl.status, 200);
         assert.ok(String(rGuestDl.headers.get("cache-control") || "").includes("no-store"));
+        assert.strictEqual(rGuestDl.headers.get("referrer-policy"), "no-referrer");
+        assert.strictEqual(rGuestDl.headers.get("x-content-type-options"), "nosniff");
         assert.strictEqual(rGuestDl.headers.get("content-type"), "application/pdf");
         assert.strictEqual(
           rGuestDl.headers.get("content-disposition"),
@@ -2975,18 +3000,20 @@ async function main() {
 
         // 2. Conflicting/override metadata & cross-resource query params rejected 403
         const overrideQueries = [
-          { qs: `&resourceId=${BUNDLE_ITEMS[1].id}`, code: "TOKEN_RESOURCE_MISMATCH" },
-          { qs: `&file=the-ad-budget-break-even-calculator.xlsx`, code: "TOKEN_FILE_MISMATCH" },
-          { qs: `&filename=the-ad-budget-break-even-calculator.xlsx`, code: "TOKEN_FILE_MISMATCH" },
-          { qs: `&paymentId=pay_other_attacker`, code: "TOKEN_METADATA_OVERRIDE_REJECTED" },
-          { qs: `&orderId=order_other_attacker`, code: "TOKEN_METADATA_OVERRIDE_REJECTED" },
-          { qs: `&userId=99900000-0000-4000-8000-000000000999`, code: "TOKEN_METADATA_OVERRIDE_REJECTED" },
-          { qs: `&email=attacker@example.test`, code: "TOKEN_METADATA_OVERRIDE_REJECTED" },
-          { qs: `&authId=pay_other`, code: "TOKEN_METADATA_OVERRIDE_REJECTED" }
+          { qs: `?resourceId=${BUNDLE_ITEMS[1].id}`, code: "TOKEN_RESOURCE_MISMATCH" },
+          { qs: `?file=the-ad-budget-break-even-calculator.xlsx`, code: "TOKEN_FILE_MISMATCH" },
+          { qs: `?filename=the-ad-budget-break-even-calculator.xlsx`, code: "TOKEN_FILE_MISMATCH" },
+          { qs: `?paymentId=pay_other_attacker`, code: "TOKEN_METADATA_OVERRIDE_REJECTED" },
+          { qs: `?orderId=order_other_attacker`, code: "TOKEN_METADATA_OVERRIDE_REJECTED" },
+          { qs: `?userId=99900000-0000-4000-8000-000000000999`, code: "TOKEN_METADATA_OVERRIDE_REJECTED" },
+          { qs: `?email=attacker@example.test`, code: "TOKEN_METADATA_OVERRIDE_REJECTED" },
+          { qs: `?authId=pay_other`, code: "TOKEN_METADATA_OVERRIDE_REJECTED" }
         ];
         for (const oq of overrideQueries) {
           resetPaymentRateLimits();
-          const rOv = await fetch(`${secBaseUrl}${mintBody.downloadUrl}${oq.qs}`);
+          const rOv = await fetch(`${secBaseUrl}${mintBody.downloadUrl}${oq.qs}`, {
+            headers: { Authorization: `Bearer ${issuedToken}` }
+          });
           assert.strictEqual(rOv.status, 403, `Expected 403 for override ${oq.qs}, got ${rOv.status}`);
           const bOv = await rOv.json();
           assert.strictEqual(bOv.success, false);
@@ -2998,14 +3025,15 @@ async function main() {
           {
             v: 2,
             resourceId: BUNDLE_ITEMS[0].id,
-            authId: "pay_a1_forged",
             filename: "the-ad-budget-break-even-calculator.xlsx",
             expiresAt: Date.now() + 60_000
           },
           process.env.ASSET_TOKEN_HMAC_SECRET!
         );
         resetPaymentRateLimits();
-        const rForgedFile = await fetch(`${secBaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(forgedMismatchFileTok)}`);
+        const rForgedFile = await fetch(`${secBaseUrl}/api/payments/download-paid-asset`, {
+          headers: { Authorization: `Bearer ${forgedMismatchFileTok}` }
+        });
         assert.strictEqual(rForgedFile.status, 403);
         assert.strictEqual((await rForgedFile.json()).code, "TOKEN_FILE_MISMATCH");
 
@@ -3021,9 +3049,12 @@ async function main() {
         const decodedV1 = verifyAssetAccessToken(legacyDedicatedV1Tok);
         assert.strictEqual(decodedV1?.v, 1, "Expected v:1 for legacy v1 signed by ASSET_TOKEN_HMAC_SECRET");
         assert.strictEqual((decodedV1 as any)?.legacy, true, "Expected legacy:true for legacy v1 signed by ASSET_TOKEN_HMAC_SECRET");
+        assert.strictEqual((decodedV1 as any)?.authId, undefined, "authId must be omitted from verified legacy v1 results");
 
         resetPaymentRateLimits();
-        const rLegacyOk = await fetch(`${secBaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(legacyDedicatedV1Tok)}`);
+        const rLegacyOk = await fetch(`${secBaseUrl}/api/payments/download-paid-asset`, {
+          headers: { Authorization: `Bearer ${legacyDedicatedV1Tok}` }
+        });
         assert.strictEqual(rLegacyOk.status, 200, `Expected HTTP 200 for legacy v1 signed by ASSET_TOKEN_HMAC_SECRET, got ${rLegacyOk.status}`);
         assert.ok(Buffer.from(await rLegacyOk.arrayBuffer()).equals(expectedPdf));
 
@@ -3037,7 +3068,9 @@ async function main() {
         );
         assert.strictEqual(verifyAssetAccessToken(legacyRzpV1Tok), null, "Legacy v1 signed by RAZORPAY_KEY_SECRET must be rejected");
         resetPaymentRateLimits();
-        const rLegacyRzp = await fetch(`${secBaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(legacyRzpV1Tok)}`);
+        const rLegacyRzp = await fetch(`${secBaseUrl}/api/payments/download-paid-asset`, {
+          headers: { Authorization: `Bearer ${legacyRzpV1Tok}` }
+        });
         assert.strictEqual(rLegacyRzp.status, 403, `Expected HTTP 403 for legacy v1 signed by RAZORPAY_KEY_SECRET, got ${rLegacyRzp.status}`);
         assert.strictEqual((await rLegacyRzp.json()).code, "INVALID_DOWNLOAD_TOKEN");
       });
@@ -3061,7 +3094,9 @@ async function main() {
           setTestProtectedAssetConfig({ candidateDirs: [safeDir] });
           resetPaymentRateLimits();
 
-          const rSymlink = await fetch(`${secBaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(wbToken)}`);
+          const rSymlink = await fetch(`${secBaseUrl}/api/payments/download-paid-asset`, {
+            headers: { Authorization: `Bearer ${wbToken}` }
+          });
           assert.strictEqual(rSymlink.status, 404, `Expected HTTP 404 for symlink attack, got ${rSymlink.status}`);
           assert.ok(String(rSymlink.headers.get("cache-control") || "").includes("no-store"));
           const symText = await rSymlink.text();
@@ -3077,7 +3112,9 @@ async function main() {
           fs.mkdirSync(targetPath);
           resetPaymentRateLimits();
 
-          const rDir = await fetch(`${secBaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(wbToken)}`);
+          const rDir = await fetch(`${secBaseUrl}/api/payments/download-paid-asset`, {
+            headers: { Authorization: `Bearer ${wbToken}` }
+          });
           assert.strictEqual(rDir.status, 404, `Expected HTTP 404 for directory entry, got ${rDir.status}`);
           const dirText = await rDir.text();
           assert.strictEqual(JSON.parse(dirText).code, "PROTECTED_ASSET_UNAVAILABLE");
@@ -3099,7 +3136,9 @@ async function main() {
           });
           resetPaymentRateLimits();
 
-          const rRace1 = await fetch(`${secBaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(wbToken)}`);
+          const rRace1 = await fetch(`${secBaseUrl}/api/payments/download-paid-asset`, {
+            headers: { Authorization: `Bearer ${wbToken}` }
+          });
           assert.strictEqual(race1Triggered, true, "Expected deterministic onAfterOpen race hook to execute");
           assert.strictEqual(rRace1.status, 404, `Expected HTTP 404 when entry swapped to symlink after open, got ${rRace1.status}`);
           const race1Text = await rRace1.text();
@@ -3125,7 +3164,9 @@ async function main() {
           });
           resetPaymentRateLimits();
 
-          const rRace2 = await fetch(`${secBaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(wbToken)}`);
+          const rRace2 = await fetch(`${secBaseUrl}/api/payments/download-paid-asset`, {
+            headers: { Authorization: `Bearer ${wbToken}` }
+          });
           assert.strictEqual(race2Triggered, true, "Expected deterministic onBeforeStream race hook to execute");
           assert.strictEqual(rRace2.status, 200, `Expected HTTP 200 streaming original validated fd, got ${rRace2.status}`);
           assert.ok(String(rRace2.headers.get("cache-control") || "").includes("no-store"));
@@ -3177,15 +3218,15 @@ async function main() {
       };
 
       // 11.1 (Finding 5 Unit) Secret policy, exclusivity, 32-byte decoded sig, base64url/UTF-8 & max TTL helpers
-      await runTest("11.1 (Finding 5 Unit) Mandatory ASSET_TOKEN_HMAC_SECRET policy, zero Razorpay fallback, strict 32-byte decoded sig, fatal UTF-8, and strict 3,600s max TTL", () => {
+      await runTest("11.1 (Finding 5 Unit) Mandatory ASSET_TOKEN_HMAC_SECRET policy, zero Razorpay fallback, strict 32-byte decoded sig, fatal UTF-8, and strict 900s max TTL", () => {
         const origAssetSecret = process.env.ASSET_TOKEN_HMAC_SECRET;
         const origRzpSecret = process.env.RAZORPAY_KEY_SECRET;
         const dedicatedSecret = "f5_unit_dedicated_asset_secret_32_bytes_high_entropy_9!";
         const rzpSecret = "f5_unit_razorpay_secret_32_bytes_high_entropy_8!";
 
         try {
-          assert.strictEqual(ASSET_TOKEN_TTL_MS, 3_600_000);
-          assert.strictEqual(ASSET_TOKEN_MAX_TTL_MS, 3_600_000);
+          assert.strictEqual(ASSET_TOKEN_TTL_MS, 900_000);
+          assert.strictEqual(ASSET_TOKEN_MAX_TTL_MS, 900_000);
 
           process.env.ASSET_TOKEN_HMAC_SECRET = dedicatedSecret;
           process.env.RAZORPAY_KEY_SECRET = rzpSecret;
@@ -3436,13 +3477,17 @@ async function main() {
 
           // 1. Valid v2 signed by dedicated asset secret -> HTTP 200
           resetPaymentRateLimits();
-          const rV2Ok = await fetch(`${secBaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(validV2)}`);
+          const rV2Ok = await fetch(`${secBaseUrl}/api/payments/download-paid-asset`, {
+            headers: { Authorization: `Bearer ${validV2}` }
+          });
           assert.strictEqual(rV2Ok.status, 200);
           assert.ok(Buffer.from(await rV2Ok.arrayBuffer()).equals(expectedPdf));
 
           // 2. Valid legacy v1 signed by dedicated asset secret -> HTTP 200
           resetPaymentRateLimits();
-          const rV1Ok = await fetch(`${secBaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(v1DedicatedOk)}`);
+          const rV1Ok = await fetch(`${secBaseUrl}/api/payments/download-paid-asset`, {
+            headers: { Authorization: `Bearer ${v1DedicatedOk}` }
+          });
           assert.strictEqual(rV1Ok.status, 200);
           assert.ok(Buffer.from(await rV1Ok.arrayBuffer()).equals(expectedPdf));
 
@@ -3453,7 +3498,9 @@ async function main() {
             ["legacy v1 with disallowed filename key", v1DedicatedBadField]
           ]) {
             resetPaymentRateLimits();
-            const res = await fetch(`${secBaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(tok)}`);
+            const res = await fetch(`${secBaseUrl}/api/payments/download-paid-asset`, {
+              headers: { Authorization: `Bearer ${tok}` }
+            });
             await assertClean403(res, label, [dedicatedSecret, rzpSecret]);
           }
 
@@ -3465,7 +3512,9 @@ async function main() {
             ["missing secret with Razorpay v2 token", v2Rzp]
           ]) {
             resetPaymentRateLimits();
-            const res = await fetch(`${secBaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(tok)}`);
+            const res = await fetch(`${secBaseUrl}/api/payments/download-paid-asset`, {
+              headers: { Authorization: `Bearer ${tok}` }
+            });
             await assertClean403(res, label, [dedicatedSecret, rzpSecret]);
           }
 
@@ -3482,7 +3531,9 @@ async function main() {
               weakVal
             );
             resetPaymentRateLimits();
-            const res = await fetch(`${secBaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(weakSigned)}`);
+            const res = await fetch(`${secBaseUrl}/api/payments/download-paid-asset`, {
+              headers: { Authorization: `Bearer ${weakSigned}` }
+            });
             await assertClean403(res, `weak secret (${label})`, [weakVal, dedicatedSecret, rzpSecret]);
           }
         } finally {
@@ -3522,10 +3573,10 @@ async function main() {
           { label: "tampered payload with original signature", token: `${Buffer.from(JSON.stringify({ v: 2, resourceId: BUNDLE_ITEMS[1].id, authId: "tamper", expiresAt: Date.now() + 60_000 }), "utf8").toString("base64url")}.${v2Sig}` },
           { label: "malformed raw UTF-8 signed payload", token: signRawBytesPayload(Buffer.from([0xff, 0xfe, 0xc0, 0xaf]), dedicatedSecret) },
           { label: "malformed UTF-8 inside signed JSON string", token: signRawBytesPayload(invalidUtf8Json, dedicatedSecret) },
-          { label: "excessive future expiry (+1h + 5s)", token: signJsonPayload({ v: 2, resourceId: BUNDLE_ITEMS[0].id, authId: "a", expiresAt: Date.now() + ASSET_TOKEN_MAX_TTL_MS + 5_000 }, dedicatedSecret) },
-          { label: "excessive future expiry (+2h)", token: signJsonPayload({ v: 2, resourceId: BUNDLE_ITEMS[0].id, authId: "a", expiresAt: Date.now() + 2 * ASSET_TOKEN_MAX_TTL_MS }, dedicatedSecret) },
+          { label: "excessive future expiry (+15m + 5s)", token: signJsonPayload({ v: 2, resourceId: BUNDLE_ITEMS[0].id, authId: "a", expiresAt: Date.now() + ASSET_TOKEN_MAX_TTL_MS + 5_000 }, dedicatedSecret) },
+          { label: "excessive future expiry (+30m)", token: signJsonPayload({ v: 2, resourceId: BUNDLE_ITEMS[0].id, authId: "a", expiresAt: Date.now() + 2 * ASSET_TOKEN_MAX_TTL_MS }, dedicatedSecret) },
           { label: "excessive future expiry (+1y)", token: signJsonPayload({ v: 2, resourceId: BUNDLE_ITEMS[0].id, authId: "a", expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000 }, dedicatedSecret) },
-          { label: "legacy v1 excessive future expiry (+2h)", token: signJsonPayload({ resourceId: BUNDLE_ITEMS[0].id, authId: "a", expiresAt: Date.now() + 2 * ASSET_TOKEN_MAX_TTL_MS }, dedicatedSecret) },
+          { label: "legacy v1 excessive future expiry (+30m)", token: signJsonPayload({ resourceId: BUNDLE_ITEMS[0].id, authId: "a", expiresAt: Date.now() + 2 * ASSET_TOKEN_MAX_TTL_MS }, dedicatedSecret) },
           { label: "non-integer float expiresAt", token: signJsonPayload({ v: 2, resourceId: BUNDLE_ITEMS[0].id, authId: "a", expiresAt: Date.now() + 60_000.5 }, dedicatedSecret) },
           { label: "unknown __proto__ payload key", token: signRawBytesPayload(protoJson, dedicatedSecret) },
           { label: "unsupported version v:0", token: signJsonPayload({ v: 0, resourceId: BUNDLE_ITEMS[0].id, authId: "a", expiresAt: Date.now() + 60_000 }, dedicatedSecret) },
@@ -3536,7 +3587,9 @@ async function main() {
 
         for (const tc of cases) {
           resetPaymentRateLimits();
-          const res = await fetch(`${secBaseUrl}/api/payments/download-paid-asset?token=${encodeURIComponent(tc.token)}`);
+          const res = await fetch(`${secBaseUrl}/api/payments/download-paid-asset`, {
+            headers: { Authorization: `Bearer ${tc.token}` }
+          });
           assert.strictEqual(res.status, 403, `Expected HTTP 403 for ${tc.label}, got ${res.status}`);
           assert.ok(String(res.headers.get("cache-control") || "").includes("no-store"), `Missing no-store header for ${tc.label}`);
           const text = await res.text();
