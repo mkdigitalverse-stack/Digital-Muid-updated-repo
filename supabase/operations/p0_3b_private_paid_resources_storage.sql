@@ -150,8 +150,8 @@ BEGIN
       OR (
         NOT (p.roles = ARRAY['service_role']::name[])
         AND (
-          (p.cmd IN ('SELECT', 'UPDATE', 'DELETE', 'ALL') AND COALESCE(p.qual, '') !~* '\bbucket_id\b')
-          OR (p.cmd IN ('INSERT', 'UPDATE', 'ALL') AND COALESCE(p.with_check, '') !~* '\bbucket_id\b')
+          (p.cmd IN ('SELECT', 'UPDATE', 'DELETE', 'ALL') AND COALESCE(p.qual, '') !~* '(^|[^a-zA-Z0-9_])bucket_id([^a-zA-Z0-9_]|$)')
+          OR (p.cmd IN ('INSERT', 'UPDATE', 'ALL') AND COALESCE(p.with_check, '') !~* '(^|[^a-zA-Z0-9_])bucket_id([^a-zA-Z0-9_]|$)')
         )
       )
     );

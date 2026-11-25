@@ -1,0 +1,145 @@
+name: Local Supabase CLI Auth & Storage Integration Tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-supabase-integration:
+    name: Local Supabase Stack (Auth, Storage & RLS)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: v2.34.1
+
+      - name: Start local Supabase stack
+        run: |
+          set -euo pipefail
+          supabase start
+
+      - name: Capture, validate, and mask Supabase credentials
+        run: |
+          set -euo pipefail
+          STATUS_JSON=$(supabase status -o json)
+          
+          API_URL=$(echo "$STATUS_JSON" | jq -r .API_URL)
+          ANON_KEY=$(echo "$STATUS_JSON" | jq -r .ANON_KEY)
+          SERVICE_ROLE_KEY=$(echo "$STATUS_JSON" | jq -r .SERVICE_ROLE_KEY)
+          DB_URL=$(echo "$STATUS_JSON" | jq -r '.DB_URL // .LOCAL_DB_URL // empty')
+          
+          # Immediately mask every nonempty secret before any validation error can print
+          if [ -n "${ANON_KEY:-}" ] && [ "$ANON_KEY" != "null" ]; then
+            echo "::add-mask::$ANON_KEY"
+          fi
+          if [ -n "${SERVICE_ROLE_KEY:-}" ] && [ "$SERVICE_ROLE_KEY" != "null" ]; then
+            echo "::add-mask::$SERVICE_ROLE_KEY"
+          fi
+          if [ -n "${DB_URL:-}" ] && [ "$DB_URL" != "null" ]; then
+            echo "::add-mask::$DB_URL"
+          fi
+
+          # Keep missing-value checks fail-closed (never print secret values in error messages)
+          if [ -z "$API_URL" ] || [ "$API_URL" = "null" ]; then
+            echo "::error::API_URL is missing or empty."
+            exit 1
+          fi
+          if [ -z "$ANON_KEY" ] || [ "$ANON_KEY" = "null" ]; then
+            echo "::error::ANON_KEY is missing or empty."
+            exit 1
+          fi
+          if [ -z "$SERVICE_ROLE_KEY" ] || [ "$SERVICE_ROLE_KEY" = "null" ]; then
+            echo "::error::SERVICE_ROLE_KEY is missing or empty."
+            exit 1
+          fi
+          if [ -z "$DB_URL" ] || [ "$DB_URL" = "null" ]; then
+            echo "::error::LOCAL_DB_URL is missing or empty."
+            exit 1
+          fi
+
+          # Validate API_URL strictly against allowed local endpoints
+          if [ "$API_URL" != "http://127.0.0.1:54321" ] && [ "$API_URL" != "http://localhost:54321" ]; then
+            echo "::error::API_URL does not match allowed local endpoints."
+            exit 1
+          fi
+
+          # Strict database URL validation: protocol postgres/postgresql, host 127.0.0.1 or localhost, port 54322, nonempty DB path, no query/fragment/unexpected components
+          python3 -c '
+          import re
+          import sys
+          from urllib.parse import urlsplit
+          url = sys.argv[1]
+          try:
+              if any(ch.isspace() for ch in url):
+                  sys.exit(1)
+              parsed = urlsplit(url)
+              if parsed.scheme not in ("postgres", "postgresql"):
+                  sys.exit(1)
+              if parsed.hostname not in ("127.0.0.1", "localhost"):
+                  sys.exit(1)
+              if parsed.port != 54322:
+                  sys.exit(1)
+              if not parsed.username:
+                  sys.exit(1)
+              if parsed.netloc.count("@") != 1:
+                  sys.exit(1)
+              hostport = parsed.netloc.rsplit("@", 1)[-1]
+              if hostport not in ("127.0.0.1:54322", "localhost:54322"):
+                  sys.exit(1)
+              if not re.fullmatch(r"/[A-Za-z0-9_-]+", parsed.path):
+                  sys.exit(1)
+              if parsed.query or parsed.fragment or "?" in url or "#" in url or ";" in parsed.path:
+                  sys.exit(1)
+          except Exception:
+              sys.exit(1)
+          ' "$DB_URL" || {
+            echo "::error::LOCAL_DB_URL failed strict validation (must be postgres:// or postgresql:// on 127.0.0.1 or localhost at port 54322 with a valid database path and no query parameters, fragments, or unexpected URL components)."
+            exit 1
+          }
+          
+          echo "SUPABASE_URL=$API_URL" >> $GITHUB_ENV
+          echo "SUPABASE_ANON_KEY=$ANON_KEY" >> $GITHUB_ENV
+          echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY" >> $GITHUB_ENV
+          echo "LOCAL_DB_URL=$DB_URL" >> $GITHUB_ENV
+          
+          echo "Supabase stack successfully started, validated, and credentials masked."
+
+      - name: Apply DB migrations and mandatory private storage operations
+        run: |
+          set -euo pipefail
+          supabase db reset --no-seed
+
+          if [ ! -f supabase/operations/p0_3b_private_paid_resources_storage.sql ]; then
+            echo "::error::Mandatory storage operation file supabase/operations/p0_3b_private_paid_resources_storage.sql is missing."
+            exit 1
+          fi
+
+          psql "$LOCAL_DB_URL" -v ON_ERROR_STOP=1 -f supabase/operations/p0_3b_private_paid_resources_storage.sql
+
+      - name: Run local Supabase Auth & Storage integration tests
+        run: |
+          set -euo pipefail
+          echo "Running integration tests against local Supabase instance..."
+          node supabase/tests/supabase_local_storage_auth_test.mjs
+
+      - name: Teardown local Supabase stack
+        if: always()
+        run: |
+          supabase stop --no-backup || true

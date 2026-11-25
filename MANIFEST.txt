@@ -1,0 +1,6 @@
+DIGITALMUID V4.3 — LOCAL SUPABASE CI MANIFEST
+==================================================
+d0774dbfa8b7a5765c4b5a8d99446a90a0283d27a1c107d070da5e60ebb6195d  supabase/config.toml
+a882592aa5771218239c0cdac8020aa6b545c19e9476b50fbccdb82c7346bda8  .github/workflows/supabase-local-integration.yml
+9c904d1578250345f624a5d8513872a75facfd0b38c4b3addd87b4c06f1da0a4  supabase/tests/supabase_local_storage_auth_test.mjs
+95f4f2ebaf472cbcf4fb6d628972a4bb5c27169ca15685b41b3b7c238aba9176  supabase/operations/p0_3b_private_paid_resources_storage.sql
