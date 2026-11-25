@@ -1,6 +1,7 @@
--- Migration: Create foundational public.bookings table
--- Exact Table Definition from supabase/schema.sql (lines 41-75)
--- Purpose: Establishes public.bookings table prior to indexing and alteration migrations.
+-- =====================================================================================
+-- MIGRATION: 20260825000001_create_bookings_table.sql
+-- DESCRIPTION: Foundational creation of public.bookings table prior to duplicate prevention index.
+-- =====================================================================================
 
 CREATE TABLE IF NOT EXISTS public.bookings (
   id TEXT PRIMARY KEY,
@@ -33,3 +34,5 @@ CREATE TABLE IF NOT EXISTS public.bookings (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+COMMENT ON TABLE public.bookings IS 'Foundational consultation and booking records table.';
