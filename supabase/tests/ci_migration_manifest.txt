@@ -1,3 +1,5 @@
+supabase/migrations/20260824000001_create_is_admin_function.sql
+supabase/migrations/20260825000001_create_bookings_table.sql
 supabase/migrations/20260826000001_prevent_duplicate_active_bookings.sql
 supabase/migrations/20260826000002_create_contact_messages_table.sql
 supabase/migrations/20260828000001_create_articles_table.sql
