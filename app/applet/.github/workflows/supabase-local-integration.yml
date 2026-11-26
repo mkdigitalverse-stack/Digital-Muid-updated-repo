@@ -1,0 +1,30 @@
+name: Disposable PostgreSQL 17 V4.3 Migration & Concurrency Tests
+
+on:
+  push:
+    branches: [ ci/local-supabase-integration ]
+  pull_request:
+    branches: [ ci/local-supabase-integration ]
+
+jobs:
+  local-supabase-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-supabase@v1
+        with:
+          supabase-version: 'v3.4.0'
+
+      - name: Start Local Supabase
+        run: supabase start
+
+      - name: Reset Database and Replay Migrations
+        run: supabase db reset --no-seed
