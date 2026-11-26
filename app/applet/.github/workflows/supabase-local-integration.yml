@@ -23,29 +23,226 @@ jobs:
         with:
           supabase-version: 'v3.4.0'
 
+      - name: Verify Supabase CLI Version
+        shell: bash
+        run: |
+          set -euo pipefail
+          CLI_VERSION=$(supabase --version)
+          echo "Supabase CLI version verified: $CLI_VERSION"
+          if [[ "$CLI_VERSION" != *"3.4.0"* ]]; then
+            echo "ERROR: Supabase CLI version is not v3.4.0"
+            exit 1
+          fi
+
       - name: Start Local Supabase
         run: supabase start
 
-      - name: Reset Database and Replay Standard Migrations
+      - name: Chronological Migration Sequence & Phase B Harness Execution
+        shell: bash
         run: |
-          # Isolate Phase B concurrent index migration to prevent bundled pipeline transaction errors
-          mkdir -p .migration_staging
+          set -euo pipefail
+          
+          echo "=== STEP A: Creating cryptographic sha256 migration manifest and staging with safety checks ==="
+          mkdir -p .migration_staging/subsequent
+          
+          find supabase/migrations -name "*.sql" | sort | xargs sha256sum > .migration_staging/original_manifest.sha256
+          echo "Original migration cryptographic manifest created:"
+          cat .migration_staging/original_manifest.sha256
+
+          restore_file() {
+            src="$1"
+            dest="$2"
+            if [ -f "$src" ]; then
+              if [ -f "$dest" ]; then
+                if cmp -s "$src" "$dest"; then
+                  echo "Notice: Destination $dest already exists and contents are identical. Removing duplicate staging copy."
+                  rm "$src"
+                else
+                  echo "FAIL-CLOSED ERROR: Destination file $dest exists and differs from staged source $src! Refusing to overwrite."
+                  return 1
+                fi
+              else
+                echo "Restoring $dest from $src..."
+                mv "$src" "$dest" || return 1
+              fi
+            fi
+            return 0
+          }
+
+          # Shared function for verified temporary-copy deletion (Requirement 1)
+          remove_verified_temp_file() {
+            temp_file="$1"
+            original_staged=".migration_staging/20261107000002_concurrent_indexes.sql"
+            if [ -f "$temp_file" ] && [ -f "$original_staged" ]; then
+              if cmp -s "$temp_file" "$original_staged"; then
+                echo "Notice: Temporary file $temp_file verified identical to staged original. Removing safely."
+                rm -f "$temp_file"
+              else
+                echo "FAIL-CLOSED ERROR: Temporary file $temp_file differs from staged original! Preserving both and aborting."
+                return 1
+              fi
+            elif [ -f "$temp_file" ]; then
+              echo "FAIL-CLOSED ERROR: Staged original Phase B file missing while temporary file $temp_file exists!"
+              return 1
+            fi
+            return 0
+          }
+
+          cleanup() {
+            ORIGINAL_EXIT=$?
+            trap - EXIT
+            echo "Running guaranteed cleanup trap (Original exit status: $ORIGINAL_EXIT)..."
+            RESTORE_FAILED=0
+            
+            if [ -f ".migration_staging/20261107000002_concurrent_indexes.sql" ]; then
+              restore_file ".migration_staging/20261107000002_concurrent_indexes.sql" "supabase/migrations/20261107000002_concurrent_indexes.sql" || RESTORE_FAILED=1
+            fi
+            if [ -f ".migration_staging/temp_active_phase_b.sql" ]; then
+              restore_file ".migration_staging/temp_active_phase_b.sql" "supabase/migrations/20261107000002_concurrent_indexes.sql" || RESTORE_FAILED=1
+            fi
+
+            if [ -d ".migration_staging/subsequent" ] && [ "$(ls -A .migration_staging/subsequent 2>/dev/null)" ]; then
+              for sub in .migration_staging/subsequent/*; do
+                if [ -f "$sub" ]; then
+                  dest="supabase/migrations/$(basename "$sub")"
+                  restore_file "$sub" "$dest" || RESTORE_FAILED=1
+                fi
+              done
+            fi
+
+            if [ -f ".migration_staging/original_manifest.sha256" ]; then
+              if ! sha256sum -c .migration_staging/original_manifest.sha256 --status; then
+                echo "FAIL-CLOSED ERROR: Cryptographic sha256 manifest verification failed after restoration!"
+                RESTORE_FAILED=1
+              fi
+            else
+              echo "FAIL-CLOSED ERROR: Original manifest sha256 file missing during cleanup!"
+              RESTORE_FAILED=1
+            fi
+
+            if [ "$RESTORE_FAILED" -eq 1 ]; then
+              echo "FAIL-CLOSED ERROR: Migration restoration failed safely without data loss!"
+              exit 1
+            fi
+
+            exit "$ORIGINAL_EXIT"
+          }
+          trap cleanup EXIT
+
+          echo "Discovering and staging Phase B and subsequent migrations..."
           if [ -f "supabase/migrations/20261107000002_concurrent_indexes.sql" ]; then
             mv supabase/migrations/20261107000002_concurrent_indexes.sql .migration_staging/
           fi
-          
+
+          > .migration_staging/expected_subsequent.txt
+          while IFS= read -r line; do
+            if [ -n "$line" ]; then
+              orig_file=$(echo "$line" | awk '{print $2}')
+              if [ -n "$orig_file" ]; then
+                BASENAME=$(basename "$orig_file")
+                VERSION_NUM=$(echo "$BASENAME" | grep -o '^[0-9]\+')
+                if [ -n "$VERSION_NUM" ] && [ "$VERSION_NUM" -gt 20261107000002 ]; then
+                  echo "$VERSION_NUM" >> .migration_staging/expected_subsequent.txt
+                  if [ -f "$orig_file" ]; then
+                    mv "$orig_file" .migration_staging/subsequent/
+                  fi
+                fi
+              fi
+            fi
+          done < .migration_staging/original_manifest.sha256
+
+          echo "=== STEP B: Running supabase db reset --no-seed (Applies earlier migrations & Phase A) ==="
           supabase db reset --no-seed
 
-      - name: Execute Phase B Concurrent Indexes Safely Outside Pipeline
-        run: |
-          # Restore Phase B migration and execute via psql with autocommit / standalone execution
+          echo "=== STEP C: Executing Phase B via psql in standalone autocommit mode ==="
           if [ -f ".migration_staging/20261107000002_concurrent_indexes.sql" ]; then
-            mv .migration_staging/20261107000002_concurrent_indexes.sql supabase/migrations/
+            cp .migration_staging/20261107000002_concurrent_indexes.sql .migration_staging/temp_active_phase_b.sql
+            cp .migration_staging/temp_active_phase_b.sql supabase/migrations/20261107000002_concurrent_indexes.sql
           fi
           
           DB_URL=$(supabase status --output json | jq -r .DB_URL)
-          echo "Executing Phase B concurrent indexes against local database..."
-          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261107000002_concurrent_indexes.sql
+          
+          if [ ! -f "scripts/verify_phase_b.sh" ]; then
+            echo "FAIL-CLOSED ERROR: Verification helper script scripts/verify_phase_b.sh not found!"
+            exit 1
+          fi
+          
+          chmod +x scripts/verify_phase_b.sh
+          ./scripts/verify_phase_b.sh "$DB_URL"
+
+          echo "=== STEP D & E: Safe verified temporary active Phase B cleanup ==="
+          if [ -f "supabase/migrations/20261107000002_concurrent_indexes.sql" ]; then
+            remove_verified_temp_file "supabase/migrations/20261107000002_concurrent_indexes.sql"
+          fi
+          remove_verified_temp_file ".migration_staging/temp_active_phase_b.sql"
+          
+          if [ -d ".migration_staging/subsequent" ] && [ "$(ls -A .migration_staging/subsequent 2>/dev/null)" ]; then
+            for sub in .migration_staging/subsequent/*; do
+              if [ -f "$sub" ]; then
+                dest="supabase/migrations/$(basename "$sub")"
+                restore_file "$sub" "$dest"
+              fi
+            done
+          fi
+
+          echo "=== STEP F: Running supabase migration up --local for subsequent migrations ==="
+          supabase migration up --local
+
+          echo "=== STEP G: Complete Independent Post-Migration History Verification ==="
+          DB_URL=$(supabase status --output json | jq -r .DB_URL)
+          echo "Independently querying schema_migrations using psql -v ON_ERROR_STOP=1..."
+          
+          PHASE_A_EXISTS=$(psql "$DB_URL" -v ON_ERROR_STOP=1 -t -A -c "SELECT version FROM supabase_migrations.schema_migrations WHERE version = '20261107000001';")
+          if [ "$PHASE_A_EXISTS" != "20261107000001" ]; then
+            echo "FAIL-CLOSED ERROR: Phase A migration version 20261107000001 is missing or mismatched in schema_migrations!"
+            exit 1
+          fi
+
+          PHASE_B_EXISTS=$(psql "$DB_URL" -v ON_ERROR_STOP=1 -t -A -c "SELECT version FROM supabase_migrations.schema_migrations WHERE version = '20261107000002';")
+          if [ -n "$PHASE_B_EXISTS" ]; then
+            echo "FAIL-CLOSED ERROR: Phase B migration version 20261107000002 unexpectedly recorded in schema_migrations!"
+            exit 1
+          fi
+
+          if [ -f ".migration_staging/expected_subsequent.txt" ]; then
+            while IFS= read -r sub_ver; do
+              if [ -n "$sub_ver" ]; then
+                REC_VER=$(psql "$DB_URL" -v ON_ERROR_STOP=1 -t -A -c "SELECT version FROM supabase_migrations.schema_migrations WHERE version = '$sub_ver';")
+                if [ "$REC_VER" != "$sub_ver" ]; then
+                  echo "FAIL-CLOSED ERROR: Expected subsequent migration version $sub_ver is missing from schema_migrations!"
+                  exit 1
+                fi
+              fi
+            done < .migration_staging/expected_subsequent.txt
+          fi
+
+          echo "NOTICE: CI-only method intentionally creates a migration-history gap for Phase B (version 20261107000002 remains unrecorded in schema_migrations while physical catalog indexes are fully verified and subsequent migrations are fully recorded)."
+
+          echo "=== STEP H: Safe Restoration, Hash Verification, Metadata Removal, and Staging Empty Check ==="
+          if [ -f ".migration_staging/20261107000002_concurrent_indexes.sql" ]; then
+            restore_file ".migration_staging/20261107000002_concurrent_indexes.sql" "supabase/migrations/20261107000002_concurrent_indexes.sql"
+          fi
+
+          if ! sha256sum -c .migration_staging/original_manifest.sha256 --status; then
+            echo "FAIL-CLOSED ERROR: Cryptographic sha256 manifest verification failed before cleanup!"
+            exit 1
+          fi
+
+          rm -f .migration_staging/original_manifest.sha256
+          rm -f .migration_staging/expected_subsequent.txt
+
+          # Fix 2: Remove empty subsequent subdirectory safely via rmdir
+          if [ -d ".migration_staging/subsequent" ]; then
+            rmdir .migration_staging/subsequent
+          fi
+
+          if [ "$(ls -A .migration_staging 2>/dev/null)" ]; then
+            echo "FAIL-CLOSED ERROR: Staging directory .migration_staging is not empty before removal!"
+            exit 1
+          fi
+
+          rmdir .migration_staging
+          trap - EXIT
 
       - name: Run Offline Security Regression & Verification Suite
         run: node run_offline_regression.mjs
