@@ -26,5 +26,26 @@ jobs:
       - name: Start Local Supabase
         run: supabase start
 
-      - name: Reset Database and Replay Migrations
-        run: supabase db reset --no-seed
+      - name: Reset Database and Replay Standard Migrations
+        run: |
+          # Isolate Phase B concurrent index migration to prevent bundled pipeline transaction errors
+          mkdir -p .migration_staging
+          if [ -f "supabase/migrations/20261107000002_concurrent_indexes.sql" ]; then
+            mv supabase/migrations/20261107000002_concurrent_indexes.sql .migration_staging/
+          fi
+          
+          supabase db reset --no-seed
+
+      - name: Execute Phase B Concurrent Indexes Safely Outside Pipeline
+        run: |
+          # Restore Phase B migration and execute via psql with autocommit / standalone execution
+          if [ -f ".migration_staging/20261107000002_concurrent_indexes.sql" ]; then
+            mv .migration_staging/20261107000002_concurrent_indexes.sql supabase/migrations/
+          fi
+          
+          DB_URL=$(supabase status --output json | jq -r .DB_URL)
+          echo "Executing Phase B concurrent indexes against local database..."
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/20261107000002_concurrent_indexes.sql
+
+      - name: Run Offline Security Regression & Verification Suite
+        run: node run_offline_regression.mjs
