@@ -188,7 +188,10 @@ for entry in "${EXPECTED_INDEXES[@]}"; do
     WHERE c.relname = '$idx_name' AND n.nspname = '$schema_name' AND t.relname = '$table_name';
   ")
 
-  IFS='|' read -r actual_idx_schema actual_tbl_schema actual_am actual_unique actual_valid actual_ready actual_nkeyatts actual_natts actual_no_expr actual_cols actual_pred <<< "$INDEX_META"
+  # Use NUL as the read delimiter so embedded newlines in pg_get_expr() are preserved.
+  # A here-string appends one newline; remove only that final newline after capture.
+  IFS='|' read -r -d '' actual_idx_schema actual_tbl_schema actual_am actual_unique actual_valid actual_ready actual_nkeyatts actual_natts actual_no_expr actual_cols actual_pred <<< "$INDEX_META" || true
+  actual_pred="${actual_pred%$'\n'}"
 
   if [ "$actual_idx_schema" != "public" ] || [ "$actual_tbl_schema" != "public" ]; then
     echo "ERROR: Index schema ($actual_idx_schema) or table schema ($actual_tbl_schema) is not 'public'."
