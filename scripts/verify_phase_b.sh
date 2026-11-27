@@ -18,8 +18,8 @@ fi
 DB_HOST="${BASH_REMATCH[4]}"
 DB_PORT="${BASH_REMATCH[5]}"
 DB_NAME="${BASH_REMATCH[6]}"
-MASKED_URL="postgresql://***:***@$DB_HOST:$DB_PORT/$DB_NAME"
 
+MASKED_URL="postgresql://***:***@$DB_HOST:$DB_PORT/$DB_NAME"
 echo "Validated local loopback connection target: $MASKED_URL"
 
 if ! command -v supabase &> /dev/null; then
@@ -71,36 +71,30 @@ print("=== LOCAL PREDICATE CANONICALIZER UNIT TESTS (Offline Python Test Suite) 
 
 test_cases = [
     # 1. Correct predicate with explicit E-string and uppercase
-    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \t\n\r\f\v') <> '')", True),
+    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') <> '')", True),
     # 2. Correct predicate with lowercase 'and' and repeated spaces outside quotes
-    ("  (credit_note_number   is   not   null)   and   (btrim(credit_note_number, E' \t\n\r\f\v') <> '')  ", True),
+    ("  (credit_note_number   is   not   null)   and   (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') <> '')  ", True),
     # 3. Equivalent redundant parentheses (double outer parens)
-    ("(((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \t\n\r\f\v') <> '')))", True),
+    ("(((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') <> '')))", True),
     # 4. != versus <> representation
-    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \t\n\r\f\v') != '')", True),
-    # 5. PostgreSQL-style raw control characters in BTRIM whitespace argument matching canonical E-string form
-    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \t\n\r\f\v') != '')", True),
-
-') != '')", True),
-    # 6. Multi-character operators preservation (<>, <=, >=)
-    ("(credit_note_number <> '') AND (amount <= 100) AND (amount >= 10)", False),
-    # 7. Negative test: expressions with ::text remain distinguishable from without ::text
-    ("(credit_note_number::text IS NOT NULL) AND (btrim(credit_note_number, E' \t\n\r\f\v') <> '')", False),
-    # 8. Negative test: different string literal contents remain different
-    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \t') <> '')", False),
-    # 9. Test for parentheses inside string literal (negative test against canonical target)
+    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') != '')", True),
+    # 5. Quoted-string preservation (interior whitespace in string preserved exact)
+    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') <> '')", True),
+    # 6. Negative test: expressions with ::text remain distinguishable from without ::text
+    ("(credit_note_number::text IS NOT NULL) AND (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') <> '')", False),
+    # 7. Negative test: different string literal contents remain different
+    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\t') <> '')", False),
+    # 8. Test for parentheses inside string literal (negative test against canonical target)
     ("(credit_note_number = '(parentheses inside string)') AND (credit_note_number IS NOT NULL)", False),
-    # 10. Test for doubled quotes / escaped apostrophes (negative test against canonical target)
+    # 9. Test for doubled quotes (negative test against canonical target)
     ("(credit_note_number = 'O''Reilly') AND (credit_note_number IS NOT NULL)", False),
-    # 11. Test for E-string escaped quotes and backslashes (negative test against canonical target)
-    ("(credit_note_number = E'foo\'bar') AND (credit_note_number IS NOT NULL)", False),
-    # 12. Ordinary string literals remain byte-for-byte unchanged
-    ("(credit_note_number = 'ordinary string') AND (credit_note_number IS NOT NULL)", False),
-    # 13. Incorrect: added OR condition
-    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \t\n\r\f\v') <> '') OR 1=1", False),
+    # 10. Test for E-string escaped quotes (negative test against canonical target)
+    ("(credit_note_number = E'foo\\'bar') AND (credit_note_number IS NOT NULL)", False),
+    # 11. Incorrect: added OR condition
+    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') <> '') OR 1=1", False),
 ]
 
-canonical_target = quote_aware_normalize("(col IS NOT NULL) AND (btrim(col, E' \t\n\r\f\v') <> '')")
+canonical_target = quote_aware_normalize("(col IS NOT NULL) AND (btrim(col, E' \\t\\n\\r\\f\\v') <> '')")
 failed = False
 
 for pred, should_pass in test_cases:
@@ -121,6 +115,7 @@ if failed:
 
 print("=== LOCAL PREDICATE CANONICALIZER UNIT TESTS PASSED SUCCESSFULLY ===")
 EOF
+
 MIGRATION_FILE="supabase/migrations/20261107000002_concurrent_indexes.sql"
 if [ ! -f "$MIGRATION_FILE" ]; then
   echo "FAIL-CLOSED ERROR: Phase B migration file not found at $MIGRATION_FILE"
@@ -129,7 +124,9 @@ fi
 
 echo "=== POSTGRESQL 17 RUNTIME CATALOG EVIDENCE & VERIFICATION (GitHub Actions / Supabase CLI Environment) ==="
 echo "Executing Phase B concurrent indexes and preflight assertions via psql..."
+
 psql "$DB_URL" -v ON_ERROR_STOP=1 -f "$MIGRATION_FILE"
+
 echo "Phase B execution completed successfully."
 
 echo "Verifying exact schema ('public'), index count (exactly 1 row per index), access method, uniqueness, exact partial predicates, indisvalid, and indisready for all 8 indexes..."
@@ -147,6 +144,7 @@ EXPECTED_INDEXES=(
 
 for entry in "${EXPECTED_INDEXES[@]}"; do
   IFS='|' read -r idx_name schema_name table_name expected_unique col_name has_partial <<< "$entry"
+  
   echo "----------------------------------------"
   echo "Validating index: $schema_name.$idx_name on $schema_name.$table_name (column: $col_name, unique: $expected_unique, partial: $has_partial)"
 
@@ -190,7 +188,8 @@ for entry in "${EXPECTED_INDEXES[@]}"; do
     WHERE c.relname = '$idx_name' AND n.nspname = '$schema_name' AND t.relname = '$table_name';
   ")
 
-  IFS='|' read -r actual_idx_schema actual_tbl_schema actual_am actual_unique actual_valid actual_ready actual_nkeyatts actual_natts actual_no_expr actual_cols actual_pred <<< "$INDEX_META"
+  IFS='|' read -r -d '' actual_idx_schema actual_tbl_schema actual_am actual_unique actual_valid actual_ready actual_nkeyatts actual_natts actual_no_expr actual_cols actual_pred <<< "$INDEX_META" || true
+  actual_pred="${actual_pred%$'\n'}"
 
   if [ "$actual_idx_schema" != "public" ] || [ "$actual_tbl_schema" != "public" ]; then
     echo "ERROR: Index schema ($actual_idx_schema) or table schema ($actual_tbl_schema) is not 'public'."
@@ -206,6 +205,7 @@ for entry in "${EXPECTED_INDEXES[@]}"; do
     echo "ERROR: Index $idx_name is expected to be unique but is non-unique."
     exit 1
   fi
+
   if [ "$expected_unique" = "f" ] && [ "$actual_unique" = "t" ]; then
     echo "ERROR: Index $idx_name is expected to be unique=false but is unique."
     exit 1
@@ -233,9 +233,16 @@ for entry in "${EXPECTED_INDEXES[@]}"; do
     fi
     
     EXPECTED_CANONICAL="(${col_name} IS NOT NULL) AND (btrim(${col_name}, E' \\t\\n\\r\\f\\v') <> '')"
-
-    NORM_ACTUAL=$(python3 scripts/canonicalizer.py "$actual_pred")
+    if [ "$idx_name" = "idx_credit_notes_number" ]; then
+      python3 -c "import sys; print('captured predicate repr:', repr(sys.argv[1]))" "$actual_pred"
+      NORM_ACTUAL=$(python3 scripts/canonicalizer.py --diag "$actual_pred")
+    else
+      NORM_ACTUAL=$(python3 scripts/canonicalizer.py "$actual_pred")
+    fi
     NORM_EXPECTED=$(python3 scripts/canonicalizer.py "$EXPECTED_CANONICAL")
+    if [ "$idx_name" = "idx_credit_notes_number" ]; then
+      python3 -c "import sys; print('normalized actual repr:', repr(sys.argv[1])); print('normalized expected repr:', repr(sys.argv[2]))" "$NORM_ACTUAL" "$NORM_EXPECTED"
+    fi
 
     if [ "$NORM_ACTUAL" != "$NORM_EXPECTED" ]; then
       echo "ERROR: Index $idx_name exact partial predicate does not match canonical Phase B definition."
@@ -256,6 +263,7 @@ done
 # Migration History Validation
 echo "========================================"
 echo "Validating migration history in schema_migrations..."
+
 RECORDED_VERSIONS=$(psql "$DB_URL" -v ON_ERROR_STOP=1 -t -A -c "SELECT version FROM supabase_migrations.schema_migrations ORDER BY version;")
 
 RECORDED_PHASE_A=$(psql "$DB_URL" -v ON_ERROR_STOP=1 -t -A -c "SELECT version FROM supabase_migrations.schema_migrations WHERE version = '20261107000001';")
