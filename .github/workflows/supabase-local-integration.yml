@@ -81,6 +81,13 @@ jobs:
 
           supabase start
 
+          echo "Restoring Phase B migration after supabase start..."
+          mv "$STAGED_PHASE_B" "$PHASE_B_FILE"
+          test -f supabase/migrations/20261107000002_concurrent_indexes.sql
+          printf '%s\n' "$PHASE_B_SHA256" | sha256sum -c --status
+          rmdir "$STAGING_DIR"
+          trap - EXIT
+
       - name: Capture, validate, and mask Supabase credentials
         run: |
           set -euo pipefail
