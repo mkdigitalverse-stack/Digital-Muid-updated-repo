@@ -33,7 +33,59 @@ jobs:
       - name: Start local Supabase stack
         run: |
           set -euo pipefail
+          PHASE_B_FILE="supabase/migrations/20261107000002_concurrent_indexes.sql"
+          test -f "$PHASE_B_FILE"
+          PHASE_B_SHA256=$(sha256sum "$PHASE_B_FILE")
+          STAGING_DIR=$(mktemp -d)
+          STAGED_PHASE_B="$STAGING_DIR/20261107000002_concurrent_indexes.sql"
+
+          restore_phase_b_start() {
+            local exit_code=$?
+            trap - EXIT
+            local restore_failed=0
+
+            if [ -f "$STAGED_PHASE_B" ]; then
+              if [ -e "$PHASE_B_FILE" ]; then
+                if cmp -s "$STAGED_PHASE_B" "$PHASE_B_FILE"; then
+                  rm -f "$STAGED_PHASE_B"
+                else
+                  echo "::error::Refusing to overwrite differing $PHASE_B_FILE during supabase start cleanup."
+                  restore_failed=1
+                fi
+              else
+                mv "$STAGED_PHASE_B" "$PHASE_B_FILE" || restore_failed=1
+              fi
+            fi
+
+            if [ -d "$STAGING_DIR" ]; then
+              rmdir "$STAGING_DIR" || restore_failed=1
+            fi
+
+            if [ ! -f "$PHASE_B_FILE" ] || ! printf '%s\n' "$PHASE_B_SHA256" | sha256sum -c --status; then
+              echo "::error::Phase B migration restoration or SHA-256 verification failed after supabase start."
+              restore_failed=1
+            fi
+
+            if [ "$restore_failed" -ne 0 ]; then
+              exit 1
+            fi
+            exit "$exit_code"
+          }
+          trap restore_phase_b_start EXIT
+
+          echo "Moving Phase B migration out of supabase/migrations before supabase start..."
+          mv "$PHASE_B_FILE" "$STAGED_PHASE_B"
+          ls -la supabase/migrations
+          test ! -e supabase/migrations/20261107000002_concurrent_indexes.sql
+
           supabase start
+
+          echo "Restoring Phase B migration after supabase start..."
+          mv "$STAGED_PHASE_B" "$PHASE_B_FILE"
+          test -f supabase/migrations/20261107000002_concurrent_indexes.sql
+          printf '%s\n' "$PHASE_B_SHA256" | sha256sum -c --status
+          rmdir "$STAGING_DIR"
+          trap - EXIT
 
       - name: Capture, validate, and mask Supabase credentials
         run: |
@@ -113,24 +165,83 @@ jobs:
             echo "::error::LOCAL_DB_URL failed strict validation (must be postgres:// or postgresql:// on 127.0.0.1 or localhost at port 54322 with a valid database path and no query parameters, fragments, or unexpected URL components)."
             exit 1
           }
-          
+
           echo "SUPABASE_URL=$API_URL" >> $GITHUB_ENV
           echo "SUPABASE_ANON_KEY=$ANON_KEY" >> $GITHUB_ENV
           echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY" >> $GITHUB_ENV
           echo "LOCAL_DB_URL=$DB_URL" >> $GITHUB_ENV
-          
+
           echo "Supabase stack successfully started, validated, and credentials masked."
 
       - name: Apply DB migrations and mandatory private storage operations
         run: |
           set -euo pipefail
+          PHASE_B_FILE="supabase/migrations/20261107000002_concurrent_indexes.sql"
+          test -f "$PHASE_B_FILE"
+          PHASE_B_SHA256=$(sha256sum "$PHASE_B_FILE")
+          STAGING_DIR=$(mktemp -d)
+          STAGED_PHASE_B="$STAGING_DIR/20261107000002_concurrent_indexes.sql"
+
+          cleanup_step() {
+            local exit_code=$?
+            trap - EXIT
+            local restore_failed=0
+
+            if [ -f "$STAGED_PHASE_B" ]; then
+              if [ -e "$PHASE_B_FILE" ]; then
+                if cmp -s "$STAGED_PHASE_B" "$PHASE_B_FILE"; then
+                  rm -f "$STAGED_PHASE_B"
+                else
+                  echo "::error::Refusing to overwrite differing $PHASE_B_FILE during cleanup."
+                  restore_failed=1
+                fi
+              else
+                echo "Cleanup trap: Restoring Phase B migration file..."
+                mv "$STAGED_PHASE_B" "$PHASE_B_FILE" || restore_failed=1
+              fi
+            fi
+
+            if [ -d "$STAGING_DIR" ]; then
+              rmdir "$STAGING_DIR" || restore_failed=1
+            fi
+
+            if [ ! -f "$PHASE_B_FILE" ] || ! printf '%s\n' "$PHASE_B_SHA256" | sha256sum -c --status; then
+              echo "::error::Phase B migration restoration or SHA-256 verification failed during cleanup."
+              restore_failed=1
+            fi
+
+            if [ "$restore_failed" -ne 0 ]; then
+              exit 1
+            fi
+            exit "$exit_code"
+          }
+          trap cleanup_step EXIT
+
+          echo "Moving Phase B migration out of supabase/migrations to exclude it from Supabase CLI migration pipeline..."
+          mv "$PHASE_B_FILE" "$STAGED_PHASE_B"
+
+          echo "Verifying Phase B migration is absent from supabase/migrations before supabase db reset --no-seed..."
+          ls -la supabase/migrations
+          test ! -e supabase/migrations/20261107000002_concurrent_indexes.sql
+
+          echo "Running supabase db reset --no-seed (applies Phase A and earlier migrations)..."
           supabase db reset --no-seed
+
+          echo "Restoring Phase B migration for standalone psql execution..."
+          mv "$STAGED_PHASE_B" "$PHASE_B_FILE"
+          test -f supabase/migrations/20261107000002_concurrent_indexes.sql
+          printf '%s\n' "$PHASE_B_SHA256" | sha256sum -c --status
+          rmdir "$STAGING_DIR"
+          trap - EXIT
+
+          echo "Executing Phase B standalone verification script via psql autocommit..."
+          chmod +x scripts/verify_phase_b.sh
+          ./scripts/verify_phase_b.sh "$LOCAL_DB_URL"
 
           if [ ! -f supabase/operations/p0_3b_private_paid_resources_storage.sql ]; then
             echo "::error::Mandatory storage operation file supabase/operations/p0_3b_private_paid_resources_storage.sql is missing."
             exit 1
           fi
-
           psql "$LOCAL_DB_URL" -v ON_ERROR_STOP=1 -f supabase/operations/p0_3b_private_paid_resources_storage.sql
 
       - name: Run local Supabase Auth & Storage integration tests
