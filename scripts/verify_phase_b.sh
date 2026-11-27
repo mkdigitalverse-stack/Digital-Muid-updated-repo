@@ -71,32 +71,38 @@ print("=== LOCAL PREDICATE CANONICALIZER UNIT TESTS (Offline Python Test Suite) 
 
 test_cases = [
     # 1. Correct predicate with explicit E-string and uppercase
-    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') <> '')", True),
+    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \t\n\r\f\v') <> '')", True),
     # 2. Correct predicate with lowercase 'and' and repeated spaces outside quotes
-    ("  (credit_note_number   is   not   null)   and   (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') <> '')  ", True),
+    ("  (credit_note_number   is   not   null)   and   (btrim(credit_note_number, E' \t\n\r\f\v') <> '')  ", True),
     # 3. Equivalent redundant parentheses (double outer parens)
-    ("(((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') <> '')))", True),
+    ("(((credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \t\n\r\f\v') <> '')))", True),
     # 4. != versus <> representation
-    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') != '')", True),
-    # 5. Quoted-string preservation (interior whitespace in string preserved exact)
-    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') <> '')", True),
-    # 6. Negative test: expressions with ::text remain distinguishable from without ::text
-    ("(credit_note_number::text IS NOT NULL) AND (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') <> '')", False),
-    # 7. Negative test: different string literal contents remain different
-    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\t') <> '')", False),
-    # 8. Test for parentheses inside string literal (negative test against canonical target)
+    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \t\n\r\f\v') != '')", True),
+    # 5. PostgreSQL-style raw control characters in BTRIM whitespace argument matching canonical E-string form
+    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \t\n\r\f\v') != '')", True),
+
+') != '')", True),
+    # 6. Multi-character operators preservation (<>, <=, >=)
+    ("(credit_note_number <> '') AND (amount <= 100) AND (amount >= 10)", False),
+    # 7. Negative test: expressions with ::text remain distinguishable from without ::text
+    ("(credit_note_number::text IS NOT NULL) AND (btrim(credit_note_number, E' \t\n\r\f\v') <> '')", False),
+    # 8. Negative test: different string literal contents remain different
+    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \t') <> '')", False),
+    # 9. Test for parentheses inside string literal (negative test against canonical target)
     ("(credit_note_number = '(parentheses inside string)') AND (credit_note_number IS NOT NULL)", False),
-    # 9. Test for doubled quotes (negative test against canonical target)
+    # 10. Test for doubled quotes / escaped apostrophes (negative test against canonical target)
     ("(credit_note_number = 'O''Reilly') AND (credit_note_number IS NOT NULL)", False),
-    # 10. Test for E-string escaped quotes (negative test against canonical target)
-    ("(credit_note_number = E'foo\\'bar') AND (credit_note_number IS NOT NULL)", False),
-    # 11. Incorrect: added OR condition
-    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \\t\\n\\r\\f\\v') <> '') OR 1=1", False),
+    # 11. Test for E-string escaped quotes and backslashes (negative test against canonical target)
+    ("(credit_note_number = E'foo\'bar') AND (credit_note_number IS NOT NULL)", False),
+    # 12. Ordinary string literals remain byte-for-byte unchanged
+    ("(credit_note_number = 'ordinary string') AND (credit_note_number IS NOT NULL)", False),
+    # 13. Incorrect: added OR condition
+    ("(credit_note_number IS NOT NULL) AND (btrim(credit_note_number, E' \t\n\r\f\v') <> '') OR 1=1", False),
 ]
 
-canonical_target = quote_aware_normalize("(col IS NOT NULL) AND (btrim(col, E' \\t\\n\\r\\f\\v') <> '')")
-
+canonical_target = quote_aware_normalize("(col IS NOT NULL) AND (btrim(col, E' \t\n\r\f\v') <> '')")
 failed = False
+
 for pred, should_pass in test_cases:
     test_target = pred.replace('credit_note_number', 'col')
     norm = quote_aware_normalize(test_target)
@@ -112,9 +118,9 @@ for pred, should_pass in test_cases:
 if failed:
     print("ERROR: Local predicate canonicalizer unit test matrix failed!")
     sys.exit(1)
+
 print("=== LOCAL PREDICATE CANONICALIZER UNIT TESTS PASSED SUCCESSFULLY ===")
 EOF
-
 MIGRATION_FILE="supabase/migrations/20261107000002_concurrent_indexes.sql"
 if [ ! -f "$MIGRATION_FILE" ]; then
   echo "FAIL-CLOSED ERROR: Phase B migration file not found at $MIGRATION_FILE"
