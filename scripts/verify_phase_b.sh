@@ -10,14 +10,14 @@ if [ -z "$DB_URL" ]; then
 fi
 
 # Strict Loopback DB URL Validation & Port Matching against Supabase CLI status
-if [[ ! "$DB_URL" =~ ^postgresql://([a-zA-Z0-9_.-]+):([^@]+)@(127\.0\.0\.1|localhost):([0-9]+)/([a-zA-Z0-9_.-]+)$ ]]; then
+if [[ ! "$DB_URL" =~ ^postgres(ql)?://([a-zA-Z0-9_.-]+):([^@]+)@(127\.0\.0\.1|localhost):([0-9]+)/([a-zA-Z0-9_.-]+)$ ]]; then
   echo "SAFETY ERROR: Database URL is null, malformed, or points to a non-loopback host. Aborting."
   exit 1
 fi
 
-DB_HOST="${BASH_REMATCH[3]}"
-DB_PORT="${BASH_REMATCH[4]}"
-DB_NAME="${BASH_REMATCH[5]}"
+DB_HOST="${BASH_REMATCH[4]}"
+DB_PORT="${BASH_REMATCH[5]}"
+DB_NAME="${BASH_REMATCH[6]}"
 MASKED_URL="postgresql://***:***@$DB_HOST:$DB_PORT/$DB_NAME"
 
 echo "Validated local loopback connection target: $MASKED_URL"
@@ -33,20 +33,20 @@ if [ -z "$STATUS_JSON" ] || [ "$STATUS_JSON" = "null" ]; then
   exit 1
 fi
 
-CLI_DB_URL=$(echo "$STATUS_JSON" | jq -r .DB_URL // empty)
+CLI_DB_URL=$(echo "$STATUS_JSON" | jq -r '.DB_URL // .LOCAL_DB_URL // empty')
 if [ -z "$CLI_DB_URL" ] || [ "$CLI_DB_URL" = "null" ]; then
   echo "FAIL-CLOSED ERROR: Supabase status JSON does not contain DB_URL!"
   exit 1
 fi
 
-if [[ ! "$CLI_DB_URL" =~ ^postgresql://([a-zA-Z0-9_.-]+):([^@]+)@(127\.0\.0\.1|localhost):([0-9]+)/([a-zA-Z0-9_.-]+)$ ]]; then
+if [[ ! "$CLI_DB_URL" =~ ^postgres(ql)?://([a-zA-Z0-9_.-]+):([^@]+)@(127\.0\.0\.1|localhost):([0-9]+)/([a-zA-Z0-9_.-]+)$ ]]; then
   echo "FAIL-CLOSED ERROR: CLI status DB URL does not match loopback pattern!"
   exit 1
 fi
 
-CLI_HOST="${BASH_REMATCH[3]}"
-CLI_PORT="${BASH_REMATCH[4]}"
-CLI_NAME="${BASH_REMATCH[5]}"
+CLI_HOST="${BASH_REMATCH[4]}"
+CLI_PORT="${BASH_REMATCH[5]}"
+CLI_NAME="${BASH_REMATCH[6]}"
 
 if [ "$DB_HOST" != "$CLI_HOST" ] || [ "$DB_PORT" != "$CLI_PORT" ] || [ "$DB_NAME" != "$CLI_NAME" ]; then
   echo "FAIL-CLOSED ERROR: Supplied DB URL does not exactly match Supabase CLI status target!"
