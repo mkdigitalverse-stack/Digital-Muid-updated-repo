@@ -1,34 +1,38 @@
 import sys
 import re
 
-def normalize_string_literal(token):
-    """
-    Narrowly normalizes the standard Phase B btrim whitespace argument 
-    (whether represented as E-string or raw deparsed control characters)
-    to a canonical E-string representation. Preserves all other literals byte-for-byte.
-    """
-    if token in ("E' \\t\\n\\r\\f\\v'", "e' \\t\\n\\r\\f\\v'"):
-        return "E' \\t\\n\\r\\f\\v'"
-    
-    if token.startswith("'") and token.endswith("'"):
-        inner = token[1:-1]
-        if inner == " \t\n\r\x0c\x0b":
-            return "E' \\t\\n\\r\\f\\v'"
-            
-    return token
-
 def quote_aware_normalize(expr):
     if not expr:
         return ""
     pattern = r"(E'(?:\\.|''|[^'])*'|e'(?:\\.|''|[^'])*'|'(?:''|[^'])*'|\"(?:\"\"|[^\"])*\")"
     tokens = re.split(pattern, expr)
     
+    # First pass: check for exact btrim(credit_note_number, <literal>) context
+    for i in range(0, len(tokens) - 2, 2):
+        code_frag = tokens[i]
+        # Match btrim(credit_note_number, ending with comma
+        match = re.search(r'\bbtrim\s*\(\s*credit_note_number\s*,\s*$', code_frag, re.IGNORECASE)
+        if match:
+            arg_token = tokens[i+1]
+            inner_e = arg_token[2:-1] if arg_token.startswith("E'") or arg_token.startswith("e'") else None
+            inner_s = arg_token[1:-1] if arg_token.startswith("'") and arg_token.endswith("'") else None
+            
+            expected_ws_ctrl = " \t\n\r\x0c\x0b"
+            expected_ws_escapes_1 = r" \t\n\r\f\v"
+            expected_ws_escapes_2 = " \\t\\n\\r\\f\\v"
+            
+            if inner_s == expected_ws_ctrl or inner_e in (expected_ws_escapes_1, expected_ws_escapes_2):
+                # Verify that the subsequent code fragment starts with closing parenthesis ')' of btrim
+                next_code = tokens[i+2] if i + 2 < len(tokens) else ""
+                if re.match(r'^\s*\)', next_code):
+                    tokens[i+1] = r"E' \t\n\r\f\v'"
+
     canonical_tokens = []
     for i, token in enumerate(tokens):
         if not token:
             continue
         if i % 2 == 1:
-            canonical_tokens.append(normalize_string_literal(token))
+            canonical_tokens.append(token)
         else:
             code = token
             code = code.replace('!=', '<>')
